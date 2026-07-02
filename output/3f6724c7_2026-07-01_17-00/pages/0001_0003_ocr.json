@@ -1,0 +1,417 @@
+[
+  {
+    "text": "34 Roof (Kurai) TpemDeding iieu: Asbestos Asn {he Sheet ':j 1':. Concrete",
+    "bbox_pct": [
+      10.5,
+      2.8,
+      71.3,
+      12.5
+    ],
+    "words": [
+      {
+        "text": "34",
+        "x": 267,
+        "y": 210,
+        "w": 50,
+        "h": 45
+      },
+      {
+        "text": "Roof (Kurai)",
+        "x": 329,
+        "y": 279,
+        "w": 270,
+        "h": 67
+      },
+      {
+        "text": "TpemDeding",
+        "x": 347,
+        "y": 200,
+        "w": 357,
+        "h": 65
+      },
+      {
+        "text": "iieu:",
+        "x": 773,
+        "y": 295,
+        "w": 132,
+        "h": 76
+      },
+      {
+        "text": "Asbestos",
+        "x": 1082,
+        "y": 313,
+        "w": 207,
+        "h": 73
+      },
+      {
+        "text": "Asn {he",
+        "x": 1296,
+        "y": 92,
+        "w": 130,
+        "h": 45
+      },
+      {
+        "text": "Sheet",
+        "x": 1311,
+        "y": 333,
+        "w": 136,
+        "h": 57
+      },
+      {
+        "text": "':j",
+        "x": 1417,
+        "y": 92,
+        "w": 149,
+        "h": 64
+      },
+      {
+        "text": "1':.",
+        "x": 1606,
+        "y": 111,
+        "w": 110,
+        "h": 45
+      },
+      {
+        "text": "Concrete",
+        "x": 1619,
+        "y": 348,
+        "w": 200,
+        "h": 64
+      }
+    ]
+  },
+  {
+    "text": "3.4. Number of Bedrooms",
+    "bbox_pct": [
+      10.0,
+      14.4,
+      33.3,
+      16.6
+    ],
+    "words": [
+      {
+        "text": "3.4. Number of Bedrooms",
+        "x": 254,
+        "y": 476,
+        "w": 596,
+        "h": 73
+      }
+    ]
+  },
+  {
+    "text": "3.4.1 Separate Bedroom Type of Bedroom No Separate Bedroom",
+    "bbox_pct": [
+      9.9,
+      23.7,
+      54.7,
+      28.9
+    ],
+    "words": [
+      {
+        "text": "3.4.1",
+        "x": 252,
+        "y": 783,
+        "w": 101,
+        "h": 42
+      },
+      {
+        "text": "Separate Bedroom",
+        "x": 313,
+        "y": 855,
+        "w": 421,
+        "h": 78
+      },
+      {
+        "text": "Type of Bedroom",
+        "x": 372,
+        "y": 784,
+        "w": 342,
+        "h": 56
+      },
+      {
+        "text": "No Separate Bedroom",
+        "x": 922,
+        "y": 880,
+        "w": 474,
+        "h": 74
+      }
+    ]
+  },
+  {
+    "text": "3.5. Bathroom Separate Common for Apartment",
+    "bbox_pct": [
+      9.5,
+      32.1,
+      47.8,
+      37.2
+    ],
+    "words": [
+      {
+        "text": "3.5. Bathroom",
+        "x": 242,
+        "y": 1058,
+        "w": 336,
+        "h": 60
+      },
+      {
+        "text": "Separate",
+        "x": 310,
+        "y": 1143,
+        "w": 214,
+        "h": 65
+      },
+      {
+        "text": "Common for Apartment",
+        "x": 711,
+        "y": 1152,
+        "w": 507,
+        "h": 75
+      }
+    ]
+  },
+  {
+    "text": "3.6. Kitchen Type Separate Kitchen Hall with Kitchen",
+    "bbox_pct": [
+      9.4,
+      40.5,
+      48.7,
+      45.5
+    ],
+    "words": [
+      {
+        "text": "3.6. Kitchen Type",
+        "x": 239,
+        "y": 1338,
+        "w": 410,
+        "h": 69
+      },
+      {
+        "text": "Separate Kitchen",
+        "x": 301,
+        "y": 1413,
+        "w": 394,
+        "h": 87
+      },
+      {
+        "text": "Hall with Kitchen",
+        "x": 881,
+        "y": 1436,
+        "w": 360,
+        "h": 60
+      }
+    ]
+  },
+  {
+    "text": "Section 4 Financial Background",
+    "bbox_pct": [
+      10.2,
+      50.2,
+      47.1,
+      52.5
+    ],
+    "words": [
+      {
+        "text": "Section 4",
+        "x": 260,
+        "y": 1655,
+        "w": 278,
+        "h": 61
+      },
+      {
+        "text": "Financial Background",
+        "x": 605,
+        "y": 1656,
+        "w": 597,
+        "h": 77
+      }
+    ]
+  },
+  {
+    "text": "4.1. Assets at Home (tick all that apply) Washing Machine Fridge AC LED TV Two-Wheeler Car",
+    "bbox_pct": [
+      8.9,
+      56.6,
+      90.6,
+      61.3
+    ],
+    "words": [
+      {
+        "text": "4.1. Assets at Home (tick all that apply)",
+        "x": 227,
+        "y": 1869,
+        "w": 904,
+        "h": 67
+      },
+      {
+        "text": "Washing Machine",
+        "x": 290,
+        "y": 1947,
+        "w": 404,
+        "h": 76
+      },
+      {
+        "text": "Fridge",
+        "x": 880,
+        "y": 1945,
+        "w": 158,
+        "h": 79
+      },
+      {
+        "text": "AC",
+        "x": 1220,
+        "y": 1957,
+        "w": 75,
+        "h": 50
+      },
+      {
+        "text": "LED TV",
+        "x": 1476,
+        "y": 1964,
+        "w": 179,
+        "h": 44
+      },
+      {
+        "text": "Two-Wheeler",
+        "x": 1828,
+        "y": 1960,
+        "w": 282,
+        "h": 56
+      },
+      {
+        "text": "Car",
+        "x": 2226,
+        "y": 1965,
+        "w": 85,
+        "h": 49
+      }
+    ]
+  },
+  {
+    "text": "Smartphone 'Separate Wi-Fi Others:",
+    "bbox_pct": [
+      11.1,
+      64.7,
+      57.0,
+      66.8
+    ],
+    "words": [
+      {
+        "text": "Smartphone",
+        "x": 283,
+        "y": 2140,
+        "w": 286,
+        "h": 64
+      },
+      {
+        "text": "'Separate Wi-Fi",
+        "x": 762,
+        "y": 2136,
+        "w": 336,
+        "h": 67
+      },
+      {
+        "text": "Others:",
+        "x": 1286,
+        "y": 2136,
+        "w": 168,
+        "h": 56
+      }
+    ]
+  },
+  {
+    "text": "4.2. Amount of Last Electricity Bill",
+    "bbox_pct": [
+      7.9,
+      70.4,
+      40.0,
+      72.6
+    ],
+    "words": [
+      {
+        "text": "4.2. Amount of Last Electricity Bill",
+        "x": 202,
+        "y": 2324,
+        "w": 817,
+        "h": 72
+      }
+    ]
+  },
+  {
+    "text": "ISTD pG Lnit LD",
+    "bbox_pct": [
+      10.4,
+      74.6,
+      49.9,
+      78.8
+    ],
+    "words": [
+      {
+        "text": "ISTD",
+        "x": 266,
+        "y": 2494,
+        "w": 256,
+        "h": 108
+      },
+      {
+        "text": "pG",
+        "x": 694,
+        "y": 2486,
+        "w": 134,
+        "h": 116
+      },
+      {
+        "text": "Lnit",
+        "x": 893,
+        "y": 2461,
+        "w": 214,
+        "h": 125
+      },
+      {
+        "text": "LD",
+        "x": 1158,
+        "y": 2486,
+        "w": 114,
+        "h": 91
+      }
+    ]
+  },
+  {
+    "text": "student? 4.3. Do you own any other assetslproperties in the name of grandparents, parents, or Yes No",
+    "bbox_pct": [
+      7.2,
+      81.3,
+      85.2,
+      88.8
+    ],
+    "words": [
+      {
+        "text": "student?",
+        "x": 184,
+        "y": 2779,
+        "w": 232,
+        "h": 67
+      },
+      {
+        "text": "4.3. Do you own any other assetslproperties in the name of grandparents, parents, or",
+        "x": 188,
+        "y": 2684,
+        "w": 1984,
+        "h": 93
+      },
+      {
+        "text": "Yes",
+        "x": 264,
+        "y": 2880,
+        "w": 93,
+        "h": 50
+      },
+      {
+        "text": "No",
+        "x": 560,
+        "y": 2873,
+        "w": 75,
+        "h": 49
+      }
+    ]
+  }
+]

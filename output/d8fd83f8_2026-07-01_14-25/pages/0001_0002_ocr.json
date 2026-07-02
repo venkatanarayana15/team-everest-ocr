@@ -1,0 +1,447 @@
+[
+  {
+    "text": "Am the Change Home Visit Questionnaire Team Everest",
+    "bbox_pct": [
+      48.3,
+      5.1,
+      86.0,
+      6.9
+    ],
+    "words": [
+      {
+        "text": "Am the Change",
+        "x": 2172,
+        "y": 327,
+        "w": 451,
+        "h": 85
+      },
+      {
+        "text": "Home Visit Questionnaire",
+        "x": 2693,
+        "y": 310,
+        "w": 722,
+        "h": 86
+      },
+      {
+        "text": "Team Everest",
+        "x": 3482,
+        "y": 309,
+        "w": 390,
+        "h": 66
+      }
+    ]
+  },
+  {
+    "text": "2.3. Is Fatherl Mother photograph kept at home?",
+    "bbox_pct": [
+      12.3,
+      12.2,
+      50.4,
+      14.1
+    ],
+    "words": [
+      {
+        "text": "2.3. Is Fatherl Mother photograph kept at home?",
+        "x": 553,
+        "y": 735,
+        "w": 1716,
+        "h": 113
+      }
+    ]
+  },
+  {
+    "text": "Yes No",
+    "bbox_pct": [
+      14.8,
+      14.8,
+      26.8,
+      16.1
+    ],
+    "words": [
+      {
+        "text": "Yes",
+        "x": 664,
+        "y": 889,
+        "w": 138,
+        "h": 77
+      },
+      {
+        "text": "No",
+        "x": 1095,
+        "y": 889,
+        "w": 111,
+        "h": 77
+      }
+    ]
+  },
+  {
+    "text": "2.4. Government ID Verified (Ration Card Aadhaar Card Ration Card Aadhaar Driving Licence Driving Licence / Voter ID) Voter ID",
+    "bbox_pct": [
+      12.4,
+      19.3,
+      74.6,
+      23.5
+    ],
+    "words": [
+      {
+        "text": "2.4. Government ID Verified (Ration Card",
+        "x": 559,
+        "y": 1182,
+        "w": 1445,
+        "h": 96
+      },
+      {
+        "text": "Aadhaar Card",
+        "x": 672,
+        "y": 1319,
+        "w": 474,
+        "h": 89
+      },
+      {
+        "text": "Ration Card",
+        "x": 1441,
+        "y": 1314,
+        "w": 412,
+        "h": 85
+      },
+      {
+        "text": "Aadhaar",
+        "x": 2050,
+        "y": 1178,
+        "w": 314,
+        "h": 85
+      },
+      {
+        "text": "Driving Licence",
+        "x": 2143,
+        "y": 1304,
+        "w": 532,
+        "h": 100
+      },
+      {
+        "text": "Driving Licence / Voter ID)",
+        "x": 2395,
+        "y": 1158,
+        "w": 960,
+        "h": 111
+      },
+      {
+        "text": "Voter ID",
+        "x": 2974,
+        "y": 1296,
+        "w": 290,
+        "h": 84
+      }
+    ]
+  },
+  {
+    "text": "Other:",
+    "bbox_pct": [
+      15.0,
+      26.3,
+      19.9,
+      27.6
+    ],
+    "words": [
+      {
+        "text": "Other:",
+        "x": 673,
+        "y": 1578,
+        "w": 223,
+        "h": 78
+      }
+    ]
+  },
+  {
+    "text": "2.5. Family Members",
+    "bbox_pct": [
+      12.6,
+      31.4,
+      29.1,
+      33.0
+    ],
+    "words": [
+      {
+        "text": "2.5. Family Members",
+        "x": 568,
+        "y": 1881,
+        "w": 743,
+        "h": 100
+      }
+    ]
+  },
+  {
+    "text": "Name Age Education Occupation Annual Income",
+    "bbox_pct": [
+      13.6,
+      33.7,
+      79.1,
+      35.4
+    ],
+    "words": [
+      {
+        "text": "Name",
+        "x": 612,
+        "y": 2047,
+        "w": 200,
+        "h": 73
+      },
+      {
+        "text": "Age",
+        "x": 1221,
+        "y": 2041,
+        "w": 145,
+        "h": 84
+      },
+      {
+        "text": "Education",
+        "x": 1825,
+        "y": 2027,
+        "w": 347,
+        "h": 84
+      },
+      {
+        "text": "Occupation",
+        "x": 2428,
+        "y": 2019,
+        "w": 398,
+        "h": 102
+      },
+      {
+        "text": "Annual Income",
+        "x": 3050,
+        "y": 2019,
+        "w": 509,
+        "h": 77
+      }
+    ]
+  },
+  {
+    "text": "Enzk7| k 45",
+    "bbox_pct": [
+      13.3,
+      38.0,
+      36.2,
+      41.4
+    ],
+    "words": [
+      {
+        "text": "Enzk7|",
+        "x": 599,
+        "y": 2277,
+        "w": 601,
+        "h": 183
+      },
+      {
+        "text": "k",
+        "x": 1081,
+        "y": 2408,
+        "w": 92,
+        "h": 77
+      },
+      {
+        "text": "45",
+        "x": 1379,
+        "y": 2312,
+        "w": 251,
+        "h": 157
+      }
+    ]
+  },
+  {
+    "text": "Section 3 Housing Condition",
+    "bbox_pct": [
+      13.8,
+      58.0,
+      43.6,
+      60.3
+    ],
+    "words": [
+      {
+        "text": "Section 3",
+        "x": 620,
+        "y": 3502,
+        "w": 409,
+        "h": 101
+      },
+      {
+        "text": "Housing Condition",
+        "x": 1138,
+        "y": 3478,
+        "w": 823,
+        "h": 139
+      }
+    ]
+  },
+  {
+    "text": "3.1. House Ownership",
+    "bbox_pct": [
+      12.9,
+      63.8,
+      30.8,
+      65.7
+    ],
+    "words": [
+      {
+        "text": "3.1. House Ownership",
+        "x": 581,
+        "y": 3829,
+        "w": 803,
+        "h": 113
+      }
+    ]
+  },
+  {
+    "text": "Own Rented",
+    "bbox_pct": [
+      15.5,
+      66.3,
+      31.6,
+      67.8
+    ],
+    "words": [
+      {
+        "text": "Own",
+        "x": 696,
+        "y": 3986,
+        "w": 168,
+        "h": 85
+      },
+      {
+        "text": "Rented",
+        "x": 1163,
+        "y": 3976,
+        "w": 261,
+        "h": 92
+      }
+    ]
+  },
+  {
+    "text": "3.1.1 If rented, what is the rent amount?",
+    "bbox_pct": [
+      13.2,
+      70.5,
+      40.7,
+      72.0
+    ],
+    "words": [
+      {
+        "text": "3.1.1",
+        "x": 594,
+        "y": 4240,
+        "w": 162,
+        "h": 78
+      },
+      {
+        "text": "If rented, what is the rent amount?",
+        "x": 775,
+        "y": 4227,
+        "w": 1057,
+        "h": 92
+      }
+    ]
+  },
+  {
+    "text": "Rent amount",
+    "bbox_pct": [
+      13.8,
+      73.2,
+      22.7,
+      74.4
+    ],
+    "words": [
+      {
+        "text": "Rent amount",
+        "x": 622,
+        "y": 4390,
+        "w": 401,
+        "h": 73
+      }
+    ]
+  },
+  {
+    "text": "3.2. Type of Home Others: Individual Private Apartment Housing Board Line House",
+    "bbox_pct": [
+      13.2,
+      79.9,
+      77.0,
+      85.4
+    ],
+    "words": [
+      {
+        "text": "3.2. Type of Home",
+        "x": 596,
+        "y": 4792,
+        "w": 654,
+        "h": 100
+      },
+      {
+        "text": "Others:",
+        "x": 602,
+        "y": 5036,
+        "w": 262,
+        "h": 85
+      },
+      {
+        "text": "Individual",
+        "x": 700,
+        "y": 4924,
+        "w": 342,
+        "h": 89
+      },
+      {
+        "text": "Private Apartment",
+        "x": 1337,
+        "y": 4918,
+        "w": 625,
+        "h": 96
+      },
+      {
+        "text": "Housing Board",
+        "x": 2251,
+        "y": 4899,
+        "w": 513,
+        "h": 101
+      },
+      {
+        "text": "Line House",
+        "x": 3063,
+        "y": 4900,
+        "w": 403,
+        "h": 85
+      }
+    ]
+  },
+  {
+    "text": "Page 2 of 6 Confidlential- Team Everest",
+    "bbox_pct": [
+      36.6,
+      90.4,
+      64.4,
+      92.2
+    ],
+    "words": [
+      {
+        "text": "Page 2 of 6",
+        "x": 1646,
+        "y": 5429,
+        "w": 344,
+        "h": 100
+      },
+      {
+        "text": "Confidlential-",
+        "x": 2087,
+        "y": 5426,
+        "w": 348,
+        "h": 84
+      },
+      {
+        "text": "Team Everest",
+        "x": 2507,
+        "y": 5432,
+        "w": 390,
+        "h": 66
+      }
+    ]
+  }
+]

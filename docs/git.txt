@@ -1,0 +1,130 @@
+# ──────────────────────────────────────────────
+# Git Commands for ocr-extract
+# ──────────────────────────────────────────────
+
+# ---- Project Setup ----
+
+# Initialize a new repository
+git init
+
+# Create .gitignore (already exists — content below for reference)
+# __pycache__/
+# *.py[oc]
+# build/
+# dist/
+# .venv
+# .env
+# output/
+
+# ---- Adding & Committing ----
+
+# Stage all files
+git add -A
+
+# Stage specific files
+git add src/server.py frontend/src/App.tsx
+
+# Commit with a message
+git commit -m "your message"
+
+# ---- Remote Repository ----
+
+# Create a new repo on GitHub via CLI (requires gh CLI)
+gh repo create ocr-extract --public --source=. --remote=origin --push
+
+# Or add existing remote
+git remote add origin https://github.com/YOUR_USER/ocr-extract.git
+
+# Push to remote
+git push -u origin main
+
+# Push to a different branch
+git push origin branch-name
+
+# ---- Branching ----
+
+# Create and switch to new branch
+git checkout -b feature/name
+
+# Switch branches
+git checkout main
+
+# List branches
+git branch -a
+
+# Delete a local branch
+git branch -d feature/name
+
+# Delete a remote branch
+git push origin --delete feature/name
+
+# ---- Pulling & Syncing ----
+
+# Pull latest from remote
+git pull origin main
+
+# Fetch all branches
+git fetch --all
+
+# ---- Status & History ----
+
+# Check current status
+git status
+
+# View diff (unstaged changes)
+git diff
+
+# View diff (staged changes)
+git diff --cached
+
+# View recent commits
+git log --oneline -10
+
+# View full commit details
+git log --oneline --graph --decorate --all
+
+# ---- Undoing & Mistakes ----
+
+# Unstage a file (keep changes)
+git reset HEAD filename
+
+# Discard unstaged changes
+git checkout -- filename
+
+# Amend last commit (don't do if already pushed)
+git commit --amend -m "new message"
+
+# Reset to previous commit (destructive — careful!)
+git reset --hard HEAD~1
+
+# ---- Running the Project ----
+
+# Backend (from /home/venkatanarayana/team-everest/ocr extraction/ocr-extract/)
+uv run uvicorn src.server:app --port 8000
+
+# Frontend (from /home/venkatanarayana/team-everest/ocr extraction/ocr-extract/frontend/)
+npm run dev
+
+# ---- Quick Reference ----
+
+# Full workflow for first push:
+git init
+git add -A
+git commit -m "Initial commit"
+gh repo create ocr-extract --public --source=. --remote=origin --push
+#   or: git remote add origin https://github.com/YOUR_USER/ocr-extract.git
+#   or: git push -u origin main
+
+# Pull → work → commit → push
+git pull origin main
+# ...make changes...
+git add -A
+git commit -m "description"
+git push
+
+# New feature branch → push → PR
+git checkout -b feature/new-stuff
+git add -A
+git commit -m "Add new stuff"
+git push -u origin feature/new-stuff
+# Then create PR on GitHub

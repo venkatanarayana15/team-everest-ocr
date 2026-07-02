@@ -1,0 +1,104 @@
+{
+  "status": "done",
+  "message": "Complete \u2014 1192 fields from 57 pages in 904s.",
+  "log": [
+    {
+      "t": "17:19:17",
+      "msg": "Uploaded 10 PDF(s)"
+    },
+    {
+      "t": "17:19:17",
+      "msg": "Processing 10 PDF(s)..."
+    },
+    {
+      "t": "17:19:17",
+      "msg": "[1/10] Processing 'MOHAMED_HAFEEZ.pdf'..."
+    },
+    {
+      "t": "17:20:28",
+      "msg": "[1/10] 'MOHAMED_HAFEEZ.pdf': 103 fields extracted."
+    },
+    {
+      "t": "17:20:28",
+      "msg": "[2/10] Processing 'DOC-20260620-WA0044..pdf'..."
+    },
+    {
+      "t": "17:22:02",
+      "msg": "[2/10] 'DOC-20260620-WA0044..pdf': 116 fields extracted."
+    },
+    {
+      "t": "17:22:02",
+      "msg": "[3/10] Processing 'Varsha_2026_TE_House.pdf'..."
+    },
+    {
+      "t": "17:23:08",
+      "msg": "[3/10] 'Varsha_2026_TE_House.pdf': 101 fields extracted."
+    },
+    {
+      "t": "17:23:08",
+      "msg": "[4/10] Processing 'TEMP-2026-9882_Nivetha_P.pdf'..."
+    },
+    {
+      "t": "17:24:15",
+      "msg": "[4/10] 'TEMP-2026-9882_Nivetha_P.pdf': 122 fields extracted."
+    },
+    {
+      "t": "17:24:15",
+      "msg": "[5/10] Processing 'ScannedDocument.pdf'..."
+    },
+    {
+      "t": "17:26:13",
+      "msg": "[5/10] 'ScannedDocument.pdf': 127 fields extracted."
+    },
+    {
+      "t": "17:26:13",
+      "msg": "[6/10] Processing 'Scan_document20260610_163440.pdf'..."
+    },
+    {
+      "t": "17:27:42",
+      "msg": "[6/10] 'Scan_document20260610_163440.pdf': 134 fields extracted."
+    },
+    {
+      "t": "17:27:42",
+      "msg": "[7/10] Processing 'Scan_document20260610_163516.pdf'..."
+    },
+    {
+      "t": "17:28:43",
+      "msg": "[7/10] 'Scan_document20260610_163516.pdf': 81 fields extracted."
+    },
+    {
+      "t": "17:28:43",
+      "msg": "[8/10] Processing 'Scan_document20260610_163605.pdf'..."
+    },
+    {
+      "t": "17:30:25",
+      "msg": "[8/10] 'Scan_document20260610_163605.pdf': 134 fields extracted."
+    },
+    {
+      "t": "17:30:25",
+      "msg": "[9/10] Processing 'Scan_document20260610_163315.pdf'..."
+    },
+    {
+      "t": "17:32:50",
+      "msg": "[9/10] 'Scan_document20260610_163315.pdf': 137 fields extracted."
+    },
+    {
+      "t": "17:32:50",
+      "msg": "[10/10] Processing 'Scan_document20260610_163038.pdf'..."
+    },
+    {
+      "t": "17:34:20",
+      "msg": "[10/10] 'Scan_document20260610_163038.pdf': 137 fields extracted."
+    },
+    {
+      "t": "17:34:20",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "17:34:20",
+      "msg": "Complete \u2014 1192 fields from 57 pages in 904s."
+    }
+  ],
+  "pages": 57,
+  "pdfs": 10
+}

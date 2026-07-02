@@ -1,0 +1,32 @@
+{
+  "status": "done",
+  "message": "Complete \u2014 123 fields from 6 pages in 124s.",
+  "log": [
+    {
+      "t": "16:42:36",
+      "msg": "Uploaded 1 PDF(s)"
+    },
+    {
+      "t": "16:42:37",
+      "msg": "Processing 1 PDF(s)..."
+    },
+    {
+      "t": "16:42:37",
+      "msg": "[1/1] Processing 'Scan_document20260610_163605.pdf'..."
+    },
+    {
+      "t": "16:44:40",
+      "msg": "[1/1] 'Scan_document20260610_163605.pdf': 123 fields extracted."
+    },
+    {
+      "t": "16:44:40",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "16:44:40",
+      "msg": "Complete \u2014 123 fields from 6 pages in 124s."
+    }
+  ],
+  "pages": 6,
+  "pdfs": 1
+}

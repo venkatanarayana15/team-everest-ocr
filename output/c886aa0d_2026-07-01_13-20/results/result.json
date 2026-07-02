@@ -1,0 +1,523 @@
+{
+  "overall_confidence": 60.7,
+  "num_pages": 6,
+  "num_pdfs": 1,
+  "pdf_names": [
+    "Scan_document20260610_163440.pdf"
+  ],
+  "pdf_errors": [],
+  "processing_time": 100.62,
+  "model": "chain",
+  "fields": [
+    {
+      "label": "Volunteer Name",
+      "value": "Thameem",
+      "confidence": 60,
+      "page": 1,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.5,
+        45.9,
+        38.6,
+        49.2
+      ]
+    },
+    {
+      "label": "Co-Volunteer Name",
+      "value": "Ansari",
+      "confidence": 50,
+      "page": 1,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.1,
+        17.1,
+        78.7,
+        23.6
+      ]
+    },
+    {
+      "label": "Date of Visit",
+      "value": "10/06/26",
+      "confidence": 50,
+      "page": 1,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.1,
+        17.1,
+        78.7,
+        23.6
+      ]
+    },
+    {
+      "label": "1.1 Application ID",
+      "value": "CHEN-2021-0321",
+      "confidence": 63,
+      "page": 1,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.2,
+        34.1,
+        28.4,
+        35.8
+      ]
+    },
+    {
+      "label": "1.2 Student Full Name",
+      "value": "Sheha.R.",
+      "confidence": 66,
+      "page": 1,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.8,
+        43.3,
+        31.8,
+        45.1
+      ]
+    },
+    {
+      "label": "1.3 Gender",
+      "value": "Female",
+      "confidence": 66,
+      "page": 1,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.8,
+        52.7,
+        22.4,
+        54.1
+      ]
+    },
+    {
+      "label": "2.1 Family Status",
+      "value": "Having both parents",
+      "confidence": 73,
+      "page": 1,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.2,
+        66.7,
+        27.1,
+        68.7
+      ]
+    },
+    {
+      "label": "2.2 Year of Death / Separation",
+      "value": "",
+      "confidence": 50,
+      "page": 1,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": true,
+      "reason": "Empty fields",
+      "bbox": [
+        12.8,
+        77.5,
+        70.7,
+        79.6
+      ]
+    },
+    {
+      "label": "2.3 Is Father/ Mother photograph kept at home?",
+      "value": "Yes",
+      "confidence": 60,
+      "page": 2,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.7,
+        12.6,
+        51.1,
+        14.6
+      ]
+    },
+    {
+      "label": "2.4 Government ID Verified (Ration Card)",
+      "value": "Ration Card",
+      "confidence": 60,
+      "page": 2,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        16.1,
+        66.9,
+        32.2,
+        68.5
+      ]
+    },
+    {
+      "label": "2.5 Family Members",
+      "value": "S. Ravi, 47, 10th, Civil contractor, P. Katasofti, 42, 12th, Housewife, Sheha.R, 25, B.com (MBA), Working",
+      "confidence": 64,
+      "page": 2,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": "Some handwriting",
+      "bbox": [
+        13.2,
+        32.0,
+        29.6,
+        33.7
+      ]
+    },
+    {
+      "label": "3.1 House Ownership",
+      "value": "Own",
+      "confidence": 68,
+      "page": 2,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.7,
+        64.7,
+        31.3,
+        66.3
+      ]
+    },
+    {
+      "label": "3.2 Type of Home",
+      "value": "Individual",
+      "confidence": 50,
+      "page": 2,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.9,
+        80.4,
+        77.1,
+        85.9
+      ]
+    },
+    {
+      "label": "3.3 Type of Ceiling",
+      "value": "Tiled",
+      "confidence": 50,
+      "page": 3,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.4,
+        10.7,
+        68.3,
+        14.6
+      ]
+    },
+    {
+      "label": "3.4 Number of Bedrooms",
+      "value": "2",
+      "confidence": 60,
+      "page": 3,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.6,
+        18.1,
+        33.8,
+        19.6
+      ]
+    },
+    {
+      "label": "3.4.1 Separate Bedroom",
+      "value": "Separate Bedroom",
+      "confidence": 60,
+      "page": 3,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.6,
+        18.1,
+        33.8,
+        19.6
+      ]
+    },
+    {
+      "label": "3.5 Bathroom",
+      "value": "Separate",
+      "confidence": 65,
+      "page": 3,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.8,
+        33.0,
+        25.1,
+        34.5
+      ]
+    },
+    {
+      "label": "3.6 Kitchen Type",
+      "value": "Hall with Kitchen",
+      "confidence": 60,
+      "page": 3,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.9,
+        40.4,
+        48.6,
+        44.3
+      ]
+    },
+    {
+      "label": "4.1 Assets at Home (tick all that apply)",
+      "value": "Washing Machine, Fridge, AC, LED TV, Two-Wheeler, Smartphone",
+      "confidence": 60,
+      "page": 3,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": "Handwriting is clear",
+      "bbox": [
+        14.1,
+        54.1,
+        80.9,
+        60.1
+      ]
+    },
+    {
+      "label": "4.2 Amount of Last Electricity Bill",
+      "value": "6000",
+      "confidence": 60,
+      "page": 3,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        14.2,
+        63.4,
+        41.5,
+        65.2
+      ]
+    },
+    {
+      "label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?",
+      "value": "Yes",
+      "confidence": 60,
+      "page": 3,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        14.4,
+        72.3,
+        82.3,
+        74.8
+      ]
+    },
+    {
+      "label": "4.4 Apart from your job, is there any other source of income?",
+      "value": "No",
+      "confidence": 62,
+      "page": 4,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        14.4,
+        19.3,
+        63.5,
+        21.5
+      ]
+    },
+    {
+      "label": "4.5 Income Type",
+      "value": "Daily",
+      "confidence": 60,
+      "page": 4,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        14.0,
+        43.5,
+        58.4,
+        47.8
+      ]
+    },
+    {
+      "label": "4.6 Do you have any loans?",
+      "value": "No",
+      "confidence": 64,
+      "page": 4,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.8,
+        51.2,
+        36.5,
+        52.9
+      ]
+    },
+    {
+      "label": "4.8 If the college fee is higher, how will you manage it?",
+      "value": "By taking educational loans",
+      "confidence": 65,
+      "page": 5,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": "Handwriting is mostly clear",
+      "bbox": [
+        14.6,
+        15.3,
+        58.4,
+        17.5
+      ]
+    },
+    {
+      "label": "5.1 Does the student have any health issues?",
+      "value": "No",
+      "confidence": 61,
+      "page": 5,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.8,
+        40.3,
+        50.6,
+        42.4
+      ]
+    },
+    {
+      "label": "6.1 Will you study college for three years without any obstacle?",
+      "value": "Yes",
+      "confidence": 63,
+      "page": 5,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": "Handwriting is mostly clear",
+      "bbox": [
+        13.0,
+        63.6,
+        64.2,
+        66.0
+      ]
+    },
+    {
+      "label": "6.2 If we have a training program within 15 km from your home, can you come?",
+      "value": "Yes",
+      "confidence": 60,
+      "page": 5,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.8,
+        73.0,
+        76.3,
+        75.6
+      ]
+    },
+    {
+      "label": "7.1 Has the student received or applied for any other scholarships for their UG degree?",
+      "value": "No",
+      "confidence": 61,
+      "page": 6,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.8,
+        15.4,
+        84.2,
+        18.1
+      ]
+    },
+    {
+      "label": "8.1 What is your opinion about the student, their family members, and their living condition?",
+      "value": "Very bad experience, full of negativity and toxicness",
+      "confidence": 65,
+      "page": 6,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": "Opinion contains some handwriting",
+      "bbox": [
+        13.4,
+        31.2,
+        87.8,
+        34.2
+      ]
+    },
+    {
+      "label": "8.2 Will you recommend this student for this scholarship?",
+      "value": "No",
+      "confidence": 62,
+      "page": 6,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.0,
+        47.5,
+        60.1,
+        50.1
+      ]
+    },
+    {
+      "label": "8.3 Any other comments you want to share?",
+      "value": "Nothing",
+      "confidence": 67,
+      "page": 6,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.8,
+        55.1,
+        48.9,
+        57.1
+      ]
+    },
+    {
+      "label": "Volunteer Signature",
+      "value": "Signature",
+      "confidence": 60,
+      "page": 6,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": "Handwritten signature",
+      "bbox": [
+        12.5,
+        76.6,
+        62.2,
+        78.8
+      ]
+    },
+    {
+      "label": "Co-Volunteer Signature",
+      "value": "Signature",
+      "confidence": 60,
+      "page": 6,
+      "file": "Scan_document20260610_163440.pdf",
+      "needs_clarification": false,
+      "reason": "Handwritten signature",
+      "bbox": [
+        12.5,
+        76.6,
+        62.2,
+        78.8
+      ]
+    }
+  ]
+}

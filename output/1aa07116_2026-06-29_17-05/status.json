@@ -1,0 +1,72 @@
+{
+  "status": "done",
+  "message": "Complete \u2014 769 fields from 33 pages in 578s.",
+  "log": [
+    {
+      "t": "17:05:22",
+      "msg": "Uploaded 6 PDF(s)"
+    },
+    {
+      "t": "17:05:23",
+      "msg": "Processing 6 PDF(s)..."
+    },
+    {
+      "t": "17:05:23",
+      "msg": "[1/6] Processing 'ScannedDocument.pdf'..."
+    },
+    {
+      "t": "17:07:17",
+      "msg": "[1/6] 'ScannedDocument.pdf': 111 fields extracted."
+    },
+    {
+      "t": "17:07:17",
+      "msg": "[2/6] Processing 'Scan_document20260610_163440.pdf'..."
+    },
+    {
+      "t": "17:08:38",
+      "msg": "[2/6] 'Scan_document20260610_163440.pdf': 137 fields extracted."
+    },
+    {
+      "t": "17:08:38",
+      "msg": "[3/6] Processing 'Scan_document20260610_163516.pdf'..."
+    },
+    {
+      "t": "17:09:36",
+      "msg": "[3/6] 'Scan_document20260610_163516.pdf': 81 fields extracted."
+    },
+    {
+      "t": "17:09:36",
+      "msg": "[4/6] Processing 'Scan_document20260610_163605.pdf'..."
+    },
+    {
+      "t": "17:11:42",
+      "msg": "[4/6] 'Scan_document20260610_163605.pdf': 163 fields extracted."
+    },
+    {
+      "t": "17:11:42",
+      "msg": "[5/6] Processing 'Scan_document20260610_163315.pdf'..."
+    },
+    {
+      "t": "17:13:34",
+      "msg": "[5/6] 'Scan_document20260610_163315.pdf': 121 fields extracted."
+    },
+    {
+      "t": "17:13:34",
+      "msg": "[6/6] Processing 'Scan_document20260610_163038.pdf'..."
+    },
+    {
+      "t": "17:15:01",
+      "msg": "[6/6] 'Scan_document20260610_163038.pdf': 156 fields extracted."
+    },
+    {
+      "t": "17:15:01",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "17:15:01",
+      "msg": "Complete \u2014 769 fields from 33 pages in 578s."
+    }
+  ],
+  "pages": 33,
+  "pdfs": 6
+}

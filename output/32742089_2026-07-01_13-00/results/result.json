@@ -1,0 +1,568 @@
+{
+  "overall_confidence": 61.8,
+  "num_pages": 6,
+  "num_pdfs": 1,
+  "pdf_names": [
+    "ScannedDocument.pdf"
+  ],
+  "pdf_errors": [],
+  "processing_time": 139.67,
+  "model": "chain",
+  "fields": [
+    {
+      "label": "Volunteer Name",
+      "value": "Rohit Vijay",
+      "confidence": 60,
+      "page": 1,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.3,
+        46.4,
+        31.0,
+        51.3
+      ]
+    },
+    {
+      "label": "Co-Volunteer Name",
+      "value": "Sujitha",
+      "confidence": 60,
+      "page": 1,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.8,
+        44.0,
+        31.8,
+        45.6
+      ]
+    },
+    {
+      "label": "Date of Visit",
+      "value": "10/06/2026",
+      "confidence": 50,
+      "page": 1,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.5,
+        20.8,
+        79.8,
+        26.1
+      ]
+    },
+    {
+      "label": "1.1. Application ID",
+      "value": "12345678",
+      "confidence": 62,
+      "page": 1,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.9,
+        34.8,
+        28.2,
+        36.4
+      ]
+    },
+    {
+      "label": "1.2. Student Full Name",
+      "value": "Rohit Vijay",
+      "confidence": 67,
+      "page": 1,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.8,
+        44.0,
+        31.8,
+        45.6
+      ]
+    },
+    {
+      "label": "1.3. Gender",
+      "value": "\u2713 Male",
+      "confidence": 69,
+      "page": 1,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.6,
+        53.1,
+        22.5,
+        54.7
+      ]
+    },
+    {
+      "label": "2.1. Family Status",
+      "value": "\u2713 Having both parents",
+      "confidence": 76,
+      "page": 1,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.3,
+        67.2,
+        27.2,
+        69.0
+      ]
+    },
+    {
+      "label": "2.2. Relationship Details",
+      "value": "Year of Death: NIL, Reason for Death: NIL",
+      "confidence": 60,
+      "page": 1,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.2,
+        74.8,
+        44.0,
+        76.5
+      ]
+    },
+    {
+      "label": "2.3. Is Father/ Mother photograph kept at home?",
+      "value": "\u2713 Yes",
+      "confidence": 61,
+      "page": 2,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.3,
+        12.4,
+        51.2,
+        14.2
+      ]
+    },
+    {
+      "label": "2.4. Government ID Verified",
+      "value": "\u2717 Aadhaar Card, \u2717 Ration Card, \u2717 Driving Licence, \u2717 Voter ID",
+      "confidence": 60,
+      "page": 2,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.4,
+        19.5,
+        75.5,
+        23.9
+      ]
+    },
+    {
+      "label": "2.5. Family Members",
+      "value": "Dora, 15, B.SC, Developer, 400000; Bujji, 27, M.SC, Agriculturist, 1000000; Bheem, 18, MBA, IT Dept, 1500000",
+      "confidence": 63,
+      "page": 2,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.5,
+        31.6,
+        29.3,
+        33.2
+      ]
+    },
+    {
+      "label": "3.1. House Ownership",
+      "value": "\u2713 Rented",
+      "confidence": 65,
+      "page": 2,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.6,
+        64.3,
+        30.7,
+        65.9
+      ]
+    },
+    {
+      "label": "3.1.1 If rented, what is the rent amount?",
+      "value": "5000",
+      "confidence": 60,
+      "page": 2,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.9,
+        70.7,
+        40.7,
+        72.2
+      ]
+    },
+    {
+      "label": "3.2. Type of Home",
+      "value": "\u2713 Individual",
+      "confidence": 50,
+      "page": 2,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.8,
+        80.1,
+        77.1,
+        85.5
+      ]
+    },
+    {
+      "label": "3.3. Type of Ceiling",
+      "value": "\u2713 Concrete",
+      "confidence": 60,
+      "page": 3,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        11.5,
+        10.7,
+        67.9,
+        14.7
+      ]
+    },
+    {
+      "label": "3.4. Number of Bedrooms",
+      "value": "5",
+      "confidence": 60,
+      "page": 3,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        11.7,
+        18.2,
+        32.5,
+        19.9
+      ]
+    },
+    {
+      "label": "3.4.1 Type of Bedroom",
+      "value": "\u2713 Separate Bedroom",
+      "confidence": 67,
+      "page": 3,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        11.7,
+        18.2,
+        32.5,
+        19.9
+      ]
+    },
+    {
+      "label": "3.5. Bathroom",
+      "value": "\u2713 Separate",
+      "confidence": 60,
+      "page": 3,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.1,
+        33.6,
+        46.2,
+        37.4
+      ]
+    },
+    {
+      "label": "3.6. Kitchen Type",
+      "value": "\u2713 Separate Kitchen",
+      "confidence": 60,
+      "page": 3,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.4,
+        40.9,
+        47.3,
+        44.8
+      ]
+    },
+    {
+      "label": "4.1. Assets at Home",
+      "value": "\u2713 Fridge, \u2713 AC, \u2713 LED TV, \u2713 Two-Wheeler, \u2713 Smartphone, \u2713 Separate Wi-Fi",
+      "confidence": 50,
+      "page": 3,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.5,
+        54.4,
+        80.2,
+        60.4
+      ]
+    },
+    {
+      "label": "4.2. Amount of Last Electricity Bill",
+      "value": "5000",
+      "confidence": 60,
+      "page": 3,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.7,
+        63.7,
+        40.2,
+        65.4
+      ]
+    },
+    {
+      "label": "4.3. Do you own any other assets/properties in the name of grandparents, parents, or student?",
+      "value": "\u2713 Yes",
+      "confidence": 60,
+      "page": 3,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.9,
+        72.7,
+        81.2,
+        74.8
+      ]
+    },
+    {
+      "label": "4.4. Apart from your job, is there any other source of income?",
+      "value": "\u2717 No",
+      "confidence": 63,
+      "page": 4,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.9,
+        20.2,
+        62.3,
+        22.3
+      ]
+    },
+    {
+      "label": "4.5. Income Type",
+      "value": "\u2713 Monthly",
+      "confidence": 60,
+      "page": 4,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.3,
+        44.1,
+        56.8,
+        48.3
+      ]
+    },
+    {
+      "label": "4.6. Do you have any loans?",
+      "value": "\u2713 Yes",
+      "confidence": 70,
+      "page": 4,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.0,
+        51.5,
+        34.9,
+        53.3
+      ]
+    },
+    {
+      "label": "4.6.1 Loan Details",
+      "value": "Housing Loan, House, 1000000, 100000; CAR Loan, CAR, 500000, 200000",
+      "confidence": 50,
+      "page": 4,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        11.5,
+        70.0,
+        76.9,
+        78.0
+      ]
+    },
+    {
+      "label": "4.7. College Fee",
+      "value": "NIL",
+      "confidence": 60,
+      "page": 4,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        16.2,
+        87.4,
+        24.8,
+        90.2
+      ]
+    },
+    {
+      "label": "4.8. If the college fee is higher, how will you manage it?",
+      "value": "I cannot manage",
+      "confidence": 71,
+      "page": 5,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.1,
+        15.4,
+        57.5,
+        17.6
+      ]
+    },
+    {
+      "label": "4.9. If you do not receive this scholarship, how will you pay the fees?",
+      "value": "I will not go to college",
+      "confidence": 71,
+      "page": 5,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.8,
+        24.7,
+        68.4,
+        27.0
+      ]
+    },
+    {
+      "label": "5.1. Does the student have any health issues?",
+      "value": "\u2717 No",
+      "confidence": 63,
+      "page": 5,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.5,
+        40.5,
+        49.5,
+        42.5
+      ]
+    },
+    {
+      "label": "6.1. Will you study college for three years without any obstacle?",
+      "value": "Yes",
+      "confidence": 63,
+      "page": 5,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        11.7,
+        63.6,
+        63.5,
+        65.9
+      ]
+    },
+    {
+      "label": "6.2. If we have a training program within 15 km from your home, can you come?",
+      "value": "\u2713 Yes",
+      "confidence": 62,
+      "page": 5,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        11.5,
+        72.9,
+        75.8,
+        75.6
+      ]
+    },
+    {
+      "label": "6.3. Are you ready to send your son/daughter to weekly skill development classes?",
+      "value": "\u2713 Yes",
+      "confidence": 60,
+      "page": 5,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        11.0,
+        80.6,
+        79.9,
+        84.5
+      ]
+    },
+    {
+      "label": "7.1. Has the student received or applied for any other scholarships for their UG degree?",
+      "value": "Yes",
+      "confidence": 62,
+      "page": 6,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.5,
+        15.8,
+        84.1,
+        18.8
+      ]
+    },
+    {
+      "label": "8.1. Opinion about the student; their family members, and their living condition",
+      "value": "The student is living a very good life with parents. Don't offer scholarship.",
+      "confidence": 68,
+      "page": 6,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        13.0,
+        31.8,
+        87.5,
+        34.5
+      ]
+    },
+    {
+      "label": "8.2. Will you recommend this student for this scholarship?",
+      "value": "\u2713 Yes",
+      "confidence": 64,
+      "page": 6,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        12.4,
+        47.9,
+        59.6,
+        50.1
+      ]
+    },
+    {
+      "label": "Volunteer Signature",
+      "value": "Rohit",
+      "confidence": 60,
+      "page": 6,
+      "file": "ScannedDocument.pdf",
+      "needs_clarification": false,
+      "reason": null,
+      "bbox": [
+        11.2,
+        77.0,
+        61.5,
+        78.9
+      ]
+    }
+  ]
+}

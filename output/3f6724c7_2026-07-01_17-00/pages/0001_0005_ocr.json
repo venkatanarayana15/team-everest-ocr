@@ -1,0 +1,485 @@
+[
+  {
+    "text": "47 Ifyou choose any college, how much Is Ihe colleye fen?",
+    "bbox_pct": [
+      6.4,
+      6.3,
+      58.9,
+      9.9
+    ],
+    "words": [
+      {
+        "text": "47 Ifyou choose any college, how much Is Ihe colleye fen?",
+        "x": 163,
+        "y": 207,
+        "w": 1339,
+        "h": 121
+      }
+    ]
+  },
+  {
+    "text": "O0 OOO",
+    "bbox_pct": [
+      23.8,
+      11.4,
+      37.8,
+      14.4
+    ],
+    "words": [
+      {
+        "text": "O0",
+        "x": 606,
+        "y": 377,
+        "w": 140,
+        "h": 91
+      },
+      {
+        "text": "OOO",
+        "x": 772,
+        "y": 396,
+        "w": 193,
+        "h": 79
+      }
+    ]
+  },
+  {
+    "text": "4.8. If the He college fee is higher; how will fvul graucla l you manage it? bavu q toxefor OSLD",
+    "bbox_pct": [
+      6.6,
+      16.8,
+      86.5,
+      28.7
+    ],
+    "words": [
+      {
+        "text": "4.8. If the",
+        "x": 168,
+        "y": 555,
+        "w": 225,
+        "h": 57
+      },
+      {
+        "text": "He",
+        "x": 208,
+        "y": 688,
+        "w": 122,
+        "h": 98
+      },
+      {
+        "text": "college",
+        "x": 390,
+        "y": 560,
+        "w": 185,
+        "h": 76
+      },
+      {
+        "text": "fee is higher; how will",
+        "x": 566,
+        "y": 572,
+        "w": 491,
+        "h": 74
+      },
+      {
+        "text": "fvul",
+        "x": 716,
+        "y": 722,
+        "w": 249,
+        "h": 151
+      },
+      {
+        "text": "graucla l",
+        "x": 983,
+        "y": 707,
+        "w": 384,
+        "h": 182
+      },
+      {
+        "text": "you manage it?",
+        "x": 1055,
+        "y": 598,
+        "w": 336,
+        "h": 57
+      },
+      {
+        "text": "bavu q",
+        "x": 1392,
+        "y": 714,
+        "w": 321,
+        "h": 179
+      },
+      {
+        "text": "toxefor",
+        "x": 1740,
+        "y": 724,
+        "w": 466,
+        "h": 224
+      },
+      {
+        "text": "OSLD",
+        "x": 1753,
+        "y": 741,
+        "w": 274,
+        "h": 104
+      }
+    ]
+  },
+  {
+    "text": "4.9. If you do not receive this scholarship, how will you pay the fees? Qxmauninq hou to Pad by {undung Rorr",
+    "bbox_pct": [
+      6.7,
+      27.4,
+      91.4,
+      38.1
+    ],
+    "words": [
+      {
+        "text": "4.9. If you do not receive this scholarship, how will you pay the fees?",
+        "x": 170,
+        "y": 903,
+        "w": 1512,
+        "h": 91
+      },
+      {
+        "text": "Qxmauninq",
+        "x": 230,
+        "y": 991,
+        "w": 564,
+        "h": 220
+      },
+      {
+        "text": "hou",
+        "x": 869,
+        "y": 1070,
+        "w": 174,
+        "h": 92
+      },
+      {
+        "text": "to",
+        "x": 1114,
+        "y": 1070,
+        "w": 96,
+        "h": 86
+      },
+      {
+        "text": "Pad",
+        "x": 1248,
+        "y": 1043,
+        "w": 253,
+        "h": 214
+      },
+      {
+        "text": "by",
+        "x": 1520,
+        "y": 1071,
+        "w": 133,
+        "h": 146
+      },
+      {
+        "text": "{undung",
+        "x": 1687,
+        "y": 1029,
+        "w": 391,
+        "h": 189
+      },
+      {
+        "text": "Rorr",
+        "x": 2077,
+        "y": 1069,
+        "w": 254,
+        "h": 138
+      }
+    ]
+  },
+  {
+    "text": "Olhts",
+    "bbox_pct": [
+      66.2,
+      35.8,
+      78.1,
+      38.4
+    ],
+    "words": [
+      {
+        "text": "Olhts",
+        "x": 1689,
+        "y": 1181,
+        "w": 303,
+        "h": 86
+      }
+    ]
+  },
+  {
+    "text": "Section 5 Health Information",
+    "bbox_pct": [
+      8.0,
+      39.0,
+      40.8,
+      40.9
+    ],
+    "words": [
+      {
+        "text": "Section 5",
+        "x": 203,
+        "y": 1286,
+        "w": 273,
+        "h": 62
+      },
+      {
+        "text": "Health Information",
+        "x": 546,
+        "y": 1289,
+        "w": 495,
+        "h": 61
+      }
+    ]
+  },
+  {
+    "text": "5.1. Does the student have any health issues? Yes No",
+    "bbox_pct": [
+      7.2,
+      45.3,
+      47.4,
+      49.5
+    ],
+    "words": [
+      {
+        "text": "5.1. Does the student have any health issues?",
+        "x": 183,
+        "y": 1494,
+        "w": 1025,
+        "h": 60
+      },
+      {
+        "text": "Yes",
+        "x": 259,
+        "y": 1587,
+        "w": 86,
+        "h": 45
+      },
+      {
+        "text": "No",
+        "x": 535,
+        "y": 1579,
+        "w": 76,
+        "h": 53
+      }
+    ]
+  },
+  {
+    "text": "5.2. If yes, list the health issues:",
+    "bbox_pct": [
+      7.3,
+      53.6,
+      36.0,
+      55.6
+    ],
+    "words": [
+      {
+        "text": "5.2. If yes, list the health issues:",
+        "x": 185,
+        "y": 1768,
+        "w": 732,
+        "h": 68
+      }
+    ]
+  },
+  {
+    "text": "ie Nu",
+    "bbox_pct": [
+      8.0,
+      56.8,
+      19.2,
+      60.4
+    ],
+    "words": [
+      {
+        "text": "ie",
+        "x": 205,
+        "y": 1876,
+        "w": 182,
+        "h": 45
+      },
+      {
+        "text": "Nu",
+        "x": 369,
+        "y": 1908,
+        "w": 120,
+        "h": 84
+      }
+    ]
+  },
+  {
+    "text": "Section 6 Student Commitment",
+    "bbox_pct": [
+      8.0,
+      64.3,
+      44.3,
+      67.3
+    ],
+    "words": [
+      {
+        "text": "Section 6",
+        "x": 203,
+        "y": 2148,
+        "w": 274,
+        "h": 73
+      },
+      {
+        "text": "Student Commitment",
+        "x": 545,
+        "y": 2122,
+        "w": 584,
+        "h": 88
+      }
+    ]
+  },
+  {
+    "text": "6.1. Will you study college for three years without any obstacle?",
+    "bbox_pct": [
+      6.8,
+      70.4,
+      63.5,
+      73.8
+    ],
+    "words": [
+      {
+        "text": "6.1. Will you study",
+        "x": 174,
+        "y": 2360,
+        "w": 443,
+        "h": 75
+      },
+      {
+        "text": "college for three",
+        "x": 612,
+        "y": 2345,
+        "w": 387,
+        "h": 72
+      },
+      {
+        "text": "years",
+        "x": 994,
+        "y": 2341,
+        "w": 135,
+        "h": 59
+      },
+      {
+        "text": "without any obstacle?",
+        "x": 1128,
+        "y": 2322,
+        "w": 492,
+        "h": 68
+      }
+    ]
+  },
+  {
+    "text": "yes",
+    "bbox_pct": [
+      18.0,
+      76.4,
+      25.4,
+      81.5
+    ],
+    "words": [
+      {
+        "text": "yes",
+        "x": 460,
+        "y": 2521,
+        "w": 187,
+        "h": 169
+      }
+    ]
+  },
+  {
+    "text": "6.2. If we have a training program Xes No Maybe within 15 km from your home; can you come?",
+    "bbox_pct": [
+      6.6,
+      80.8,
+      77.4,
+      87.6
+    ],
+    "words": [
+      {
+        "text": "6.2. If we have a training program",
+        "x": 169,
+        "y": 2706,
+        "w": 792,
+        "h": 104
+      },
+      {
+        "text": "Xes",
+        "x": 243,
+        "y": 2839,
+        "w": 96,
+        "h": 52
+      },
+      {
+        "text": "No",
+        "x": 537,
+        "y": 2824,
+        "w": 72,
+        "h": 49
+      },
+      {
+        "text": "Maybe",
+        "x": 801,
+        "y": 2797,
+        "w": 157,
+        "h": 64
+      },
+      {
+        "text": "within 15 km from",
+        "x": 954,
+        "y": 2696,
+        "w": 412,
+        "h": 66
+      },
+      {
+        "text": "your",
+        "x": 1362,
+        "y": 2684,
+        "w": 118,
+        "h": 66
+      },
+      {
+        "text": "home; can you come?",
+        "x": 1478,
+        "y": 2665,
+        "w": 495,
+        "h": 74
+      }
+    ]
+  },
+  {
+    "text": "vaye 5 41 6 Confick-nitl Ioif ( vrN",
+    "bbox_pct": [
+      33.6,
+      94.8,
+      64.8,
+      97.5
+    ],
+    "words": [
+      {
+        "text": "vaye 5 41 6",
+        "x": 856,
+        "y": 3150,
+        "w": 226,
+        "h": 67
+      },
+      {
+        "text": "Confick-nitl",
+        "x": 1141,
+        "y": 3140,
+        "w": 222,
+        "h": 56
+      },
+      {
+        "text": "Ioif ( vrN",
+        "x": 1408,
+        "y": 3127,
+        "w": 244,
+        "h": 50
+      }
+    ]
+  }
+]

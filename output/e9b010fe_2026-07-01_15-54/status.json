@@ -1,0 +1,59 @@
+{
+  "status": "done",
+  "message": "Extraction complete. Results ready for download.",
+  "log": [
+    {
+      "t": "15:54:52",
+      "msg": "PDF batch: MOHAMED_HAFEEZ.pdf"
+    },
+    {
+      "t": "15:54:53",
+      "msg": "Rendering and enhancing pages..."
+    },
+    {
+      "t": "15:56:07",
+      "msg": "Preprocessing done. 6 pages ready."
+    },
+    {
+      "t": "15:56:07",
+      "msg": "Running Tesseract for bounding box detection..."
+    },
+    {
+      "t": "15:56:41",
+      "msg": "Tesseract detected 88 words across 6 pages."
+    },
+    {
+      "t": "15:56:41",
+      "msg": "Running primary extraction (OpenAI)..."
+    },
+    {
+      "t": "15:58:13",
+      "msg": "OpenAI extracted 76 fields (confidence: 85%). Merging with bounding boxes..."
+    },
+    {
+      "t": "15:58:13",
+      "msg": "Merged 76 fields with Tesseract bboxes."
+    },
+    {
+      "t": "15:58:13",
+      "msg": "Running secondary verification (OpenAI)..."
+    },
+    {
+      "t": "15:59:35",
+      "msg": "OpenAI verified 77 fields, corrected 2, added 1 new."
+    },
+    {
+      "t": "15:59:35",
+      "msg": "Template fill: 78 total fields after adding missing positions."
+    },
+    {
+      "t": "15:59:35",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "15:59:35",
+      "msg": "Extraction complete. Results ready for download."
+    }
+  ],
+  "pages": 6
+}

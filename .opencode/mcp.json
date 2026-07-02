@@ -1,0 +1,12 @@
+{
+  "mcp": {
+    "magic": {
+      "type": "local",
+      "command": ["npx", "-y", "@21st-dev/magic@latest"],
+      "enabled": true,
+      "environment": {
+        "API_KEY": "your-actual-api-key"
+      }
+    }
+  }
+}

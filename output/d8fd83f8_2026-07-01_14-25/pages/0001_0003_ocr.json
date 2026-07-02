@@ -1,0 +1,532 @@
+[
+  {
+    "text": "Am the Change Home Visit Questionnaire Team Everest",
+    "bbox_pct": [
+      48.8,
+      5.1,
+      86.8,
+      7.0
+    ],
+    "words": [
+      {
+        "text": "Am the Change",
+        "x": 2196,
+        "y": 337,
+        "w": 446,
+        "h": 84
+      },
+      {
+        "text": "Home Visit Questionnaire",
+        "x": 2711,
+        "y": 314,
+        "w": 728,
+        "h": 90
+      },
+      {
+        "text": "Team Everest",
+        "x": 3509,
+        "y": 308,
+        "w": 397,
+        "h": 73
+      }
+    ]
+  },
+  {
+    "text": "3.3. Type of Ceiling Roof (Kurai) Tiled Asbestos Sheet Concrete",
+    "bbox_pct": [
+      12.5,
+      10.4,
+      68.2,
+      14.3
+    ],
+    "words": [
+      {
+        "text": "3.3. Type of Ceiling",
+        "x": 562,
+        "y": 625,
+        "w": 696,
+        "h": 110
+      },
+      {
+        "text": "Roof (Kurai)",
+        "x": 677,
+        "y": 771,
+        "w": 412,
+        "h": 89
+      },
+      {
+        "text": "Tiled",
+        "x": 1385,
+        "y": 761,
+        "w": 178,
+        "h": 85
+      },
+      {
+        "text": "Asbestos",
+        "x": 1863,
+        "y": 752,
+        "w": 323,
+        "h": 84
+      },
+      {
+        "text": "Sheet",
+        "x": 2228,
+        "y": 747,
+        "w": 221,
+        "h": 85
+      },
+      {
+        "text": "Concrete",
+        "x": 2734,
+        "y": 727,
+        "w": 334,
+        "h": 91
+      }
+    ]
+  },
+  {
+    "text": "3.4. Number of Bedrooms",
+    "bbox_pct": [
+      12.5,
+      17.8,
+      33.1,
+      19.4
+    ],
+    "words": [
+      {
+        "text": "3.4. Number of Bedrooms",
+        "x": 564,
+        "y": 1071,
+        "w": 924,
+        "h": 93
+      }
+    ]
+  },
+  {
+    "text": "Enter number",
+    "bbox_pct": [
+      13.2,
+      20.4,
+      22.6,
+      21.6
+    ],
+    "words": [
+      {
+        "text": "Enter number",
+        "x": 594,
+        "y": 1222,
+        "w": 424,
+        "h": 77
+      }
+    ]
+  },
+  {
+    "text": "3.4.1 Separate Bedroom Type of Bedroom No Separate Bedroom",
+    "bbox_pct": [
+      12.6,
+      25.8,
+      52.8,
+      29.6
+    ],
+    "words": [
+      {
+        "text": "3.4.1",
+        "x": 565,
+        "y": 1554,
+        "w": 162,
+        "h": 73
+      },
+      {
+        "text": "Separate Bedroom",
+        "x": 671,
+        "y": 1674,
+        "w": 649,
+        "h": 101
+      },
+      {
+        "text": "Type of Bedroom",
+        "x": 752,
+        "y": 1549,
+        "w": 534,
+        "h": 93
+      },
+      {
+        "text": "No Separate Bedroom",
+        "x": 1618,
+        "y": 1660,
+        "w": 757,
+        "h": 105
+      }
+    ]
+  },
+  {
+    "text": "3.5. Bathroom Separate Common for Apartment",
+    "bbox_pct": [
+      12.6,
+      33.1,
+      46.5,
+      36.9
+    ],
+    "words": [
+      {
+        "text": "3.5. Bathroom",
+        "x": 569,
+        "y": 1989,
+        "w": 511,
+        "h": 85
+      },
+      {
+        "text": "Separate",
+        "x": 682,
+        "y": 2125,
+        "w": 318,
+        "h": 89
+      },
+      {
+        "text": "Common for Apartment",
+        "x": 1295,
+        "y": 2105,
+        "w": 799,
+        "h": 102
+      }
+    ]
+  },
+  {
+    "text": "3.6. Kitchen Type Separate Kitchen Hall with Kitchen",
+    "bbox_pct": [
+      12.6,
+      40.5,
+      47.4,
+      44.4
+    ],
+    "words": [
+      {
+        "text": "3.6. Kitchen Type",
+        "x": 568,
+        "y": 2429,
+        "w": 630,
+        "h": 96
+      },
+      {
+        "text": "Separate Kitchen",
+        "x": 681,
+        "y": 2560,
+        "w": 587,
+        "h": 101
+      },
+      {
+        "text": "Hall with Kitchen",
+        "x": 1568,
+        "y": 2547,
+        "w": 567,
+        "h": 89
+      }
+    ]
+  },
+  {
+    "text": "ISection 4 Financial Background",
+    "bbox_pct": [
+      13.6,
+      48.3,
+      46.3,
+      50.5
+    ],
+    "words": [
+      {
+        "text": "ISection 4",
+        "x": 610,
+        "y": 2926,
+        "w": 415,
+        "h": 100
+      },
+      {
+        "text": "Financial Background",
+        "x": 1130,
+        "y": 2898,
+        "w": 955,
+        "h": 134
+      }
+    ]
+  },
+  {
+    "text": "4.1. Assets at Home (tick all that apply) Car Washing Machine Smartphone Fridge Separate Wi-Fi AC LED TV Others: Two-Wheeler",
+    "bbox_pct": [
+      12.7,
+      54.1,
+      79.6,
+      60.1
+    ],
+    "words": [
+      {
+        "text": "4.1. Assets at Home (tick all that apply)",
+        "x": 573,
+        "y": 3249,
+        "w": 1403,
+        "h": 105
+      },
+      {
+        "text": "Car",
+        "x": 575,
+        "y": 3519,
+        "w": 138,
+        "h": 77
+      },
+      {
+        "text": "Washing Machine",
+        "x": 677,
+        "y": 3390,
+        "w": 616,
+        "h": 112
+      },
+      {
+        "text": "Smartphone",
+        "x": 1002,
+        "y": 3498,
+        "w": 433,
+        "h": 110
+      },
+      {
+        "text": "Fridge",
+        "x": 1581,
+        "y": 3381,
+        "w": 241,
+        "h": 105
+      },
+      {
+        "text": "Separate Wi-Fi",
+        "x": 1731,
+        "y": 3488,
+        "w": 522,
+        "h": 105
+      },
+      {
+        "text": "AC",
+        "x": 2116,
+        "y": 3382,
+        "w": 122,
+        "h": 89
+      },
+      {
+        "text": "LED TV",
+        "x": 2533,
+        "y": 3382,
+        "w": 281,
+        "h": 84
+      },
+      {
+        "text": "Others:",
+        "x": 2543,
+        "y": 3489,
+        "w": 267,
+        "h": 85
+      },
+      {
+        "text": "Two-Wheeler",
+        "x": 3114,
+        "y": 3369,
+        "w": 470,
+        "h": 93
+      }
+    ]
+  },
+  {
+    "text": "4.2. Amount of Last Electricity Bill",
+    "bbox_pct": [
+      12.7,
+      63.4,
+      40.1,
+      65.2
+    ],
+    "words": [
+      {
+        "text": "4.2. Amount of Last Electricity Bill",
+        "x": 572,
+        "y": 3802,
+        "w": 1232,
+        "h": 112
+      }
+    ]
+  },
+  {
+    "text": "Amount in Oa L Icaew)",
+    "bbox_pct": [
+      13.4,
+      66.3,
+      33.6,
+      69.6
+    ],
+    "words": [
+      {
+        "text": "Amount in",
+        "x": 603,
+        "y": 3978,
+        "w": 317,
+        "h": 78
+      },
+      {
+        "text": "Oa",
+        "x": 796,
+        "y": 4096,
+        "w": 113,
+        "h": 66
+      },
+      {
+        "text": "L",
+        "x": 954,
+        "y": 4072,
+        "w": 78,
+        "h": 91
+      },
+      {
+        "text": "Icaew)",
+        "x": 1087,
+        "y": 4058,
+        "w": 427,
+        "h": 117
+      }
+    ]
+  },
+  {
+    "text": "4.3. Do you own any other assetslproperties in the name of grandparents, parents, or",
+    "bbox_pct": [
+      12.6,
+      72.5,
+      80.8,
+      74.7
+    ],
+    "words": [
+      {
+        "text": "4.3. Do you own any other assetslproperties in the name of grandparents, parents, or",
+        "x": 565,
+        "y": 4351,
+        "w": 3069,
+        "h": 133
+      }
+    ]
+  },
+  {
+    "text": "student?",
+    "bbox_pct": [
+      12.6,
+      74.8,
+      20.1,
+      76.4
+    ],
+    "words": [
+      {
+        "text": "student?",
+        "x": 566,
+        "y": 4486,
+        "w": 338,
+        "h": 100
+      }
+    ]
+  },
+  {
+    "text": "Yes No",
+    "bbox_pct": [
+      15.2,
+      77.1,
+      27.3,
+      78.5
+    ],
+    "words": [
+      {
+        "text": "Yes",
+        "x": 682,
+        "y": 4628,
+        "w": 140,
+        "h": 85
+      },
+      {
+        "text": "No",
+        "x": 1118,
+        "y": 4624,
+        "w": 112,
+        "h": 84
+      }
+    ]
+  },
+  {
+    "text": "4.3.1 Ifyes, list their properties:",
+    "bbox_pct": [
+      12.7,
+      81.0,
+      34.8,
+      83.0
+    ],
+    "words": [
+      {
+        "text": "4.3.1 Ifyes, list their properties:",
+        "x": 572,
+        "y": 4863,
+        "w": 992,
+        "h": 114
+      }
+    ]
+  },
+  {
+    "text": "Property Description Owner Name Approximate Value",
+    "bbox_pct": [
+      13.5,
+      83.4,
+      73.6,
+      85.6
+    ],
+    "words": [
+      {
+        "text": "Property Description",
+        "x": 608,
+        "y": 5026,
+        "w": 701,
+        "h": 110
+      },
+      {
+        "text": "Owner Name",
+        "x": 1643,
+        "y": 5022,
+        "w": 440,
+        "h": 85
+      },
+      {
+        "text": "Approximate Value",
+        "x": 2671,
+        "y": 5002,
+        "w": 642,
+        "h": 108
+      }
+    ]
+  },
+  {
+    "text": "Page 3 0f 6 Confidential Team Everest",
+    "bbox_pct": [
+      35.8,
+      90.6,
+      64.1,
+      92.4
+    ],
+    "words": [
+      {
+        "text": "Page 3 0f 6",
+        "x": 1611,
+        "y": 5438,
+        "w": 351,
+        "h": 104
+      },
+      {
+        "text": "Confidential",
+        "x": 2065,
+        "y": 5445,
+        "w": 345,
+        "h": 73
+      },
+      {
+        "text": "Team Everest",
+        "x": 2483,
+        "y": 5445,
+        "w": 401,
+        "h": 73
+      }
+    ]
+  }
+]

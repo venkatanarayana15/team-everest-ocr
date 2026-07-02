@@ -1,0 +1,415 @@
+[
+  {
+    "text": "Am the Change - Home Visit Questionnaire Team Everest",
+    "bbox_pct": [
+      51.0,
+      5.2,
+      88.8,
+      6.9
+    ],
+    "words": [
+      {
+        "text": "Am the Change -",
+        "x": 2293,
+        "y": 314,
+        "w": 451,
+        "h": 98
+      },
+      {
+        "text": "Home Visit Questionnaire",
+        "x": 2808,
+        "y": 323,
+        "w": 724,
+        "h": 91
+      },
+      {
+        "text": "Team Everest",
+        "x": 3598,
+        "y": 336,
+        "w": 397,
+        "h": 77
+      }
+    ]
+  },
+  {
+    "text": "Amount in 7",
+    "bbox_pct": [
+      15.4,
+      8.7,
+      23.4,
+      9.9
+    ],
+    "words": [
+      {
+        "text": "Amount in",
+        "x": 692,
+        "y": 523,
+        "w": 312,
+        "h": 73
+      },
+      {
+        "text": "7",
+        "x": 1019,
+        "y": 537,
+        "w": 33,
+        "h": 50
+      }
+    ]
+  },
+  {
+    "text": "4.8. If the college fee is higher, how will you manage it?",
+    "bbox_pct": [
+      14.6,
+      15.3,
+      58.4,
+      17.5
+    ],
+    "words": [
+      {
+        "text": "4.8. If the college fee is higher, how will you manage it?",
+        "x": 659,
+        "y": 917,
+        "w": 1967,
+        "h": 133
+      }
+    ]
+  },
+  {
+    "text": "dalir Cdu caluorel (68s",
+    "bbox_pct": [
+      31.3,
+      18.7,
+      62.9,
+      21.3
+    ],
+    "words": [
+      {
+        "text": "dalir",
+        "x": 1407,
+        "y": 1123,
+        "w": 319,
+        "h": 132
+      },
+      {
+        "text": "Cdu caluorel",
+        "x": 1855,
+        "y": 1147,
+        "w": 668,
+        "h": 125
+      },
+      {
+        "text": "(68s",
+        "x": 2582,
+        "y": 1164,
+        "w": 249,
+        "h": 113
+      }
+    ]
+  },
+  {
+    "text": "4.9. If you do not receive this scholarship, how will you pay the fees?",
+    "bbox_pct": [
+      14.4,
+      24.6,
+      69.0,
+      26.9
+    ],
+    "words": [
+      {
+        "text": "4.9. If you do not receive this",
+        "x": 648,
+        "y": 1473,
+        "w": 1042,
+        "h": 105
+      },
+      {
+        "text": "scholarship, how will you pay the fees?",
+        "x": 1683,
+        "y": 1476,
+        "w": 1423,
+        "h": 138
+      }
+    ]
+  },
+  {
+    "text": "Section 5 Health Information",
+    "bbox_pct": [
+      14.8,
+      34.6,
+      44.5,
+      36.8
+    ],
+    "words": [
+      {
+        "text": "Section 5",
+        "x": 668,
+        "y": 2075,
+        "w": 419,
+        "h": 113
+      },
+      {
+        "text": "Health Information",
+        "x": 1194,
+        "y": 2089,
+        "w": 810,
+        "h": 121
+      }
+    ]
+  },
+  {
+    "text": "5.1. Does the student have any health issues? Yes No",
+    "bbox_pct": [
+      13.8,
+      40.3,
+      50.6,
+      44.1
+    ],
+    "words": [
+      {
+        "text": "5.1. Does the student have any health issues?",
+        "x": 622,
+        "y": 2419,
+        "w": 1653,
+        "h": 123
+      },
+      {
+        "text": "Yes",
+        "x": 730,
+        "y": 2555,
+        "w": 147,
+        "h": 93
+      },
+      {
+        "text": "No",
+        "x": 1170,
+        "y": 2572,
+        "w": 111,
+        "h": 77
+      }
+    ]
+  },
+  {
+    "text": "5.2. If yes, list the health issues: Describe health issues",
+    "bbox_pct": [
+      13.5,
+      47.9,
+      39.6,
+      52.0
+    ],
+    "words": [
+      {
+        "text": "5.2. If yes, list the health issues:",
+        "x": 608,
+        "y": 2872,
+        "w": 1172,
+        "h": 120
+      },
+      {
+        "text": "Describe health issues",
+        "x": 638,
+        "y": 3024,
+        "w": 704,
+        "h": 99
+      }
+    ]
+  },
+  {
+    "text": "(Section 6 Student Commitment",
+    "bbox_pct": [
+      14.1,
+      58.0,
+      46.5,
+      60.1
+    ],
+    "words": [
+      {
+        "text": "(Section 6",
+        "x": 634,
+        "y": 3479,
+        "w": 409,
+        "h": 100
+      },
+      {
+        "text": "Student Commitment",
+        "x": 1155,
+        "y": 3481,
+        "w": 937,
+        "h": 127
+      }
+    ]
+  },
+  {
+    "text": "6.1, Will you study college for three years without any obstacle?",
+    "bbox_pct": [
+      13.0,
+      63.6,
+      64.2,
+      66.0
+    ],
+    "words": [
+      {
+        "text": "6.1, Will you",
+        "x": 583,
+        "y": 3822,
+        "w": 457,
+        "h": 110
+      },
+      {
+        "text": "study",
+        "x": 1028,
+        "y": 3815,
+        "w": 240,
+        "h": 127
+      },
+      {
+        "text": "college for three years without any obstacle?",
+        "x": 1250,
+        "y": 3823,
+        "w": 1639,
+        "h": 134
+      }
+    ]
+  },
+  {
+    "text": "Yes",
+    "bbox_pct": [
+      30.6,
+      68.1,
+      34.4,
+      70.0
+    ],
+    "words": [
+      {
+        "text": "Yes",
+        "x": 1378,
+        "y": 4087,
+        "w": 168,
+        "h": 112
+      }
+    ]
+  },
+  {
+    "text": "6.2. If we have a Yes No training program within 15 km from your home; can you come? Maybe",
+    "bbox_pct": [
+      12.8,
+      73.0,
+      76.3,
+      77.4
+    ],
+    "words": [
+      {
+        "text": "6.2. If we have a",
+        "x": 577,
+        "y": 4393,
+        "w": 579,
+        "h": 99
+      },
+      {
+        "text": "Yes",
+        "x": 691,
+        "y": 4530,
+        "w": 136,
+        "h": 84
+      },
+      {
+        "text": "No",
+        "x": 1122,
+        "y": 4539,
+        "w": 113,
+        "h": 85
+      },
+      {
+        "text": "training program within 15 km from your home; can you come?",
+        "x": 1140,
+        "y": 4377,
+        "w": 2294,
+        "h": 159
+      },
+      {
+        "text": "Maybe",
+        "x": 1534,
+        "y": 4538,
+        "w": 250,
+        "h": 105
+      }
+    ]
+  },
+  {
+    "text": "Sundays (16 classes a year)? 6.3. Are you ready to send your sonldaughter to weekly skill development classes o Yes No",
+    "bbox_pct": [
+      12.4,
+      80.7,
+      80.3,
+      86.4
+    ],
+    "words": [
+      {
+        "text": "Sundays (16 classes a year)?",
+        "x": 556,
+        "y": 4931,
+        "w": 1078,
+        "h": 138
+      },
+      {
+        "text": "6.3. Are you ready to send your sonldaughter to weekly skill development classes o",
+        "x": 564,
+        "y": 4839,
+        "w": 3048,
+        "h": 153
+      },
+      {
+        "text": "Yes",
+        "x": 677,
+        "y": 5093,
+        "w": 140,
+        "h": 84
+      },
+      {
+        "text": "No",
+        "x": 1114,
+        "y": 5103,
+        "w": 110,
+        "h": 78
+      }
+    ]
+  },
+  {
+    "text": "Page 5 of 6 Confidential S Team Everest",
+    "bbox_pct": [
+      35.5,
+      90.4,
+      63.5,
+      92.0
+    ],
+    "words": [
+      {
+        "text": "Page 5 of 6",
+        "x": 1598,
+        "y": 5425,
+        "w": 349,
+        "h": 93
+      },
+      {
+        "text": "Confidential",
+        "x": 2047,
+        "y": 5440,
+        "w": 344,
+        "h": 73
+      },
+      {
+        "text": "S",
+        "x": 2398,
+        "y": 5468,
+        "w": 55,
+        "h": 32
+      },
+      {
+        "text": "Team Everest",
+        "x": 2464,
+        "y": 5445,
+        "w": 392,
+        "h": 73
+      }
+    ]
+  }
+]

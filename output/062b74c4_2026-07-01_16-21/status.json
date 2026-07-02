@@ -1,0 +1,59 @@
+{
+  "status": "done",
+  "message": "Extraction complete. Results ready for download.",
+  "log": [
+    {
+      "t": "16:21:03",
+      "msg": "PDF batch: TEMP-2026-9882_Nivetha_P.pdf"
+    },
+    {
+      "t": "16:21:07",
+      "msg": "Rendering and enhancing pages..."
+    },
+    {
+      "t": "16:21:29",
+      "msg": "Preprocessing done. 6 pages ready."
+    },
+    {
+      "t": "16:21:29",
+      "msg": "Running Tesseract for bounding box detection..."
+    },
+    {
+      "t": "16:21:49",
+      "msg": "Tesseract detected 739 words across 6 pages."
+    },
+    {
+      "t": "16:21:49",
+      "msg": "Running primary extraction (OpenAI)..."
+    },
+    {
+      "t": "16:23:28",
+      "msg": "OpenAI extracted 81 fields (confidence: 95%). Merging with bounding boxes..."
+    },
+    {
+      "t": "16:23:28",
+      "msg": "Merged 81 fields with Tesseract bboxes."
+    },
+    {
+      "t": "16:23:28",
+      "msg": "Running secondary verification (OpenAI)..."
+    },
+    {
+      "t": "16:24:06",
+      "msg": "OpenAI verified 81 fields, corrected 1, added 0 new."
+    },
+    {
+      "t": "16:24:06",
+      "msg": "Template fill: 82 total fields after adding missing positions."
+    },
+    {
+      "t": "16:24:06",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "16:24:06",
+      "msg": "Extraction complete. Results ready for download."
+    }
+  ],
+  "pages": 6
+}

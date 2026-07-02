@@ -1,0 +1,72 @@
+{
+  "status": "done",
+  "message": "Complete \u2014 37 fields from 6 pages in 140s.",
+  "log": [
+    {
+      "t": "13:00:30",
+      "msg": "Uploaded 1 file(s) (0 converted to PDF)"
+    },
+    {
+      "t": "13:00:30",
+      "msg": "Processing 1 PDF(s)..."
+    },
+    {
+      "t": "13:00:30",
+      "msg": "[1/1] Processing 'ScannedDocument.pdf'..."
+    },
+    {
+      "t": "13:00:34",
+      "msg": "Rendering 6 pages from 'ScannedDocument.pdf'..."
+    },
+    {
+      "t": "13:00:40",
+      "msg": "Running OCR (GPU) on 6 pages of 'ScannedDocument.pdf'..."
+    },
+    {
+      "t": "13:01:04",
+      "msg": "Connecting to models for 'ScannedDocument.pdf' (GPT-4o + OpenRouter chain)..."
+    },
+    {
+      "t": "13:01:04",
+      "msg": "Loading OCR data for 'ScannedDocument.pdf'..."
+    },
+    {
+      "t": "13:01:04",
+      "msg": "Loaded 99 OCR lines across 6 pages for 'ScannedDocument.pdf'."
+    },
+    {
+      "t": "13:01:05",
+      "msg": "Connecting to Model A (gpt-4o) for 'ScannedDocument.pdf'..."
+    },
+    {
+      "t": "13:02:34",
+      "msg": "Model A extracted 37 fields (37 with precise bbox), confidence=95%."
+    },
+    {
+      "t": "13:02:34",
+      "msg": "Confidence 95% >= threshold 90.0%, skipping Models B/C/D."
+    },
+    {
+      "t": "13:02:34",
+      "msg": "[1/1] 'ScannedDocument.pdf': 37 fields extracted."
+    },
+    {
+      "t": "13:02:34",
+      "msg": "Running final bbox refinement via Tesseract on 37 fields..."
+    },
+    {
+      "t": "13:02:50",
+      "msg": "Bbox refinement complete: 37/37 fields have precise coordinates."
+    },
+    {
+      "t": "13:02:50",
+      "msg": "Writing result files (JSON, MD, TXT, HTML)..."
+    },
+    {
+      "t": "13:02:50",
+      "msg": "Complete \u2014 37 fields from 6 pages in 140s."
+    }
+  ],
+  "pages": 6,
+  "pdfs": 1
+}

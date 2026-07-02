@@ -1,0 +1,461 @@
+[
+  {
+    "text": "Am the Change Home Visit Questionnaire Team Everest",
+    "bbox_pct": [
+      50.0,
+      5.8,
+      87.9,
+      7.4
+    ],
+    "words": [
+      {
+        "text": "Am the",
+        "x": 2249,
+        "y": 360,
+        "w": 207,
+        "h": 66
+      },
+      {
+        "text": "Change",
+        "x": 2454,
+        "y": 347,
+        "w": 247,
+        "h": 97
+      },
+      {
+        "text": "Home Visit Questionnaire",
+        "x": 2767,
+        "y": 353,
+        "w": 721,
+        "h": 79
+      },
+      {
+        "text": "Team Everest",
+        "x": 3562,
+        "y": 360,
+        "w": 394,
+        "h": 66
+      }
+    ]
+  },
+  {
+    "text": "4.4. Apart from your job, is there any other source of income?",
+    "bbox_pct": [
+      12.9,
+      20.2,
+      62.3,
+      22.3
+    ],
+    "words": [
+      {
+        "text": "4.4. Apart from",
+        "x": 582,
+        "y": 1214,
+        "w": 548,
+        "h": 97
+      },
+      {
+        "text": "your",
+        "x": 1126,
+        "y": 1220,
+        "w": 188,
+        "h": 100
+      },
+      {
+        "text": "job, is there any other source of income?",
+        "x": 1308,
+        "y": 1223,
+        "w": 1495,
+        "h": 114
+      }
+    ]
+  },
+  {
+    "text": "Yes No",
+    "bbox_pct": [
+      15.4,
+      22.4,
+      27.6,
+      23.9
+    ],
+    "words": [
+      {
+        "text": "Yes",
+        "x": 691,
+        "y": 1347,
+        "w": 141,
+        "h": 85
+      },
+      {
+        "text": "No",
+        "x": 1128,
+        "y": 1358,
+        "w": 115,
+        "h": 77
+      }
+    ]
+  },
+  {
+    "text": "4.4.1 If yes, Iist other sources of income:",
+    "bbox_pct": [
+      12.8,
+      26.6,
+      40.8,
+      28.4
+    ],
+    "words": [
+      {
+        "text": "4.4.1",
+        "x": 578,
+        "y": 1593,
+        "w": 165,
+        "h": 78
+      },
+      {
+        "text": "If yes, Iist other sources of income:",
+        "x": 760,
+        "y": 1599,
+        "w": 1078,
+        "h": 103
+      }
+    ]
+  },
+  {
+    "text": "Source of Income Amount",
+    "bbox_pct": [
+      13.6,
+      29.0,
+      54.1,
+      30.9
+    ],
+    "words": [
+      {
+        "text": "Source of Income",
+        "x": 613,
+        "y": 1743,
+        "w": 592,
+        "h": 98
+      },
+      {
+        "text": "Amount",
+        "x": 2159,
+        "y": 1775,
+        "w": 275,
+        "h": 77
+      }
+    ]
+  },
+  {
+    "text": "4.5. Income Type Monthly Daily Weekly Ad-Hoc",
+    "bbox_pct": [
+      12.3,
+      44.1,
+      56.8,
+      48.3
+    ],
+    "words": [
+      {
+        "text": "4.5. Income Type",
+        "x": 554,
+        "y": 2648,
+        "w": 621,
+        "h": 102
+      },
+      {
+        "text": "Monthly",
+        "x": 657,
+        "y": 2766,
+        "w": 292,
+        "h": 114
+      },
+      {
+        "text": "Daily",
+        "x": 1238,
+        "y": 2790,
+        "w": 190,
+        "h": 96
+      },
+      {
+        "text": "Weekly",
+        "x": 1721,
+        "y": 2784,
+        "w": 275,
+        "h": 115
+      },
+      {
+        "text": "Ad-Hoc",
+        "x": 2288,
+        "y": 2804,
+        "w": 270,
+        "h": 92
+      }
+    ]
+  },
+  {
+    "text": "4.6. Do you have any loans?",
+    "bbox_pct": [
+      12.0,
+      51.5,
+      34.9,
+      53.3
+    ],
+    "words": [
+      {
+        "text": "4.6. Do you have any loans?",
+        "x": 539,
+        "y": 3089,
+        "w": 1030,
+        "h": 109
+      }
+    ]
+  },
+  {
+    "text": "Yes No",
+    "bbox_pct": [
+      14.2,
+      53.7,
+      26.7,
+      55.3
+    ],
+    "words": [
+      {
+        "text": "Yes",
+        "x": 640,
+        "y": 3224,
+        "w": 153,
+        "h": 89
+      },
+      {
+        "text": "No",
+        "x": 1089,
+        "y": 3232,
+        "w": 113,
+        "h": 84
+      }
+    ]
+  },
+  {
+    "text": "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount:",
+    "bbox_pct": [
+      11.7,
+      57.9,
+      64.7,
+      60.1
+    ],
+    "words": [
+      {
+        "text": "4.6.1",
+        "x": 528,
+        "y": 3476,
+        "w": 171,
+        "h": 78
+      },
+      {
+        "text": "If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount:",
+        "x": 711,
+        "y": 3477,
+        "w": 2202,
+        "h": 126
+      }
+    ]
+  },
+  {
+    "text": "Sr. No. Loan Purpose Loan Amount Taken Pending Loan Amount",
+    "bbox_pct": [
+      12.5,
+      63.7,
+      75.1,
+      67.4
+    ],
+    "words": [
+      {
+        "text": "Sr. No.",
+        "x": 561,
+        "y": 3823,
+        "w": 232,
+        "h": 73
+      },
+      {
+        "text": "Loan Purpose",
+        "x": 1342,
+        "y": 3831,
+        "w": 481,
+        "h": 100
+      },
+      {
+        "text": "Loan Amount Taken",
+        "x": 2121,
+        "y": 3844,
+        "w": 675,
+        "h": 92
+      },
+      {
+        "text": "Pending Loan",
+        "x": 2893,
+        "y": 3845,
+        "w": 488,
+        "h": 113
+      },
+      {
+        "text": "Amount",
+        "x": 2898,
+        "y": 3957,
+        "w": 283,
+        "h": 88
+      }
+    ]
+  },
+  {
+    "text": "Hcwl) lcan Howxk 10o0o0o0 (000 c",
+    "bbox_pct": [
+      11.5,
+      70.0,
+      71.9,
+      74.7
+    ],
+    "words": [
+      {
+        "text": "Hcwl)",
+        "x": 519,
+        "y": 4202,
+        "w": 502,
+        "h": 278
+      },
+      {
+        "text": "lcan",
+        "x": 996,
+        "y": 4268,
+        "w": 252,
+        "h": 139
+      },
+      {
+        "text": "Howxk",
+        "x": 1428,
+        "y": 4241,
+        "w": 372,
+        "h": 177
+      },
+      {
+        "text": "10o0o0o0",
+        "x": 2141,
+        "y": 4239,
+        "w": 661,
+        "h": 205
+      },
+      {
+        "text": "(000 c",
+        "x": 2940,
+        "y": 4257,
+        "w": 297,
+        "h": 133
+      }
+    ]
+  },
+  {
+    "text": "CAR_Itan CAk G60000 2 2000 0",
+    "bbox_pct": [
+      12.7,
+      74.9,
+      76.9,
+      78.0
+    ],
+    "words": [
+      {
+        "text": "CAR_Itan",
+        "x": 572,
+        "y": 4505,
+        "w": 556,
+        "h": 162
+      },
+      {
+        "text": "CAk",
+        "x": 1414,
+        "y": 4545,
+        "w": 275,
+        "h": 134
+      },
+      {
+        "text": "G60000",
+        "x": 2192,
+        "y": 4491,
+        "w": 504,
+        "h": 177
+      },
+      {
+        "text": "2 2000 0",
+        "x": 2985,
+        "y": 4505,
+        "w": 474,
+        "h": 140
+      }
+    ]
+  },
+  {
+    "text": "4.7. If you choose any college; how much is the college fee?",
+    "bbox_pct": [
+      10.8,
+      85.3,
+      59.5,
+      87.9
+    ],
+    "words": [
+      {
+        "text": "4.7. If you choose any college; how much is the college fee?",
+        "x": 484,
+        "y": 5120,
+        "w": 2195,
+        "h": 153
+      }
+    ]
+  },
+  {
+    "text": "NLL",
+    "bbox_pct": [
+      16.2,
+      87.4,
+      24.8,
+      90.2
+    ],
+    "words": [
+      {
+        "text": "NLL",
+        "x": 729,
+        "y": 5243,
+        "w": 387,
+        "h": 171
+      }
+    ]
+  },
+  {
+    "text": "Page 4 0f 6 Confidential Team Everest",
+    "bbox_pct": [
+      34.0,
+      90.6,
+      62.6,
+      92.2
+    ],
+    "words": [
+      {
+        "text": "Page 4 0f 6",
+        "x": 1529,
+        "y": 5434,
+        "w": 358,
+        "h": 97
+      },
+      {
+        "text": "Confidential",
+        "x": 1990,
+        "y": 5450,
+        "w": 350,
+        "h": 73
+      },
+      {
+        "text": "Team Everest",
+        "x": 2417,
+        "y": 5454,
+        "w": 401,
+        "h": 73
+      }
+    ]
+  }
+]

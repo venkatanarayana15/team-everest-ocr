@@ -1,0 +1,32 @@
+# OCR Extraction Results
+
+- **Job ID:** d8fd83f8_2026-07-01_14-25
+- **Overall Confidence:** 60.2%
+- **Processing Time:** 64.44s
+- **Pages:** 3
+- **PDFs:** Scan_document20260610_163516.pdf
+
+- **Volunteer Name:** Deepika K (confidence: 60%)
+- **Co-Volunteer Name:** Santhoshi M (confidence: 60%)
+- **Date of Visit:** 23.06.2022 (confidence: 50%)
+- **Section 1 Student Profile:** (empty) (confidence: 60%)
+- **1.1. Application ID:** CHEN_201902002 (confidence: 64%)
+- **1.2. Student Full Name:** Deeplos k (confidence: 67%)
+- **1.3. Gender:** Female (confidence: 60%)
+- **Section 2 Family Background:** (empty) (confidence: 60%)
+- **2.1. Family Status:** Single Parent (confidence: 60%)
+- **2.2. Relationship Details (if applicable):** (empty) (confidence: 60%)
+- **2.3. Is Father/ Mother photograph kept at home?:** No (confidence: 60%)
+- **2.4. Government ID Verified:** Aadhaar Card (confidence: 50%)
+- **2.5. Family Members:** Prabhakar K, 45 (confidence: 62%)
+- **Section 3 Housing Condition:** (empty) (confidence: 60%)
+- **3.1. House Ownership:** Own (confidence: 70%)
+- **3.2. Type of Home:** Individual (confidence: 50%)
+- **3.3. Type of Ceiling:** Concrete (confidence: 60%)
+- **3.4. Number of Bedrooms:** 0 (confidence: 60%)
+- **3.4.1 Type of Bedroom:** No Separate Bedroom (confidence: 65%)
+- **3.5. Bathroom:** Separate (confidence: 60%)
+- **3.6. Kitchen Type:** Hall with Kitchen (confidence: 60%)
+- **4.1. Assets at Home (tick all that apply):** Washing Machine, Fridge, AC, Two-Wheeler (confidence: 60%)
+- **4.2. Amount of Last Electricity Bill:** Don't Know (confidence: 68%)
+- **4.3. Do you own any other assetslproperties in the name of grandparents, parents, or student?:** No (confidence: 60%)
