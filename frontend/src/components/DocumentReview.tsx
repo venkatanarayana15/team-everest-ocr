@@ -1,0 +1,281 @@
+import { useRef, useCallback, useState, useEffect } from 'react';
+import { pageImageUrl } from '../api/client';
+import type { Field, Section } from '../types';
+import ExtractedDataPanel from './ExtractedDataPanel';
+
+interface Props {
+  jobId: string;
+  numPages: number;
+  pageOffset?: number;
+  fields: Field[];
+  sections: Section[];
+  selectedField: Field | null;
+  currentPage: number;
+  onFieldClick: (field: Field) => void;
+  onFieldsUpdated: (fields: Field[]) => void;
+}
+
+function BboxOverlay({
+  bbox, color, natW, natH, elW, elH,
+}: {
+  bbox: [number, number, number, number];
+  color: string;
+  natW: number;
+  natH: number;
+  elW: number;
+  elH: number;
+}) {
+  const scale = Math.min(elW / natW, elH / natH);
+  const renderedW = natW * scale;
+  const renderedH = natH * scale;
+  const offsetX = (elW - renderedW) / 2;
+  const offsetY = (elH - renderedH) / 2;
+
+  return (
+    <div style={{
+      position: 'absolute',
+      left: bbox[0] * scale + offsetX,
+      top: bbox[1] * scale + offsetY,
+      width: (bbox[2] - bbox[0]) * scale,
+      height: (bbox[3] - bbox[1]) * scale,
+      border: `2px solid ${color}`,
+      background: `${color}22`,
+      borderRadius: 2,
+      pointerEvents: 'none',
+    }} />
+  );
+}
+
+export default function DocumentReview({
+  jobId, numPages, pageOffset = 0, fields, sections,
+  selectedField, currentPage, onFieldClick, onFieldsUpdated,
+}: Props) {
+  const [fitModes, setFitModes] = useState<Record<number, boolean>>({});
+  const [imgDims, setImgDims] = useState<Record<number, { natW: number; natH: number; elW: number; elH: number }>>({});
+  const blockRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  useEffect(() => {
+    const block = blockRefs.current.get(currentPage);
+    if (block) block.scrollIntoView({ behavior: 'auto', block: 'start' });
+  }, [currentPage]);
+
+  useEffect(() => {
+    // Immediate check for already loaded (cached) images
+    const timer = setInterval(() => {
+      let updated = false;
+      const nextDims = { ...imgDims };
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        if (nextDims[pageNum]) continue;
+        const el = document.getElementById(`doc-review-img-${pageNum}`) as HTMLImageElement | null;
+        if (el && el.complete && el.naturalWidth > 0 && el.clientWidth > 0) {
+          nextDims[pageNum] = {
+            natW: el.naturalWidth,
+            natH: el.naturalHeight,
+            elW: el.clientWidth,
+            elH: el.clientHeight,
+          };
+          updated = true;
+        }
+      }
+      if (updated) {
+        setImgDims(nextDims);
+      }
+    }, 300);
+
+    return () => clearInterval(timer);
+  }, [numPages, jobId, imgDims]);
+
+  const handleFieldClick = useCallback((field: Field) => {
+    onFieldClick(field);
+  }, [onFieldClick]);
+
+  const handleImgLoad = useCallback((pageNum: number) => {
+    const el = document.getElementById(`doc-review-img-${pageNum}`) as HTMLImageElement | null;
+    if (!el || el.naturalWidth === 0 || el.clientWidth === 0) return;
+    setImgDims(prev => ({
+      ...prev,
+      [pageNum]: {
+        natW: el.naturalWidth,
+        natH: el.naturalHeight,
+        elW: el.clientWidth,
+        elH: el.clientHeight,
+      },
+    }));
+  }, []);
+
+  const setBlockRef = useCallback((pageNum: number, el: HTMLDivElement | null) => {
+    if (el) blockRefs.current.set(pageNum, el);
+    else blockRefs.current.delete(pageNum);
+  }, []);
+
+  const toggleFit = useCallback((pageNum: number) => {
+    setFitModes(prev => ({ ...prev, [pageNum]: !prev[pageNum] }));
+    setImgDims(prev => {
+      const d = { ...prev };
+      delete d[pageNum];
+      return d;
+    });
+  }, []);
+
+  const selectedOnPage = selectedField?.page;
+
+  if (!numPages || numPages === 0) {
+    return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', fontSize: 14 }}>
+        No pages to display.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      flex: 1, overflowY: 'auto',
+      fontFamily: 'var(--font-sans)',
+      background: 'var(--color-bg)',
+    }}>
+      {Array.from({ length: numPages }, (_, i) => {
+        const pageNum = i + 1;
+        const fitMode = fitModes[pageNum] ?? true;
+        const dims = imgDims[pageNum];
+        const isSelectedPage = selectedOnPage === pageNum;
+        const pageFields = fields.filter(f => f.page === pageNum);
+
+        return (
+          <div
+            key={pageNum}
+            ref={el => setBlockRef(pageNum, el)}
+            style={{
+              display: 'flex',
+              height: 'calc(100vh - 180px)',
+              margin: 12,
+              borderRadius: 'var(--radius-xl)',
+              border: `1px solid ${isSelectedPage ? 'var(--color-primary)' : 'var(--color-border)'}`,
+              boxShadow: isSelectedPage
+                ? '0 0 0 2px rgba(37,99,235,0.15), var(--shadow-md)'
+                : 'var(--shadow-sm)',
+              background: 'var(--color-surface)',
+              transition: 'border-color var(--transition-normal), box-shadow var(--transition-normal)',
+            }}
+          >
+            {/* ── Left: PDF page ── */}
+            <div style={{
+              width: '55%',
+              display: 'flex',
+              flexDirection: 'column',
+              minHeight: 0,
+              background: '#fafafa',
+            }}>
+              <div style={{
+                padding: '8px 14px',
+                background: 'var(--color-surface)',
+                borderBottom: '1px solid var(--color-border)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                flexShrink: 0,
+              }}>
+                <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text)' }}>Page {pageNum}</span>
+                <span style={{ color: 'var(--color-text-placeholder)' }}>·</span>
+                <span style={{ fontWeight: 400, color: 'var(--color-text-secondary)', fontSize: 12 }}>
+                  {pageFields.length} field{pageFields.length !== 1 ? 's' : ''}
+                </span>
+                <div style={{ flex: 1 }} />
+                <button
+                  onClick={() => toggleFit(pageNum)}
+                  style={{
+                    padding: '2px 8px', fontSize: 11, fontWeight: 500,
+                    border: `1px solid ${fitMode ? 'var(--color-primary)' : 'var(--color-border-hover)'}`,
+                    borderRadius: 'var(--radius-sm)',
+                    background: fitMode ? 'var(--color-primary-light)' : 'var(--color-surface)',
+                    color: fitMode ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                    cursor: 'pointer',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                >
+                  {fitMode ? 'Fit' : 'Free'}
+                </button>
+              </div>
+
+              <div style={{
+                flex: 1,
+                minHeight: 0,
+                overflow: 'auto',
+                display: 'flex',
+                justifyContent: fitMode ? 'center' : 'flex-start',
+                alignItems: 'flex-start',
+                position: 'relative',
+              }}>
+                {/* ── Fit mode: image scales to width, height auto ── */}
+                {fitMode ? (
+                  <div style={{ position: 'relative', width: '100%' }}>
+                    <img
+                      id={`doc-review-img-${pageNum}`}
+                      src={pageImageUrl(jobId, pageOffset + pageNum)}
+                      onLoad={() => handleImgLoad(pageNum)}
+                      style={{ width: '100%', maxWidth: '100%', height: 'auto', display: 'block' }}
+                      alt={`Page ${pageNum}`}
+                    />
+                    {dims && (
+                      <>
+                        {selectedField?.bbox && isSelectedPage && (
+                          <BboxOverlay bbox={selectedField.bbox} color="#3b82f6" natW={dims.natW} natH={dims.natH} elW={dims.elW} elH={dims.elH} />
+                        )}
+                        {selectedField?.value_bbox && isSelectedPage && (
+                          <BboxOverlay bbox={selectedField.value_bbox} color="#22c55e" natW={dims.natW} natH={dims.natH} elW={dims.elW} elH={dims.elH} />
+                        )}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ position: 'relative', display: 'inline-block', padding: 8 }}>
+                    <img
+                      id={`doc-review-img-${pageNum}`}
+                      src={pageImageUrl(jobId, pageOffset + pageNum)}
+                      onLoad={() => handleImgLoad(pageNum)}
+                      style={{ display: 'block', boxShadow: '0 1px 4px rgba(0,0,0,0.1)' }}
+                      alt={`Page ${pageNum}`}
+                    />
+                    {dims && (
+                      <>
+                        {selectedField?.bbox && isSelectedPage && (
+                          <BboxOverlay bbox={selectedField.bbox} color="#3b82f6" natW={dims.natW} natH={dims.natH} elW={dims.elW} elH={dims.elH} />
+                        )}
+                        {selectedField?.value_bbox && isSelectedPage && (
+                          <BboxOverlay bbox={selectedField.value_bbox} color="#22c55e" natW={dims.natW} natH={dims.natH} elW={dims.elW} elH={dims.elH} />
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Right: Extracted data ── */}
+            <div style={{
+              width: '45%',
+              display: 'flex',
+              flexDirection: 'column',
+              minHeight: 0,
+              overflow: 'hidden',
+              borderLeft: '1px solid var(--color-border)',
+              background: 'var(--color-surface)',
+            }}>
+              <ExtractedDataPanel
+                fields={fields}
+                sections={sections}
+                selectedField={selectedField}
+                onFieldClick={handleFieldClick}
+                onPageClick={() => {}}
+                currentPage={pageNum}
+                numPages={numPages}
+                jobId={jobId}
+                onFieldsUpdated={onFieldsUpdated}
+                hideToolbar
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
