@@ -10,6 +10,7 @@ interface JobEntry {
   num_pdfs?: number | null;
   pdf_names: string[];
   created_at?: number;
+  processing_time?: number | null;
 }
 
 interface Props {
@@ -264,6 +265,7 @@ export default function DashboardPage({ onNewBatch, onSelectBatch }: Props) {
                   <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 11, color: 'var(--color-text-muted)' }}>
                     {j.num_pages != null && <span>{j.num_pages} page{j.num_pages !== 1 ? 's' : ''}</span>}
                     {j.num_pdfs != null && <span>{j.num_pdfs} PDF{j.num_pdfs !== 1 ? 's' : ''}</span>}
+                    {j.processing_time != null && <span>⏱️ {j.processing_time}s</span>}
                     {j.overall_confidence != null && (
                       <span style={{
                         fontWeight: 600,

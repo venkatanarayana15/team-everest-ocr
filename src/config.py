@@ -41,3 +41,4 @@ class Config:
     output_json_indent: int = 2
     searchable_pdf_font: str = "Helvetica"
     ocr_backend: str = "tesseract"
+    max_image_width: int = 1200

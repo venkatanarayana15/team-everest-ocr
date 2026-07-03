@@ -13,6 +13,20 @@ export function subscribeToJob(jobId: string, onMessage: (data: any) => void): (
   return () => es.close();
 }
 
+export function subscribeToBatch(jobIds: string[], onMessage: (data: any) => void): () => void {
+  const ids = jobIds.join(',');
+  const es = new EventSource(`${API}/stream-batch?job_ids=${encodeURIComponent(ids)}`);
+  es.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      onMessage(data);
+      if (data._batch_complete) es.close();
+    } catch { /* ignore */ }
+  };
+  es.onerror = () => { es.close(); };
+  return () => es.close();
+}
+
 export interface StatusResponse {
   status: string;
   message?: string;
@@ -46,12 +60,14 @@ export async function listJobs() {
   return res.json();
 }
 
-export function pageImageUrl(jobId: string, pageNum: number): string {
-  return `${API}/pages/${jobId}/${pageNum}`;
+export function pageImageUrl(jobId: string, pageNum: number, pdfName?: string | null): string {
+  const query = pdfName ? `?pdf_name=${encodeURIComponent(pdfName)}` : '';
+  return `${API}/pages/${jobId}/${pageNum}${query}`;
 }
 
-export function thumbnailUrl(jobId: string, pageNum: number): string {
-  return `${API}/pages/${jobId}/${pageNum}?width=200`;
+export function thumbnailUrl(jobId: string, pageNum: number, pdfName?: string | null): string {
+  const query = pdfName ? `&pdf_name=${encodeURIComponent(pdfName)}` : '';
+  return `${API}/pages/${jobId}/${pageNum}?width=200${query}`;
 }
 
 export function downloadUrl(jobId: string, format: 'json' | 'md' | 'html' | 'txt'): string {

@@ -13,6 +13,17 @@ interface Props {
   currentPage: number;
   onFieldClick: (field: Field) => void;
   onFieldsUpdated: (fields: Field[]) => void;
+  rawText?: string;
+  rightPanelFormat?: 'fields' | 'txt';
+  onRawTextUpdated?: (newRawText: string) => void;
+  pdfName?: string | null;
+}
+
+function getPageText(rawText: string, pageNum: number): string {
+  const parts = rawText.split(/--- Page \d+ ---/);
+  if (parts.length === 1) return rawText;
+  if (pageNum < parts.length) return parts[pageNum]?.trim() || '';
+  return parts[parts.length - 1]?.trim() || '';
 }
 
 function BboxOverlay({
@@ -46,13 +57,96 @@ function BboxOverlay({
   );
 }
 
+function EditableTextViewer({
+  pageNum,
+  rawText,
+  onSave,
+}: {
+  pageNum: number;
+  rawText: string;
+  onSave: (pageNum: number, text: string) => void;
+}) {
+  const initialText = useMemo(() => getPageText(rawText, pageNum), [rawText, pageNum]);
+  const [text, setText] = useState(initialText);
+
+  useEffect(() => {
+    setText(initialText);
+  }, [initialText]);
+
+  return (
+    <div style={{
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      background: 'var(--color-surface)',
+      padding: '12px 16px',
+      minHeight: 0,
+    }}>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        style={{
+          flex: 1,
+          fontFamily: 'var(--font-mono)',
+          fontSize: 13,
+          lineHeight: 1.6,
+          padding: 12,
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-md)',
+          resize: 'none',
+          outline: 'none',
+          background: 'var(--color-bg)',
+          color: 'var(--color-text)',
+          boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)',
+        }}
+        placeholder="Raw OCR transcription text..."
+      />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+        <button
+          onClick={() => onSave(pageNum, text)}
+          style={{
+            padding: '6px 14px',
+            fontSize: 12,
+            fontWeight: 600,
+            border: 'none',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--color-primary)',
+            color: '#fff',
+            cursor: 'pointer',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          Save Text
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function DocumentReview({
   jobId, numPages, pageOffset = 0, fields, sections,
   selectedField, currentPage, onFieldClick, onFieldsUpdated,
+  rawText = '',
+  rightPanelFormat = 'fields',
+  onRawTextUpdated,
+  pdfName = null,
 }: Props) {
   const [fitModes, setFitModes] = useState<Record<number, boolean>>({});
   const [imgDims, setImgDims] = useState<Record<number, { natW: number; natH: number; elW: number; elH: number }>>({});
   const blockRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  const handlePageTextChange = useCallback((pageNum: number, newPageText: string) => {
+    const parts = rawText.split(/(--- Page \d+ ---)/);
+    const targetSeparator = `--- Page ${pageNum} ---`;
+    const idx = parts.indexOf(targetSeparator);
+    if (idx !== -1 && idx + 1 < parts.length) {
+      parts[idx + 1] = `\n${newPageText.trim()}\n\n`;
+      const fullText = parts.join('');
+      if (onRawTextUpdated) onRawTextUpdated(fullText);
+    } else {
+      if (onRawTextUpdated) onRawTextUpdated(newPageText);
+    }
+  }, [rawText, onRawTextUpdated]);
 
   useEffect(() => {
     const block = blockRefs.current.get(currentPage);
@@ -210,7 +304,7 @@ export default function DocumentReview({
                   <div style={{ position: 'relative', width: '100%' }}>
                     <img
                       id={`doc-review-img-${pageNum}`}
-                      src={pageImageUrl(jobId, pageOffset + pageNum)}
+                      src={pageImageUrl(jobId, pageOffset + pageNum, pdfName)}
                       onLoad={() => handleImgLoad(pageNum)}
                       style={{ width: '100%', maxWidth: '100%', height: 'auto', display: 'block' }}
                       alt={`Page ${pageNum}`}
@@ -230,7 +324,7 @@ export default function DocumentReview({
                   <div style={{ position: 'relative', display: 'inline-block', padding: 8 }}>
                     <img
                       id={`doc-review-img-${pageNum}`}
-                      src={pageImageUrl(jobId, pageOffset + pageNum)}
+                      src={pageImageUrl(jobId, pageOffset + pageNum, pdfName)}
                       onLoad={() => handleImgLoad(pageNum)}
                       style={{ display: 'block', boxShadow: '0 1px 4px rgba(0,0,0,0.1)' }}
                       alt={`Page ${pageNum}`}
@@ -250,7 +344,7 @@ export default function DocumentReview({
               </div>
             </div>
 
-            {/* ── Right: Extracted data ── */}
+            {/* ── Right: Extracted data / Raw Text ── */}
             <div style={{
               width: '45%',
               display: 'flex',
@@ -260,18 +354,26 @@ export default function DocumentReview({
               borderLeft: '1px solid var(--color-border)',
               background: 'var(--color-surface)',
             }}>
-              <ExtractedDataPanel
-                fields={fields}
-                sections={sections}
-                selectedField={selectedField}
-                onFieldClick={handleFieldClick}
-                onPageClick={() => {}}
-                currentPage={pageNum}
-                numPages={numPages}
-                jobId={jobId}
-                onFieldsUpdated={onFieldsUpdated}
-                hideToolbar
-              />
+              {rightPanelFormat === 'fields' ? (
+                <ExtractedDataPanel
+                  fields={fields}
+                  sections={sections}
+                  selectedField={selectedField}
+                  onFieldClick={handleFieldClick}
+                  onPageClick={() => {}}
+                  currentPage={pageNum}
+                  numPages={numPages}
+                  jobId={jobId}
+                  onFieldsUpdated={onFieldsUpdated}
+                  hideToolbar
+                />
+              ) : (
+                <EditableTextViewer
+                  pageNum={pageNum}
+                  rawText={rawText}
+                  onSave={handlePageTextChange}
+                />
+              )}
             </div>
           </div>
         );

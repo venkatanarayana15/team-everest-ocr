@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   uploadPDFWithDedup, uploadImages, uploadBatch,
   thumbnailUrl, retryJob, listPDFs, getValidation, processFolder,
-  subscribeToJob,
+  subscribeToJob, subscribeToBatch,
 } from '../api/client';
 import PipelineProcessingView from '../components/PipelineProcessingView';
 interface Props {
@@ -188,8 +188,27 @@ export default function UploadPage({ onDone, onBack }: Props) {
   const startRef = useRef<number>(0);
   const logEndRef = useRef<HTMLDivElement>(null);
   const fileDropRef = useRef<HTMLDivElement>(null);
-  const [perPdfProgress, setPdfProgresses] = useState<Record<string, { progress: number; stage: string }>>({});
+  const [perPdfProgress, setPdfProgresses] = useState<Record<string, { progress: number; stage: string; elapsed?: number }>>({});
   const [overallProgress, setOverallProgress] = useState<number | null>(null);
+  const [elapsedTime, setElapsedTime] = useState<number | null>(null);
+  const [batchJobIds, setBatchJobIds] = useState<string[]>([]);
+  const batchJobIdsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    if (phase !== 'processing' && phase !== 'uploading') {
+      if (phase === 'idle') setElapsedTime(null);
+      return;
+    }
+    const interval = setInterval(() => {
+      if (startRef.current > 0) {
+        setElapsedTime(Math.round((Date.now() - startRef.current) / 1000));
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [phase]);
+  useEffect(() => {
+    batchJobIdsRef.current = batchJobIds;
+  }, [batchJobIds]);
 
   const loadPdfs = useCallback(async () => {
     try {
@@ -276,9 +295,159 @@ export default function UploadPage({ onDone, onBack }: Props) {
 
   const startSSE = useCallback((id: string) => {
     stopSSE();
+    setLogs([]);
     startRef.current = Date.now();
     sseUnsubRef.current = subscribeToJob(id, (data) => handleSSEMessage(id, data));
   }, [stopSSE, handleSSEMessage]);
+
+  const handleBatchSSEMessage = useCallback((data: any) => {
+    if (data._batch_complete) {
+      addLog('✅ All batch items processed!');
+      setOverallProgress(100);
+      setProgress(100);
+      setCurrentStatus('done');
+      setStatusMsg('Batch extraction complete.');
+      stopSSE();
+      return;
+    }
+
+    const jobName = data.original_name || data.job_id;
+    
+    setPdfProgresses((prev) => {
+      const next = {
+        ...prev,
+        [jobName]: {
+          progress: data.progress?.overall ?? 0,
+          stage: data.status,
+          elapsed: data.progress?.elapsed,
+        }
+      };
+      
+      const values = Object.values(next);
+      if (values.length > 0) {
+        const sum = values.reduce((acc, curr) => acc + curr.progress, 0);
+        setOverallProgress(Math.round(sum / batchJobIdsRef.current.length));
+      }
+      return next;
+    });
+
+    if (data.message) {
+      setStatusMsg(`[${jobName}] ${data.message}`);
+    }
+
+    if (data.log && Array.isArray(data.log)) {
+      setLogs((prev) => {
+        const existing = new Set(prev.map((e) => `${e.t}|${e.msg}`));
+        const newEntries = data.log
+          .map((entry: any) => ({
+            t: entry.t,
+            msg: `[${jobName}] ${entry.msg}`,
+          }))
+          .filter((entry: any) => !existing.has(`${entry.t}|${entry.msg}`));
+        if (newEntries.length === 0) return prev;
+        return [...prev, ...newEntries];
+      });
+    }
+
+    if (data.status === 'error') {
+      addLog(`❌ [${jobName}] failed: ${data.message || 'Unknown error'}`);
+    }
+  }, [addLog, stopSSE]);
+
+  const startBatchSSE = useCallback((jobIds: string[]) => {
+    stopSSE();
+    setLogs([]);
+    startRef.current = Date.now();
+    sseUnsubRef.current = subscribeToBatch(jobIds, handleBatchSSEMessage);
+  }, [stopSSE, handleBatchSSEMessage]);
+
+  const handleResumeJob = useCallback(async (jobIdToResume: string) => {
+    const jobName = batchResults.find(r => r.job_id === jobIdToResume)?.filename || jobIdToResume;
+    addLog(`🔄 Resuming job ${jobName} (${jobIdToResume}) from checkpoint...`);
+    
+    setPdfProgresses(prev => ({
+      ...prev,
+      [jobName]: { progress: 0, stage: 'queued' }
+    }));
+    
+    try {
+      await retryJob(jobIdToResume);
+      addLog(`✅ Resume started for: ${jobName}`);
+      
+      const jobIds = batchResults.map(r => r.job_id).filter(Boolean) as string[];
+      if (jobIds.length > 0) {
+        startBatchSSE(jobIds);
+      } else {
+        startSSE(jobIdToResume);
+      }
+    } catch (e: any) {
+      addLog(`❌ Resume failed for ${jobName}: ${e.message}`);
+      setPdfProgresses(prev => ({
+        ...prev,
+        [jobName]: { progress: 0, stage: 'error' }
+      }));
+    }
+  }, [batchResults, retryJob, addLog, startBatchSSE, startSSE]);
+
+  const handleResumeBatch = useCallback(async () => {
+    addLog(`🔄 Resuming failed batch items...`);
+    const failedJobs = batchResults.filter(r => {
+      const pp = perPdfProgress[r.filename || r.name];
+      return pp?.stage === 'error' || r.status === 'error';
+    });
+    
+    if (failedJobs.length === 0) {
+      addLog(`ℹ️ No failed jobs to resume.`);
+      return;
+    }
+    
+    setPhase('processing');
+    setCurrentStatus('preprocessing');
+    setStatusMsg(`Resuming ${failedJobs.length} failed items...`);
+    
+    for (const j of failedJobs) {
+      const jobName = j.filename || j.name;
+      addLog(`🔄 Resuming ${jobName} (${j.job_id})...`);
+      setPdfProgresses(prev => ({
+        ...prev,
+        [jobName]: { progress: 0, stage: 'queued' }
+      }));
+      try {
+        await retryJob(j.job_id);
+      } catch (e: any) {
+        addLog(`❌ Failed to start resume for ${jobName}: ${e.message}`);
+        setPdfProgresses(prev => ({
+          ...prev,
+          [jobName]: { progress: 0, stage: 'error' }
+        }));
+      }
+    }
+    
+    const jobIds = batchResults.map(r => r.job_id).filter(Boolean) as string[];
+    startBatchSSE(jobIds);
+  }, [batchResults, perPdfProgress, retryJob, addLog, startBatchSSE]);
+
+  const handleStartOver = useCallback(() => {
+    setPhase('idle');
+    setLogs([]);
+    setStatusMsg('');
+    setJobId(null);
+    setNumPages(0);
+    setFiles([]);
+    setUploadQueue([]);
+    setProgress(0);
+    setCurrentStatus('');
+    setIsUploadingBatch(false);
+    setBatchResults([]);
+    setBatchJobIds([]);
+    setPdfProgresses({});
+    setOverallProgress(null);
+  }, []);
+
+  const handleViewResults = useCallback(() => {
+    onDone(batchJobIds.length > 0 ? batchJobIds : (jobId ? [jobId] : []));
+    loadPdfs();
+  }, [onDone, batchJobIds, jobId, loadPdfs]);
 
   const processQueue = useCallback(async () => {
     if (uploadQueue.length === 0) {
@@ -331,17 +500,16 @@ export default function UploadPage({ onDone, onBack }: Props) {
         addLog(`  ${icon} ${r.filename || r.name} → ${r.job_id}`);
         if (r.job_id) jobIds.push(r.job_id);
       }
+      setBatchJobIds(jobIds);
       if (jobIds.length > 0) {
-        setTimeout(() => {
-          onDone(jobIds);
-          loadPdfs();
-        }, 500);
+        setPhase('processing');
+        startBatchSSE(jobIds);
       }
     } catch (e: any) {
       setPhase('error');
       addLog(`❌ Batch upload failed: ${e.message}`);
     }
-  }, [addLog, onDone, loadPdfs]);
+  }, [addLog, startBatchSSE]);
 
   const startUpload = useCallback((fileList: File[]) => {
     const all = Array.from(fileList);
@@ -443,17 +611,26 @@ export default function UploadPage({ onDone, onBack }: Props) {
   };
 
   if (phase !== 'idle') {
+    const processingFiles = batchResults.length > 0
+      ? batchResults.map(r => ({ name: r.filename || r.name, jobId: r.job_id }))
+      : files.map(f => ({ name: f.name, jobId: jobId || undefined }));
+
     return (
       <PipelineProcessingView
-        jobId={jobId || ''}
-        files={files}
+        jobId={jobId || (batchJobIds.length > 0 ? `${batchJobIds.length} items` : '')}
+        files={processingFiles}
         status={currentStatus}
         statusMessage={statusMsg}
         progress={progress}
         overallProgress={overallProgress}
         perPdfProgress={perPdfProgress}
         logs={logs}
+        elapsed={elapsedTime}
         onBack={onBack || (() => {})}
+        onResumeJob={handleResumeJob}
+        onResumeBatch={handleResumeBatch}
+        onStartOver={handleStartOver}
+        onViewResults={handleViewResults}
       />
     );
   }
@@ -690,198 +867,7 @@ export default function UploadPage({ onDone, onBack }: Props) {
             </div>
           )}
 
-          {(isProcessing || phase === 'error' || batchResults.length > 0) && (
-            <div style={{ maxWidth: 780, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
-              {showPreview && (
-                <div style={{
-                  background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)', padding: '12px 16px',
-                  boxShadow: 'var(--shadow-md)',
-                  border: '1px solid var(--color-border)',
-                }}>
-                  <h3 style={{ fontSize: 13, color: 'var(--color-text-secondary)', margin: '0 0 8px 0', fontWeight: 600 }}>
-                    Pages ({numPages})
-                  </h3>
-                  <div style={{ display: 'flex', gap: 8, overflow: 'auto', paddingBottom: 4 }}>
-                    {Array.from({ length: numPages }, (_, i) => (
-                      <div key={i} style={{ flexShrink: 0, textAlign: 'center' }}>
-                        <img
-                          src={thumbnailUrl(jobId!, i + 1)}
-                          alt={`Page ${i + 1}`}
-                          style={{
-                            width: 120, borderRadius: 'var(--radius-md)',
-                            border: '1px solid var(--color-border)',
-                            boxShadow: 'var(--shadow-sm)',
-                          }}
-                        />
-                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>Page {i + 1}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
-              {batchResults.length > 0 && (
-                <div style={{
-                  background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)', padding: '12px 16px',
-                  boxShadow: 'var(--shadow-md)',
-                  border: '1px solid var(--color-border)',
-                }}>
-                  <h3 style={{ fontSize: 13, color: 'var(--color-text-secondary)', margin: '0 0 8px 0', fontWeight: 600 }}>
-                    Batch Submitted ({batchResults.length} items)
-                  </h3>
-                  <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {batchResults.map((r, i) => (
-                      <div key={i} style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '4px 8px', borderRadius: 'var(--radius-sm)',
-                        background: r.status === 'error' ? 'var(--color-danger-light)' : 'var(--color-bg)',
-                      }}>
-                        <span>{r.type === 'pdf' ? '📄' : r.type === 'image_set' ? '🖼️' : '📦'}</span>
-                        <span style={{ flex: 1, color: 'var(--color-text)', fontWeight: 500 }}>{r.filename || r.name}</span>
-                        <span style={{
-                          color: r.status === 'error' ? 'var(--color-danger)' : 'var(--color-success)',
-                          fontWeight: 600,
-                        }}>{r.status}</span>
-                        {r.job_id && (
-                          <span style={{ fontSize: 10, color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-                            {r.job_id}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {currentStatus === 'incomplete' && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '12px 16px', borderRadius: 'var(--radius-lg)',
-                  background: 'var(--color-warning-light)', border: '1px solid var(--color-warning-border)',
-                }}>
-                  <span style={{ fontSize: 18 }}>⚠️</span>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-warning-dark)' }}>
-                      Page Validation Failed
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--color-warning-dark)', marginTop: 2, opacity: 0.8 }}>
-                      {statusMsg || 'Document does not have the expected 6 pages.'}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {statusMsg && currentStatus !== 'incomplete' && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '10px 14px', borderRadius: 'var(--radius-lg)',
-                  background: phase === 'error' ? 'var(--color-danger-light)' : 'var(--color-info-light)',
-                  border: `1px solid ${phase === 'error' ? 'var(--color-danger-border)' : 'var(--color-info-border)'}`,
-                }}>
-                  <span style={{ fontSize: 16 }}>
-                    {phase === 'error' ? '❌' : STATUS_ICON[currentStatus]?.emoji || '⏳'}
-                  </span>
-                  <span style={{
-                    fontSize: 13, fontWeight: 500,
-                    color: phase === 'error' ? 'var(--color-danger)' : 'var(--color-info)',
-                  }}>
-                    {statusMsg}
-                  </span>
-                </div>
-              )}
-
-              {logs.length > 0 && (
-                <div style={{
-                  background: 'var(--color-terminal-bg)', borderRadius: 'var(--radius-xl)',
-                  border: '1px solid var(--color-terminal-header)', overflow: 'hidden',
-                  boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
-                }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '8px 14px', background: 'var(--color-terminal-header)',
-                    borderBottom: '1px solid var(--color-terminal-border)',
-                  }}>
-                    <div style={{ display: 'flex', gap: 5 }}>
-                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#ef4444' }} />
-                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#eab308' }} />
-                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#22c55e' }} />
-                    </div>
-                    <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)' }}>
-                      pipeline.log
-                    </span>
-                    {phase === 'uploading' && (
-                      <span style={{ fontSize: 10, color: '#eab308', fontFamily: 'var(--font-mono)', marginLeft: 'auto' }}>
-                        ● uploading
-                      </span>
-                    )}
-                  </div>
-                  <div style={{
-                    padding: '10px 14px', maxHeight: 240, overflow: 'auto',
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 12, lineHeight: 1.65,
-                  }}>
-                    {logs.map((entry, i) => (
-                      <div key={i} style={{
-                        color: i === logs.length - 1 ? '#e2e8f0' : '#64748b',
-                      }}>
-                        <span style={{ color: '#475569' }}>{entry.t}</span>
-                        {' '}{entry.msg}
-                      </div>
-                    ))}
-                    <div ref={logEndRef} />
-                  </div>
-                </div>
-              )}
-
-              {phase === 'error' && (
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-                  {jobId ? (
-                    <button onClick={async () => {
-                      setPhase('uploading');
-                      addLog(`🔄 Retrying job ${jobId} from checkpoint...`);
-                      try {
-                        const { job_id } = await retryJob(jobId);
-                        addLog(`✅ Retry started. Job ID: ${job_id}`);
-                        startSSE(job_id);
-                        setPhase('processing');
-                      } catch (e: any) {
-                        setPhase('error');
-                        addLog(`❌ Retry failed: ${e.message}`);
-                      }
-                    }}
-                      style={{
-                        padding: '10px 24px', fontSize: 14, fontWeight: 600,
-                        border: 'none', borderRadius: 'var(--radius-lg)', cursor: 'pointer',
-                        background: 'var(--color-success)', color: '#fff',
-                        transition: 'all var(--transition-fast)',
-                        boxShadow: '0 2px 8px rgba(22,163,74,0.3)',
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.filter = 'brightness(1.05)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.filter = 'none'; }}>
-                      Resume from Checkpoint
-                    </button>
-                  ) : null}
-                  <button onClick={() => {
-                    setPhase('idle'); setLogs([]); setStatusMsg('');
-                    setJobId(null); setNumPages(0); setFiles([]); setUploadQueue([]);
-                    setProgress(0); setCurrentStatus(''); setIsUploadingBatch(false);
-                    setBatchResults([]);
-                  }}
-                    style={{
-                      padding: '10px 24px', fontSize: 14, fontWeight: 600,
-                      border: 'none', borderRadius: 'var(--radius-lg)', cursor: 'pointer',
-                      background: 'var(--color-primary-gradient)', color: '#fff',
-                      boxShadow: 'var(--shadow-primary)',
-                      transition: 'all var(--transition-fast)',
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.boxShadow = 'var(--shadow-primary-lg)'; e.currentTarget.style.filter = 'brightness(1.05)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'var(--shadow-primary)'; e.currentTarget.style.filter = 'none'; }}>
-                    Start Over
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
 

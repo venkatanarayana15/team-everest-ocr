@@ -1,0 +1,8 @@
+.env
+docs
+.opencode
+.antigravity
+.venv
+__pycache__
+*.pyc
+idea.md

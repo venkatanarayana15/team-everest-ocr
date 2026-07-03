@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { getResult, saveToDB, getStatus } from '../api/client';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { getResult, saveToDB, getStatus, subscribeToBatch } from '../api/client';
 import type { Field, JobResult, StatusResponse } from '../types';
 import DocumentReview from '../components/DocumentReview';
+import TextViewer from '../components/TextViewer';
 import StatusHeader from '../components/StatusHeader';
 
 interface Props {
@@ -113,8 +114,24 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
   const [savingToDb, setSavingToDb] = useState(false);
   const [dbSaved, setDbSaved] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [textView, setTextView] = useState(false);
+  const [rightPanelFormat, setRightPanelFormat] = useState<'fields' | 'txt'>('fields');
+  const [priorityFilter, setPriorityFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
   const [jobStatuses, setJobStatuses] = useState<Record<string, BatchStatus>>({});
-  const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+
+  const filteredFields = useMemo(() => {
+    return fields.filter(f => {
+      if (priorityFilter === 'all') return true;
+      const isHigh = f.confidence < 0.7 || f.needs_clarification;
+      const isMedium = f.confidence >= 0.7 && f.confidence < 0.9 && !f.needs_clarification;
+      const isLow = f.confidence >= 0.9 && !f.needs_clarification;
+      
+      if (priorityFilter === 'high') return isHigh;
+      if (priorityFilter === 'medium') return isMedium;
+      if (priorityFilter === 'low') return isLow;
+      return true;
+    });
+  }, [fields, priorityFilter]);
 
   const fetchResult = useCallback(async (jid: string) => {
     setLoading(true);
@@ -223,13 +240,30 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
     enrichFilenames();
     fetchStatuses();
 
-    pollRef.current = setInterval(() => {
-      fetchStatuses();
-      enrichFromResult();
-    }, 3000);
+    const unsub = subscribeToBatch(jobIds, (data: any) => {
+      if (data._batch_complete) {
+        enrichFromResult();
+        return;
+      }
+      const jid = data.job_id;
+      if (!jid) return;
+      setJobStatuses(prev => ({
+        ...prev,
+        [jid]: {
+          filename: prev[jid]?.filename || '',
+          status: data.status,
+          message: data.message || data.progress?.message || '',
+          overall_confidence: null,
+          input_type: data.progress?.input_type,
+        },
+      }));
+      if (data.status === 'done') {
+        enrichFromResult();
+      }
+    });
 
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      if (unsub) unsub();
     };
   }, [jobIds, fetchStatuses, enrichFromResult, enrichFilenames]);
 
@@ -241,6 +275,20 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
   const handleFieldsUpdated = useCallback((updated: Field[]) => {
     setFields(updated);
   }, []);
+
+  const handleRawTextUpdated = useCallback(async (newRawText: string) => {
+    setResult(prev => prev ? { ...prev, raw_text: newRawText } : null);
+    try {
+      const res = await fetch(`/update-raw-text/${selectedJobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raw_text: newRawText }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      console.error('Failed to update raw text:', e);
+    }
+  }, [selectedJobId]);
 
   const handleSaveToDb = useCallback(async () => {
     if (savingToDb || dbSaved) return;
@@ -311,6 +359,7 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
             onBack={onBack}
             onToggleSidebar={() => setSidebarOpen(o => !o)}
             sidebarOpen={sidebarOpen}
+            tokenUsage={null}
           />
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <div style={{ textAlign: 'center' }}>
@@ -360,6 +409,7 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
           onBack={onBack}
           onToggleSidebar={() => setSidebarOpen(o => !o)}
           sidebarOpen={sidebarOpen}
+          tokenUsage={result?.token_usage?.total ?? null}
         />
 
         <div style={{
@@ -368,11 +418,125 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
           borderBottom: '1px solid var(--color-border)',
         }}>
           <span style={{ fontSize: 13, color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>{fields.length}</span> fields
+            <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>{filteredFields.length}</span> / <span style={{ color: 'var(--color-text-muted)' }}>{fields.length}</span> fields
             {totalCorrected > 0 && (
               <> · <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>{totalCorrected}</span> corrected</>
             )}
           </span>
+
+          {/* Priority filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--color-text-secondary)' }}>Priority:</span>
+            <div style={{ display: 'flex', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', overflow: 'hidden', background: 'var(--color-surface)' }}>
+              <button
+                onClick={() => setPriorityFilter('all')}
+                style={{
+                  padding: '5px 10px', fontSize: 11, fontWeight: 600, border: 'none',
+                  borderRight: '1px solid var(--color-border)', cursor: 'pointer',
+                  background: priorityFilter === 'all' ? 'var(--color-border-light)' : 'transparent',
+                  color: priorityFilter === 'all' ? 'var(--color-text)' : 'var(--color-text-secondary)',
+                  transition: 'all var(--transition-fast)',
+                }}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setPriorityFilter('high')}
+                style={{
+                  padding: '5px 10px', fontSize: 11, fontWeight: 600, border: 'none',
+                  borderRight: '1px solid var(--color-border)', cursor: 'pointer',
+                  background: priorityFilter === 'high' ? '#fef2f2' : 'transparent',
+                  color: priorityFilter === 'high' ? '#dc2626' : 'var(--color-text-secondary)',
+                  transition: 'all var(--transition-fast)',
+                }}
+                title="Low confidence fields (<70%) or needs clarification"
+              >
+                🔴 High
+              </button>
+              <button
+                onClick={() => setPriorityFilter('medium')}
+                style={{
+                  padding: '5px 10px', fontSize: 11, fontWeight: 600, border: 'none',
+                  borderRight: '1px solid var(--color-border)', cursor: 'pointer',
+                  background: priorityFilter === 'medium' ? '#fffbeb' : 'transparent',
+                  color: priorityFilter === 'medium' ? '#d97706' : 'var(--color-text-secondary)',
+                  transition: 'all var(--transition-fast)',
+                }}
+                title="Medium confidence fields (70% - 90%)"
+              >
+                🟡 Med
+              </button>
+              <button
+                onClick={() => setPriorityFilter('low')}
+                style={{
+                  padding: '5px 10px', fontSize: 11, fontWeight: 600, border: 'none',
+                  cursor: 'pointer',
+                  background: priorityFilter === 'low' ? '#f0fdf4' : 'transparent',
+                  color: priorityFilter === 'low' ? '#16a34a' : 'var(--color-text-secondary)',
+                  transition: 'all var(--transition-fast)',
+                }}
+                title="High confidence fields (>=90%)"
+              >
+                🟢 Low
+              </button>
+            </div>
+          </div>
+
+          <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px' }} />
+
+          <button
+            onClick={() => setTextView(v => !v)}
+            style={{
+              padding: '6px 12px', fontSize: 12, fontWeight: 600,
+              border: `1px solid ${textView ? 'var(--color-primary)' : 'var(--color-border-hover)'}`,
+              borderRadius: 'var(--radius-md)',
+              cursor: 'pointer',
+              background: textView ? 'var(--color-primary-light)' : 'var(--color-surface)',
+              color: textView ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+              transition: 'all var(--transition-fast)',
+            }}
+            title={textView ? 'Switch to side-by-side view' : 'Switch to full text view'}
+          >
+            {textView ? '🖼️ Side-by-Side' : '📝 Full Text'}
+          </button>
+
+          {!textView && (
+            <div style={{
+              display: 'flex',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-md)',
+              overflow: 'hidden',
+              background: 'var(--color-surface)',
+            }}>
+              <button
+                onClick={() => setRightPanelFormat('fields')}
+                style={{
+                  padding: '5px 12px', fontSize: 12, fontWeight: 600,
+                  border: 'none',
+                  borderRight: '1px solid var(--color-border)',
+                  cursor: 'pointer',
+                  background: rightPanelFormat === 'fields' ? 'var(--color-primary-light)' : 'transparent',
+                  color: rightPanelFormat === 'fields' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                  transition: 'all var(--transition-fast)',
+                }}
+              >
+                Fields View
+              </button>
+              <button
+                onClick={() => setRightPanelFormat('txt')}
+                style={{
+                  padding: '5px 12px', fontSize: 12, fontWeight: 600,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: rightPanelFormat === 'txt' ? 'var(--color-primary-light)' : 'transparent',
+                  color: rightPanelFormat === 'txt' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                  transition: 'all var(--transition-fast)',
+                }}
+              >
+                📝 Edit Page Text
+              </button>
+            </div>
+          )}
           <div style={{ flex: 1 }} />
           {selectedJobId && (
             <button
@@ -392,16 +556,34 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
         </div>
 
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-          <DocumentReview
-            jobId={selectedJobId}
-            numPages={result?.num_pages ?? 0}
-            fields={fields}
-            sections={sections}
-            selectedField={selectedField}
-            currentPage={currentPage}
-            onFieldClick={handleFieldClick}
-            onFieldsUpdated={handleFieldsUpdated}
-          />
+          {textView && result?.raw_text ? (
+            <TextViewer
+              rawText={result.raw_text}
+              fields={filteredFields}
+              sections={sections}
+              selectedField={selectedField}
+              currentPage={currentPage}
+              jobId={selectedJobId}
+              onFieldClick={handleFieldClick}
+              onFieldsUpdated={handleFieldsUpdated}
+              onPageChange={setCurrentPage}
+              numPages={result?.num_pages ?? 0}
+            />
+          ) : (
+            <DocumentReview
+              jobId={selectedJobId}
+              numPages={result?.num_pages ?? 0}
+              fields={filteredFields}
+              sections={sections}
+              selectedField={selectedField}
+              currentPage={currentPage}
+              onFieldClick={handleFieldClick}
+              onFieldsUpdated={handleFieldsUpdated}
+              rawText={result?.raw_text}
+              rightPanelFormat={rightPanelFormat}
+              onRawTextUpdated={handleRawTextUpdated}
+            />
+          )}
         </div>
       </div>
     </div>

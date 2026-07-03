@@ -34,6 +34,12 @@ export interface JobStatus {
   message?: string;
 }
 
+export interface TokenUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
 export interface JobResult {
   overall_confidence: number;
   num_pages: number;
@@ -43,6 +49,12 @@ export interface JobResult {
   raw_text: string;
   primary_model: string;
   secondary_model: string;
+  token_usage?: {
+    primary: TokenUsage;
+    secondary: TokenUsage;
+    total: TokenUsage;
+  };
+  pdf_times?: Record<string, number>;
 }
 
 export interface JobInfo {

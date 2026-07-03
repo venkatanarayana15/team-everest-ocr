@@ -1,171 +1,164 @@
-# Project State — OCR Extraction Pipeline
+# AGENTS.md
 
-## Architecture
-- Backend: FastAPI + uvicorn on port 8000
-- Frontend: React + TypeScript + Vite on port 5173
-- Python via `uv run python` (3.13.12 in `.venv`)
-- OCR: Tesseract 5.5.2 static binary in `bin/`
-- Database: PostgreSQL (asyncpg) with dedup + save-to-DB
+This repository contains a production-oriented OCR extraction pipeline for a fixed 6-page questionnaire, with FastAPI backend, React frontend, Tesseract OCR, LLM-based structured extraction and verification, validation, deduplication, and PostgreSQL persistence.
 
-## Run Commands
-- Backend: `uv run uvicorn src.server:app --port 8000`
-- Frontend: `cd frontend && npm run dev`
-- Tests: `uv run python tests/test_backend.py`
+## Working model
+- Act like a senior/staff engineer: optimize for reliability, debuggability, maintainability, safe failure modes, and clear rollback paths.
+- Prefer small, reviewable changes over broad refactors unless the task explicitly requires architectural work.
+- Preserve existing behavior unless the task explicitly asks to change product behavior.
+- When a requirement is ambiguous, choose the safer and more observable implementation.
 
-## Pipeline
-1. Preprocess (deskew, denoise, grayscale)
-2. Bbox detection (Tesseract)
-3. Primary extraction (LLM → JSON fields)
-4. Merge fields with bboxes
-5. Secondary verification (LLM corrects + adds missing)
-6. Save result.json + markdown/text/html
+## Stack
+- Backend: FastAPI + uvicorn
+- Frontend: React + TypeScript + Vite
+- Python runner: `uv run python`
+- OCR: local static Tesseract binary in `bin/`
+- Database: PostgreSQL via `asyncpg`
+- Tests: Python test script in `tests/test_backend.py`
 
-## LLM Providers
-- `.env`: `PRIMARY_PROVIDER=openai`, `PRIMARY_MODEL=gpt-4o-mini`
-- `.env`: `SECONDARY_PROVIDER=openai`, `SECONDARY_MODEL=gpt-4o-mini`
-- Gemini key also in `.env` (exhausted free tier)
+## Canonical commands
+- Start backend: `uv run uvicorn src.server:app --port 8000`
+- Start frontend: `cd frontend && npm run dev`
+- Run tests: `uv run python tests/test_backend.py`
 
-## Key Features Implemented
-- section_number (int | null) on every StructuredField
-- sections array (number, name, page) in result.json
-- Server-side _derive_sections() fallback from raw_text + field labels
-- Frontend FieldList groups by page → section, shows N/A for empty sections
-- Three-tier section fallback: API → raw_text headings → field label prefixes
-- Field order sorted by Y-position (bbox[1]) to mirror PDF page layout
-- Header fields: Volunteer Name, Co-Volunteer Name, Date of Visit (section=null)
-- Checkbox visual rendering (✓/✗/? with colored toggle)
-- Label (blue) + Value (green) bbox rendering on page image
-- Table rows: "{Section} — Row {n} — {Column}"
-- Conditional fields: value="N/A" when condition unmet
-- Y-position indicator on field cards
-- Green highlight border/bg for manually corrected fields
-- Original filename preserved in `original_name.txt` per job
-- PostgreSQL database with 4 tables (pdfs, extraction_results, extracted_fields, corrections_log)
-- PDF hash dedup (SHA256) on upload, returns duplicate info to client
-- GET /pdfs endpoint listing all uploaded documents with status
-- POST /save-to-db/{job_id} saves extraction results to PostgreSQL
-- Frontend UploadPage sidebar listing uploaded docs (clickable to review)
-- Batch upload support (multiple files, folder upload)
-- Dedup dialog when re-uploading existing PDF
+## Repository map
+- `src/server.py`: API endpoints, upload flows, checkpoint/resume, section derivation fallback, dedup, DB save, validation endpoints
+- `src/extraction_pipeline.py`: core pipeline models and orchestration, including `StructuredField`, `PipelineResult`, merge logic, verify logic
+- `src/prompt_templates.py`: LLM prompts and questionnaire template grounding
+- `src/database.py`: PostgreSQL schema and CRUD logic for `pdfs`, `extraction_results`, `extracted_fields`, `corrections_log`
+- `src/backends.py`: OCR backend integration, including static Tesseract path handling and `process_images()`
+- `src/input_handler.py`: input-type detection, ZIP extraction, folder scanning, mixed-batch routing
+- `src/page_classifier.py`: 6-page content-based page classification and ordering
+- `frontend/src/pages/UploadPage.tsx`: upload modes, sidebar, dedup dialog, batch UI
+- `frontend/src/pages/ReviewPage.tsx`: extraction review and DB save action
+- `frontend/src/components/FieldList.tsx`: page-to-section grouping, empty section rendering, Y-order display
+- `frontend/src/components/FieldCard.tsx`: field rendering, checkbox UI, edit state, corrected highlighting
+- `frontend/src/components/ImageViewer.tsx`: label/value bbox overlays on page image
+- `frontend/src/api/client.ts`: frontend API client bindings
+- `frontend/src/types.ts`: shared frontend types
+- `tests/test_backend.py`: unit tests covering bbox logic, input handling, and page classification
+- `bin/tesseract`, `bin/eng.traineddata`: pinned OCR runtime assets
+- `.env`: provider configuration and secrets; never hardcode or echo secret values
 
-## Multi-Input Support (Features 1-5)
+## Product constraints
+- Primary target document is the “I Am The Change — Home Visit Questionnaire”.
+- The classifier and validation logic assume exactly 6 logical pages.
+- Header fields are global metadata and should remain `section_number = null`.
+- Field order in review UI must continue to mirror page layout using `bbox[1]` Y-position sorting.
+- Section grouping has a three-tier fallback: API sections, raw-text heading derivation, then field-label prefixes.
+- Conditional fields may intentionally resolve to `N/A`; do not treat this as missing data.
+- Table row field labels use the format `{Section} — Row {n} — {Column}`; preserve this convention unless the task explicitly migrates it everywhere.
 
-### Feature 1 — Multiple Input Types
-- **Mode A (PDF)**: `POST /upload` — single PDF, splits into pages
-- **Mode B (Images)**: `POST /upload-images` — 6 images, auto-classified by content
-- **Mode C (ZIP)**: `POST /upload` with .zip — extracts images, classifies pages
+## Current pipeline
+1. Preprocess input pages: deskew, denoise, grayscale.
+2. Detect bounding boxes with Tesseract.
+3. Run primary LLM extraction into JSON fields.
+4. Merge extracted fields with bbox data.
+5. Run secondary LLM verification/correction and fill missing values.
+6. Persist artifacts such as `result.json` plus markdown/text/html outputs.
 
-### Feature 2 — Batch Processing
-- `POST /upload-batch` — mixed batch in single request
-- `POST /process-folder` — server-side folder scan and batch process
-- Each document gets independent job_id, continues on failure
+## Supported inputs
+### Mode A: PDF
+- `POST /upload` accepts a single PDF and splits it into pages.
 
-### Feature 3 — Mixed Batch
-- `src/input_handler.py`: `detect_input_type()`, `detect_item_type()`, `scan_folder()`
-- Auto-detects PDF vs image set vs ZIP in a batch
-- Routes to correct pipeline automatically
+### Mode B: Images
+- `POST /upload-images` accepts six images and classifies them by content.
 
-### Feature 4 — Automatic Page Classification
-- `src/page_classifier.py`: `PageClassifier` class
-- Content-based page numbering using OCR text + template matching
-- Uses: keyword signatures, section headers, field number patterns (1.x, 2.x, etc.)
-- No filename dependency — classifies purely by document layout
-- Returns confidence score per page
-- `resolve_order()` handles shuffled/reordered uploads
+### Mode C: ZIP
+- `POST /upload` also accepts ZIP files containing page images.
 
-### Feature 5 — Page Validation
-- Validates: exactly 6 pages, no duplicates, no missing, no blank/unreadable
-- `GET /validate/{job_id}` returns full validation report
-- Status "incomplete" + validation JSON when validation fails
-- Pipeline continues processing remaining documents in batch
-- Validation checks: duplicate pages, missing pages, blank pages, unreadable pages, low OCR confidence
+### Batch modes
+- `POST /upload-batch` accepts mixed items in one request.
+- `POST /process-folder` scans a server-side folder and processes items independently.
+- Batch processing should isolate failures per document; one bad item must not abort the full batch.
 
-## Form Template Fields (I Am The Change — Home Visit Questionnaire)
+## Validation rules
+- Validation expects exactly 6 pages.
+- Detect duplicates, missing pages, blank pages, unreadable pages, and low OCR confidence.
+- `GET /validate/{job_id}` should return a full validation report.
+- Invalid documents may be marked `incomplete`, but the system should still preserve enough diagnostics for debugging and UI review.
 
-### Header (Page 1, section=null)
-- Volunteer Name [text]
-- Co-Volunteer Name [text]
-- Date of Visit [text]
+## LLM provider rules
+- Provider and model selection come from `.env`.
+- Current defaults are OpenAI for both primary and secondary stages, typically `gpt-4o-mini`.
+- Gemini credentials may exist but free-tier capacity can be exhausted; never assume Gemini availability.
+- Any provider-specific change must preserve a clean fallback path and useful error messages.
+- LLM responses must be treated as untrusted input: validate shape, coerce carefully, and fail closed with diagnostics.
 
-### Section 1 — Student Profile (Page 1)
-- 1.1 Application ID [text]
-- 1.2 Student Full Name [text]
-- 1.3 Gender [radio]: Male, Female, Others
+## Database rules
+- PostgreSQL is the source of truth for persisted uploads and extraction results.
+- PDF dedup uses SHA256 on upload; preserve idempotent behavior for re-uploads.
+- Keep DB writes explicit and transactional where multi-table consistency matters.
+- Do not silently swallow DB failures; log enough context to debug without exposing secrets or raw credentials.
+- Schema changes must include migration planning, backward compatibility notes, and impact on `/pdfs` and `/save-to-db/{job_id}`.
 
-### Section 2 — Family Background (Pages 1-2)
-- Page 1:
-  - 2.1 Family Status [radio]: Single Parent, Parentless, Having both parents
-  - 2.2 Relationship Details — Year of Death / Separation [text]
-  - 2.2 Relationship Details — Reason for Death / Separation [text]
-- Page 2:
-  - 2.3 Is Father/Mother photograph kept at home? [radio]: Yes, No
-  - 2.4 Government ID Verified [radio]: Aadhaar Card, Ration Card, Driving Licence, Voter ID, Other
-  - 2.5 Family Members [table]: Name, Age, Education, Occupation, Annual Income
+## OCR runtime rules
+- Prefer the repository-pinned Tesseract binary in `bin/` over system-installed variants.
+- Any change to OCR invocation must consider binary path resolution, traineddata availability, platform differences, and subprocess error handling.
+- Timeouts, missing binaries, malformed images, and empty OCR output must all degrade gracefully.
 
-### Section 3 — Housing Condition (Pages 2-3)
-- Page 2:
-  - 3.1 House Ownership [radio]: Own, Rented
-  - 3.1.1 If rented, what is the rent amount? [text]
-  - 3.2 Type of Home [checkbox]: Individual, Private Apartment, Housing Board, Line House, Others
-- Page 3:
-  - 3.3 Type of Ceiling [checkbox]: Roof, Tiled, Asbestos, Concrete
-  - 3.4 Number of Bedrooms [text]
-  - 3.4.1 Type of Bedroom [radio]: Separate Bedroom, No Separate Bedroom
-  - 3.5 Bathroom [radio]: Separate, Common for Apartment
-  - 3.6 Kitchen Type [checkbox]: Separate Kitchen, Hall with Kitchen
+## API change rules
+- Keep request and response contracts stable unless explicitly asked to version or break them.
+- If an endpoint changes shape, update backend models, frontend client types, and consuming UI in the same change.
+- For long-running endpoints, preserve resumability and user-visible status reporting.
+- Return structured errors with actionable detail; avoid opaque 500s where validation or dependency failures can be surfaced safely.
 
-### Section 4 — Financial Background (Pages 3-5)
-- Page 3:
-  - 4.1 Assets at Home [checkbox]: Washing Machine, Fridge, AC, LED TV, Two-Wheeler, Car, Smartphone, Separate Wi-Fi, Others
-  - 4.2 Amount of Last Electricity Bill [text]
-  - 4.3 Do you own any other assets...? [radio]: Yes, No
-  - 4.3.1 If yes, list their properties [table]: Property Description, Owner Name, Approximate Value
-- Page 4:
-  - 4.4 Apart from your job...? [radio]: Yes, No
-  - 4.4.1 If yes, list other sources of income [table]: Source, Amount
-  - 4.5 Income Type [radio]: Monthly, Daily, Weekly, Ad-Hoc
-  - 4.6 Do you have any loans? [radio]: Yes, No
-  - 4.6.1 If yes, share Loan Purpose... [table]: Loan Purpose, Loan Amount Taken, Pending Loan Amount
-  - 4.7 If you choose any college, how much is the college fee? [text]
-- Page 5:
-  - 4.8 If the college fee is higher, how will you manage it? [text]
-  - 4.9 If you do not receive this scholarship, how will you pay the fees? [text]
+## Frontend change rules
+- Keep TypeScript types aligned with backend response models.
+- Handle partial data, missing sections, duplicate uploads, validation failures, and long-running jobs without crashing the UI.
+- Preserve current review affordances: checkbox rendering, corrected-field highlighting, page/section grouping, Y-position display, and bbox overlays.
+- Do not hide backend uncertainty; surface incomplete or fallback-derived data clearly.
 
-### Section 5 — Health Information (Page 5)
-- 5.1 Does the student have any health issues? [radio]: Yes, No
-- 5.2 If yes, list the health issues [text] — N/A when 5.1=No
+## Testing expectations
+- At minimum, run `uv run python tests/test_backend.py` after backend logic changes.
+- Add or update tests whenever changing bbox merge logic, section derivation, input detection, classification, validation, deduplication, or DB persistence behavior.
+- Prefer deterministic tests over network-dependent tests.
+- For bug fixes, add a regression test that fails before the fix and passes after it.
 
-### Section 6 — Student Commitment (Page 5)
-- 6.1 Will you study college for three years without any obstacle? [text]
-- 6.2 If we have a training program within 15 km...? [radio]: Yes, No, Maybe
-- 6.3 Are you ready to send your son/daughter...? [radio]: Yes, No
+## Reliability checklist
+Before finishing any meaningful change, verify the following where relevant:
+- Happy path still works for PDF, image-set, ZIP, and mixed batch inputs.
+- Failure in one batch item does not stop sibling jobs.
+- Duplicate upload behavior remains idempotent and user-visible.
+- Missing or malformed OCR/LLM output does not crash the pipeline.
+- Section fallback behavior still produces sensible groupings.
+- Save-to-DB path does not create partial or duplicated records unexpectedly.
+- Logs and error payloads are useful but do not leak secrets or sensitive raw config.
 
-### Section 7 — Scholarship Information (Page 6)
-- 7.1 Has the student received or applied for any other scholarships...? [text]
+## Observability and debugging
+- Prefer explicit logs around stage transitions: ingest, preprocess, OCR, extraction, verification, validation, artifact write, DB save.
+- Include stable identifiers such as `job_id`, page number, and provider name in logs where possible.
+- When catching exceptions, preserve root cause details in logs while returning sanitized API errors.
+- Avoid noisy logs for normal control flow; log for diagnosis, not narration.
 
-### Section 8 — Volunteer Observation (Page 6)
-- 8.1 What is your opinion about the student...? [text]
-- 8.2 Will you recommend this student for this scholarship? [radio]: Yes, No, Not Sure
-- 8.3 Any other comments you want to share? [text]
+## Security and safety
+- Never commit `.env`, API keys, database URLs, or derived secrets.
+- Do not print secret values in logs, test output, or debugging scripts.
+- Treat uploaded files, ZIP contents, OCR text, and LLM output as untrusted input.
+- Defend against path traversal, unsafe ZIP extraction, malformed PDFs/images, and oversized uploads.
 
-## Relevant Files
-- `src/prompt_templates.py`: Full prompt with template reference
-- `src/extraction_pipeline.py`: StructuredField (section_number), PipelineResult (sections), merge/verify logic
-- `src/server.py`: Checkpoint/resume, _derive_sections(), dedup upload, /save-to-db, /pdfs, image pipeline, batch endpoints
-- `src/database.py`: PostgreSQL asyncpg module, 4-table schema, all CRUD functions
-- `src/backends.py`: TesseractBackend with static binary path + `process_images()` method
-- `src/config.py`: OCR backend = "tesseract"
-- `src/input_handler.py`: Input type detection (PDF/image/ZIP/mixed), ZIP extraction, folder scanning
-- `src/page_classifier.py`: PageClassifier — content-based page classification for 6-page questionnaire
-- `frontend/src/types.ts`: Field, Section, JobResult types
-- `frontend/src/components/FieldList.tsx`: Page→section grouping, N/A display, Y-sort
-- `frontend/src/components/FieldCard.tsx`: Checkbox UI, edit, green highlight for corrected, bbox indicators
-- `frontend/src/components/ImageViewer.tsx`: Label/value bbox rendering
-- `frontend/src/pages/UploadPage.tsx`: Mode tabs (PDF/Images/ZIP/Mixed), sidebar, batch results, dedup dialog
-- `frontend/src/pages/ReviewPage.tsx`: "Save it in DB" button, SplitPane layout
-- `frontend/vite.config.ts`: Proxy routes for all endpoints
-- `frontend/src/api/client.ts`: uploadPDF, uploadImages, uploadBatch, processFolder, getValidation, listPDFs, saveToDB
-- `tests/test_backend.py`: 28 unit tests (bbox logic + input handler + page classifier)
-- `AGENTS.md`: Full project state documentation
-- `.env`: API keys and provider config
-- `bin/tesseract` and `bin/eng.traineddata`: Static tesseract 5.5.2 binary + language data
+## Change strategy
+- Prefer targeted fixes first.
+- Refactor only after behavior is covered by tests or when the current structure blocks a safe fix.
+- When touching multiple layers, update in this order unless the task dictates otherwise: contract, backend, tests, frontend, docs.
+- Keep docs synchronized with behavior; stale AGENTS.md or project-state docs create operational risk.
+
+## Good change examples
+- Add validation for malformed provider responses before model parsing.
+- Preserve existing response schema while adding optional fields.
+- Add regression tests for shuffled image ordering in `PageClassifier`.
+- Improve DB save idempotency with explicit conflict handling.
+- Surface `incomplete` validation details in the UI instead of generic failure messages.
+
+## Avoid
+- Quick fixes that bypass validation or silently coerce bad data.
+- Hardcoded absolute machine-specific paths when a repo-relative path is required.
+- Backend response changes without matching frontend type and UI updates.
+- Catch-all `except Exception` blocks that discard context.
+- Hidden retries, duplicate writes, or implicit fallback logic without logging.
+- Reordering fields in a way that breaks page-layout mirroring.
+
+## When adding new docs
+- Keep root `AGENTS.md` concise but operational.
+- Put deep implementation details in focused docs and link them here if the repository grows further.
+- If this project splits into subprojects, add nested `AGENTS.md` files near the relevant code so local rules override root guidance.

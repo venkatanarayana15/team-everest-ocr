@@ -207,7 +207,9 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
           padding: '10px 12px', borderBottom: '1px solid var(--color-border)',
           display: 'flex', alignItems: 'center', gap: 6,
         }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text)' }}>PDFs in batch</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text)' }}>
+            PDFs in batch {result?.processing_time != null ? `(⏱️ ${result.processing_time}s)` : ''}
+          </span>
           <span style={{
             fontSize: 10, color: 'var(--color-text-muted)',
             background: 'var(--color-bg)', padding: '1px 6px', borderRadius: 8,
@@ -237,7 +239,7 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
                 onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--color-bg)'; }}
                 onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
               >
-                <span>📄 {name}</span>
+                <span>📄 {name} {result?.pdf_times?.[name] != null ? `(${result.pdf_times[name]}s)` : ''}</span>
               </div>
             );
           })}
@@ -257,6 +259,7 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
             currentPage={currentPage}
             onFieldClick={handleFieldClick}
             onFieldsUpdated={handleFieldsUpdated}
+            pdfName={selectedPdf}
           />
         ) : (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}>

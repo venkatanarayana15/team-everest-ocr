@@ -1,3 +1,9 @@
+interface TokenDisplay {
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
 interface Props {
   jobId: string;
   overallConfidence: number | null;
@@ -9,6 +15,7 @@ interface Props {
   onBack: () => void;
   onToggleSidebar?: () => void;
   sidebarOpen?: boolean;
+  tokenUsage?: TokenDisplay | null;
 }
 
 function confidenceColor(conf: number): string {
@@ -27,6 +34,7 @@ export default function StatusHeader({
   onBack,
   onToggleSidebar,
   sidebarOpen,
+  tokenUsage,
 }: Props) {
   return (
     <div
@@ -118,6 +126,20 @@ export default function StatusHeader({
           <span style={{ color: 'var(--color-text-muted)' }}>s</span>
         </span>
       </div>
+
+      {tokenUsage && (
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 3,
+          padding: '2px 8px', background: 'var(--color-bg)', borderRadius: 'var(--radius-sm)',
+          fontSize: 12, color: 'var(--color-text-secondary)',
+          fontFamily: 'var(--font-mono)',
+        }}
+          title={`Prompt: ${tokenUsage.prompt_tokens} · Completion: ${tokenUsage.completion_tokens}`}
+        >
+          <span style={{ fontWeight: 600 }}>⚡</span>
+          {tokenUsage.total_tokens.toLocaleString()} tok
+        </span>
+      )}
 
       <div style={{ flex: 1 }} />
 
