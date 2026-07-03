@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 
 interface Props {
   jobId: string;
-  files: Array<{ name: string }>;
+  files: Array<{ name: string; jobId?: string }>;
   status: string;
   statusMessage: string;
   progress: number;
@@ -11,6 +11,10 @@ interface Props {
   logs: Array<{ t: string; msg: string }>;
   elapsed?: number | null;
   onBack: () => void;
+  onResumeJob?: (jobId: string) => void;
+  onResumeBatch?: () => void;
+  onStartOver?: () => void;
+  onViewResults?: () => void;
 }
 
 const STAGES = [
@@ -50,7 +54,8 @@ const STAGE_MAPPING: Record<string, string> = {
 
 export default function PipelineProcessingView({
   jobId, files, status, statusMessage, progress,
-  overallProgress, perPdfProgress, logs, elapsed, onBack
+  overallProgress, perPdfProgress, logs, elapsed, onBack,
+  onResumeJob, onResumeBatch, onStartOver, onViewResults
 }: Props) {
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -114,6 +119,7 @@ export default function PipelineProcessingView({
               const statusColor = statusVal === 'done' ? 'var(--color-success)'
                 : statusVal === 'error' ? 'var(--color-danger)'
                 : 'var(--color-warning)';
+              const isError = statusVal === 'error';
               return (
                 <div
                   key={p.name || i}
@@ -142,6 +148,22 @@ export default function PipelineProcessingView({
                     <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--color-text-secondary)', minWidth: 28, textAlign: 'right' }}>
                       {progressVal}%
                     </span>
+                    {isError && p.jobId && onResumeJob && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onResumeJob(p.jobId!);
+                        }}
+                        style={{
+                          padding: '2px 8px', fontSize: 10, fontWeight: 600,
+                          border: 'none', borderRadius: 4,
+                          background: 'var(--color-success)', color: '#fff',
+                          cursor: 'pointer', marginLeft: 4,
+                        }}
+                      >
+                        🔄 Resume
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -313,6 +335,59 @@ export default function PipelineProcessingView({
               <div ref={logEndRef} />
             </div>
           </div>
+          {/* Action Buttons */}
+          {(status === 'error' || status === 'done' || status === 'incomplete') && (
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 12 }}>
+              {status === 'done' && onViewResults && (
+                <button
+                  onClick={onViewResults}
+                  style={{
+                    padding: '10px 24px', fontSize: 14, fontWeight: 600,
+                    border: 'none', borderRadius: 'var(--radius-lg)', cursor: 'pointer',
+                    background: 'var(--color-success)', color: '#fff',
+                    transition: 'all var(--transition-fast)',
+                    boxShadow: '0 2px 8px rgba(22,163,74,0.3)',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.filter = 'brightness(1.05)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.filter = 'none'; }}
+                >
+                  🎉 View Results
+                </button>
+              )}
+              {(status === 'error' || status === 'incomplete') && onResumeBatch && jobId && (
+                <button
+                  onClick={onResumeBatch}
+                  style={{
+                    padding: '10px 24px', fontSize: 14, fontWeight: 600,
+                    border: 'none', borderRadius: 'var(--radius-lg)', cursor: 'pointer',
+                    background: 'var(--color-success)', color: '#fff',
+                    transition: 'all var(--transition-fast)',
+                    boxShadow: '0 2px 8px rgba(22,163,74,0.3)',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.filter = 'brightness(1.05)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.filter = 'none'; }}
+                >
+                  🔄 Resume Batch
+                </button>
+              )}
+              {onStartOver && (
+                <button
+                  onClick={onStartOver}
+                  style={{
+                    padding: '10px 24px', fontSize: 14, fontWeight: 600,
+                    border: 'none', borderRadius: 'var(--radius-lg)', cursor: 'pointer',
+                    background: 'var(--color-primary-gradient)', color: '#fff',
+                    boxShadow: 'var(--shadow-primary)',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.filter = 'brightness(1.05)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.filter = 'none'; }}
+                >
+                  ↩️ Start Over
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

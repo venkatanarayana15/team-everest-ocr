@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -58,7 +59,11 @@ app = FastAPI(title="OCR Extraction Pipeline")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173", "http://127.0.0.1:5173",
+        "http://localhost:5174", "http://127.0.0.1:5174",
+        "http://localhost:5175", "http://127.0.0.1:5175"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -75,36 +80,23 @@ logger.info("Output dir: %s", BASE_DIR)
 # and by refusing new jobs when free memory drops too low.
 MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "3"))
 MIN_FREE_MEM_MB = int(os.environ.get("MIN_FREE_MEM_MB", "512"))
-_job_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_JOBS)
-_JOB_SEMAPHORE_TIMEOUT = 3600  # 1 hour max wait for a slot
+_JOB_TIMEOUT = 3600  # 1 hour max wait for memory
+_executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS, thread_name_prefix="ocr")
 
 
-def _acquire_slot(job_dir: Path) -> bool:
-    """Acquire a concurrency slot (waits if memory is low). Returns False if timed out."""
-    # Memory throttle: wait while free memory is below threshold
-    mem_wait_start = time.time()
-    while time.time() - mem_wait_start < _JOB_SEMAPHORE_TIMEOUT:
+def _wait_for_memory(job_dir: Path) -> bool:
+    """Block until free memory is above threshold. Returns False on timeout."""
+    start = time.time()
+    while time.time() - start < _JOB_TIMEOUT:
         free = psutil.virtual_memory().available / (1024 * 1024)
         if free >= MIN_FREE_MEM_MB:
-            break
+            return True
         logger.warning("Low memory: %.0f MB free (need %d MB). Delaying job...", free, MIN_FREE_MEM_MB)
         time.sleep(5)
-    else:
-        _set_status(job_dir, "error",
-            f"Timed out waiting for memory (>{_JOB_SEMAPHORE_TIMEOUT}s, "
-            f"free={free:.0f} MB < {MIN_FREE_MEM_MB} MB). Try again later.")
-        return False
-
-    acquired = _job_semaphore.acquire(blocking=True, timeout=_JOB_SEMAPHORE_TIMEOUT)
-    if not acquired:
-        _set_status(job_dir, "error",
-            f"Timed out waiting for a processing slot (>{_JOB_SEMAPHORE_TIMEOUT}s). "
-            "Try again later.")
-    return acquired
-
-
-def _release_slot() -> None:
-    _job_semaphore.release()
+    _set_status(job_dir, "error",
+        f"Timed out waiting for memory (>{_JOB_TIMEOUT}s, "
+        f"free={free:.0f} MB < {MIN_FREE_MEM_MB} MB). Try again later.")
+    return False
 
 
 # ── Progress store (for SSE streaming) ────────────────────────────────
@@ -260,12 +252,20 @@ def _set_status(job_dir: Path, status: str, message: str = "", pages: int = 0) -
         }
 
 
+_last_good_status: dict[str, dict] = {}
+
 def _get_status(job_dir: Path) -> dict:
     path = job_dir / "status.json"
     if not path.exists():
         return {"status": "unknown", "message": "", "log": [], "pages": 0}
-    with open(path) as f:
-        data = json.load(f)
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return _last_good_status.get(job_dir.name, {
+            "status": "unknown", "message": "", "log": [], "pages": 0,
+        })
+    _last_good_status[job_dir.name] = data
     name_path = job_dir / "original_name.txt"
     if name_path.exists():
         data["original_name"] = name_path.read_text().strip()
@@ -347,7 +347,7 @@ def _emit_progress(job_dir: Path, status: str, pdf_name: str = "") -> None:
 
 
 def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
-    if not _acquire_slot(job_dir):
+    if not _wait_for_memory(job_dir):
         return
     try:
         import traceback
@@ -377,6 +377,7 @@ def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
         num_pages_pages: list[int] = []
         raw_text = ""
         sections_data: list[dict] | None = None
+        model_data: dict | None = None
         checkpoint = _load_checkpoint(job_dir)
 
         if checkpoint:
@@ -390,31 +391,39 @@ def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
             num_pages_pages = list(pages.keys())
             _set_status(job_dir, "preprocessing", f"Preprocessing done. {len(pages)} pages ready.", pages=len(pages))
 
-            # ── Step 2: Bbox (Tesseract, CPU) ──────────────────────
-            _set_status(job_dir, "primary_extraction", "Running Tesseract for bounding box detection...")
-            logger.info("[%s] Tesseract: detecting text regions...", job_dir.name)
-            word_boxes = pipeline.run_bbox(pdf_path)
-            _set_status(job_dir, "primary_extraction",
-                f"Tesseract detected {len(word_boxes)} words across {len(num_pages_pages)} pages.",
-                pages=len(num_pages_pages),
-            )
-            # Save tesseract word boxes for frontend mapping feature
-            _save_tesseract_data(job_dir, word_boxes)
-
-            # ── Step 3a: Primary extraction ──────────────────────────
-            _set_status(job_dir, "primary_extraction", f"Running primary extraction ({primary_name})...")
-            logger.info("[%s] Primary extraction with %s...", job_dir.name, primary_name)
             pages_dir = job_dir / "pages"
             page_images = {
                 int(p.stem.split("_")[1]): str(p)
                 for p in sorted(pages_dir.glob("page_*.png")) if "_original" not in p.stem
             } if pages_dir.exists() else {}
-            model_data = pipeline.run_primary_extraction(str(pdf_path), page_images)
+
+            # ── Step 2+3a: Parallel Tesseract + Primary LLM ─────────
+            _set_status(job_dir, "primary_extraction",
+                "Running Tesseract (CPU) and primary extraction (LLM) in parallel...")
+            bbox_cache = job_dir / "bbox_cache.pkl"
+            from concurrent.futures import ThreadPoolExecutor as _TempPool
+            with _TempPool(max_workers=2) as _pool:
+                _bbox_fut = _pool.submit(pipeline.run_bbox, pdf_path)
+                _primary_fut = _pool.submit(
+                    pipeline.run_primary_extraction, str(pdf_path), page_images
+                )
+                word_boxes = _bbox_fut.result()
+                model_data, primary_token_usage = _primary_fut.result()
+
+            # Cache bboxes so Step 4 doesn't re-run Tesseract
+            import pickle
+            with open(bbox_cache, "wb") as f:
+                pickle.dump(word_boxes, f)
+
+            _set_status(job_dir, "primary_extraction",
+                f"Tesseract detected {len(word_boxes)} words across {len(num_pages_pages)} pages.",
+                pages=len(num_pages_pages),
+            )
+            _save_tesseract_data(job_dir, word_boxes)
 
             if model_data:
                 overall_confidence = model_data.get("overall_confidence", 0)
                 raw_text = model_data.get("raw_text", "")
-                # Insert reliable page markers based on field page numbers
                 raw_text = _insert_page_markers(raw_text, model_data.get("fields", []))
                 num_model = len(model_data.get("fields", []))
                 _set_status(job_dir, "extracting",
@@ -470,24 +479,62 @@ def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
                     prev = json.load(f)
                 raw_text = prev.get("raw_text", "")
 
-        # ── Step 4: Secondary verification ──────────────────────────
-        _set_status(job_dir, "secondary_verification", f"Running secondary verification ({secondary_name})...")
-        logger.info("[%s] Secondary verification with %s...", job_dir.name, secondary_name)
-        fields = pipeline.verify_secondary(fields, pipeline.run_bbox(pdf_path), str(job_dir), prefix=secondary_name)
-        verified = sum(1 for f in fields if f.is_verified)
-        corrected = sum(1 for f in fields if f.original_value is not None)
-        new_from_secondary = sum(1 for f in fields if f.verified_by == secondary_name and f.extracted_by is None)
-        _set_status(job_dir, "secondary_verification",
-            f"{secondary_name} verified {verified} fields, corrected {corrected}, added {new_from_secondary} new.",
-        )
-
-        # ── Step 5: Fill missing template fields ─────────────────────
-        fields = ExtractionPipeline.fill_missing_template_fields(fields)
+        # ── Step 4a: Fill missing template fields (before secondary) ──
         _set_status(job_dir, "template_fill",
-            f"Template fill: {len(fields)} total fields after adding missing positions.",
+            "Filling missing template fields before verification...")
+        fields = ExtractionPipeline.fill_missing_template_fields(fields)
+
+        # ── Step 4b: Load cached bboxes for secondary ────────────────
+        bbox_cache = job_dir / "bbox_cache.pkl"
+        if bbox_cache.exists():
+            import pickle
+            with open(bbox_cache, "rb") as f:
+                word_boxes = pickle.load(f)
+        else:
+            word_boxes = pipeline.run_bbox(pdf_path)
+
+        # Determine whether secondary is needed
+        skip_secondary = (
+            overall_confidence >= 95
+            and model_data
+            and not model_data.get("clarification_needed")
         )
 
-        # Re-derive sections now that template fill added missing section_numbers
+        if skip_secondary:
+            logger.info("[%s] High confidence (≥95%%), skipping secondary verification.", job_dir.name)
+            _set_status(job_dir, "secondary_verification",
+                f"{primary_name} confidence {overall_confidence}% ≥ 95% — skipping verification.",
+            )
+            secondary_token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            for f in fields:
+                f.is_verified = True
+                f.verified_by = primary_name
+        else:
+            # ── Step 5: Secondary verification ──────────────────────────
+            _set_status(job_dir, "secondary_verification", f"Running secondary verification ({secondary_name})...")
+            logger.info("[%s] Secondary verification with %s...", job_dir.name, secondary_name)
+            fields, secondary_token_usage = pipeline.verify_secondary(fields, word_boxes, str(job_dir), prefix=secondary_name)
+            verified = sum(1 for f in fields if f.is_verified)
+            corrected = sum(1 for f in fields if f.original_value is not None)
+            new_from_secondary = sum(1 for f in fields if f.verified_by == secondary_name and f.extracted_by is None)
+            _set_status(job_dir, "secondary_verification",
+                f"{secondary_name} verified {verified} fields, corrected {corrected}, added {new_from_secondary} new.",
+            )
+
+        # Accumulate token usage
+        token_usage = {
+            "primary": primary_token_usage,
+            "secondary": secondary_token_usage,
+            "total": {
+                "prompt_tokens": (primary_token_usage.get("prompt_tokens", 0) or 0) + (secondary_token_usage.get("prompt_tokens", 0) or 0),
+                "completion_tokens": (primary_token_usage.get("completion_tokens", 0) or 0) + (secondary_token_usage.get("completion_tokens", 0) or 0),
+                "total_tokens": (primary_token_usage.get("total_tokens", 0) or 0) + (secondary_token_usage.get("total_tokens", 0) or 0),
+            },
+        }
+        logger.info("Token usage: primary=%s secondary=%s total=%s",
+                     primary_token_usage, secondary_token_usage, token_usage["total"])
+
+        # Re-derive sections (template_fill already ran)
         sections_data = _derive_sections(fields, raw_text or "")
 
         # ── Save results ───────────────────────────────────────────
@@ -504,6 +551,7 @@ def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
             "raw_text": raw_text or "",
             "primary_model": primary_name,
             "secondary_model": secondary_name,
+            "token_usage": token_usage,
             "sections": sections_data or [],
             "pdf_names": [pdf_name],
             "fields": [
@@ -603,7 +651,11 @@ def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
         if cp.exists():
             cp.unlink()
 
-        _set_status(job_dir, "done", "Extraction complete. Results ready for download.")
+        token_log_msg = f"Extraction complete. Token Consumption -> Primary ({primary_name}): Prompt={primary_token_usage.get('prompt_tokens', 0)}, Completion={primary_token_usage.get('completion_tokens', 0)}"
+        if secondary_token_usage:
+            token_log_msg += f" | Secondary ({secondary_name}): Prompt={secondary_token_usage.get('prompt_tokens', 0)}, Completion={secondary_token_usage.get('completion_tokens', 0)}"
+        token_log_msg += f" | Total={token_usage['total'].get('total_tokens', 0)}"
+        _set_status(job_dir, "done", token_log_msg)
 
     except Exception as e:
         tb = traceback.format_exc()
@@ -611,7 +663,211 @@ def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
         _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
     finally:
         _cleanup_intermediate(job_dir)
-        _release_slot()
+
+
+def _set_batch_pdf_status(job_dir: Path, pdf_name: str, status: str, pct: int, message: str = "") -> None:
+    path = job_dir / "status.json"
+    existing = {}
+    if path.exists():
+        try:
+            with open(path) as f:
+                existing = json.load(f)
+        except Exception:
+            pass
+
+    log = existing.get("log", [])
+    if message:
+        from datetime import datetime
+        log.append({"t": datetime.now().strftime("%H:%M:%S"), "msg": f"[{pdf_name}] {message}"})
+
+    data = {
+        "status": "processing",
+        "message": f"Processing {pdf_name}: {message}" if message else existing.get("message", ""),
+        "log": log,
+        "pages": existing.get("pages", 0),
+    }
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+    with _progress_lock:
+        existing_progress = _progress_store.get(job_dir.name, {})
+        start_time = existing_progress.get("start_time")
+        if not start_time:
+            start_time = time.time()
+        elapsed = round(time.time() - start_time, 1)
+
+        pdfs_map = existing_progress.get("pdfs", {})
+        pdfs_map[pdf_name] = {
+            "progress": pct,
+            "stage": status,
+            "elapsed": elapsed,
+        }
+
+        total_pct = sum(item["progress"] for item in pdfs_map.values())
+        overall_pct = round(total_pct / len(pdfs_map)) if pdfs_map else 0
+
+        _progress_store[job_dir.name] = {
+            "overall": overall_pct,
+            "pdfs": pdfs_map,
+            "start_time": start_time,
+            "elapsed": elapsed,
+        }
+
+
+def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
+    t0 = time.time()
+    try:
+        from src.model_client import get_model_client
+        config = Config(output_dir=str(job_dir / "output"))
+        primary = get_model_client("primary")
+        secondary = get_model_client("secondary")
+        primary_name = type(primary).__name__.replace("Client", "").lower()
+        secondary_name = type(secondary).__name__.replace("Client", "").lower()
+
+        from src.extraction_pipeline import ExtractionPipeline
+        pipeline = ExtractionPipeline(config, primary_client=primary, secondary_client=secondary)
+
+        all_fields = []
+        all_raw_text = []
+        total_pages = 0
+        confidences = []
+
+        total_primary_prompt = 0
+        total_primary_completion = 0
+        total_secondary_prompt = 0
+        total_secondary_completion = 0
+
+        # Initialize progress for all PDFs
+        for item in pdfs_info:
+            _set_batch_pdf_status(job_dir, item["filename"], "queued", 0, "Queued in batch")
+
+        pdf_times = {}
+
+        for idx, item in enumerate(pdfs_info):
+            filename = item["filename"]
+            pdf_path = Path(item["path"])
+            pdf_t0 = time.time()
+            
+            _set_batch_pdf_status(job_dir, filename, "preprocessing", 10, "Rendering pages...")
+            
+            sub_dir = job_dir / f"pdf_{idx}"
+            sub_dir.mkdir(exist_ok=True)
+            
+            # Step 1: Preprocess
+            pages = pipeline.preprocess(str(pdf_path), str(sub_dir))
+            page_images = {
+                int(p.stem.split("_")[1]): str(p)
+                for p in sorted((sub_dir / "pages").glob("page_*.png")) if "_original" not in p.stem
+            } if (sub_dir / "pages").exists() else {}
+            
+            _set_batch_pdf_status(job_dir, filename, "primary_extraction", 30, "Extracting fields with primary AI...")
+            
+            # Step 2: OCR + Primary
+            word_boxes = pipeline.run_bbox(str(pdf_path))
+            model_data, primary_token_usage = pipeline.run_primary_extraction(str(pdf_path), page_images)
+            
+            total_primary_prompt += primary_token_usage.get("prompt_tokens", 0) or 0
+            total_primary_completion += primary_token_usage.get("completion_tokens", 0) or 0
+
+            _set_batch_pdf_status(job_dir, filename, "field_mapping", 60, "Mapping fields to bounding boxes...")
+            
+            fields = []
+            if model_data:
+                raw_text = model_data.get("raw_text", "")
+                raw_text = _insert_page_markers(raw_text, model_data.get("fields", []))
+                fields = pipeline.merge_fields(model_data, word_boxes, prefix=primary_name)
+            else:
+                raw_text = ""
+                fields = [
+                    StructuredField(label=wb.text, value=wb.text, confidence=int(wb.confidence), page=wb.page_num, bbox=wb.bbox, extracted_by=primary_name)
+                    for wb in word_boxes
+                ]
+                
+            fields = ExtractionPipeline.fill_missing_template_fields(fields)
+            
+            # Step 5: Verification
+            overall_confidence = model_data.get("overall_confidence", 0) if model_data else 0
+            secondary_token_usage = {}
+            if overall_confidence < 95:
+                _set_batch_pdf_status(job_dir, filename, "secondary_verification", 80, "Running secondary verification...")
+                fields, secondary_token_usage = pipeline.verify_secondary(fields, word_boxes, str(sub_dir), prefix=secondary_name)
+                total_secondary_prompt += secondary_token_usage.get("prompt_tokens", 0) or 0
+                total_secondary_completion += secondary_token_usage.get("completion_tokens", 0) or 0
+                
+            # Tag fields with file names
+            for f in fields:
+                f.file = filename
+                
+            all_fields.extend(fields)
+            
+            if raw_text:
+                all_raw_text.append(f"--- Page {total_pages + 1} ---\n--- File: {filename} ---\n{raw_text}")
+                
+            total_pages += len(pages)
+            confidences.append(overall_confidence)
+            
+            pdf_times[filename] = round(time.time() - pdf_t0, 1)
+            _set_batch_pdf_status(job_dir, filename, "done", 100, "Done")
+
+        overall_conf = round(sum(confidences) / len(confidences)) if confidences else 0
+        elapsed = time.time() - t0
+        
+        result_dict = {
+            "overall_confidence": overall_conf,
+            "num_pages": total_pages,
+            "num_pdfs": len(pdfs_info),
+            "processing_time": round(elapsed, 2),
+            "pdf_times": pdf_times,
+            "raw_text": "\n\n".join(all_raw_text),
+            "primary_model": primary_name,
+            "secondary_model": secondary_name,
+            "sections": [],
+            "pdf_names": [item["filename"] for item in pdfs_info],
+            "fields": [
+                {
+                    "label": f.label,
+                    "value": f.value,
+                    "confidence": f.confidence,
+                    "page": f.page,
+                    "section_number": f.section_number,
+                    "bbox": list(f.bbox) if f.bbox else None,
+                    "value_bbox": list(f.value_bbox) if f.value_bbox else None,
+                    "needs_clarification": f.needs_clarification,
+                    "reason": f.reason,
+                    "is_verified": f.is_verified,
+                    "extracted_by": f.extracted_by,
+                    "verified_by": f.verified_by,
+                    "original_value": f.original_value,
+                    "file": getattr(f, "file", None) or filename,
+                }
+                for f in all_fields
+            ]
+        }
+        
+        results_dir = job_dir / "results"
+        results_dir.mkdir(exist_ok=True)
+        with open(results_dir / "result.json", "w") as f:
+            json.dump(result_dict, f, indent=2)
+            
+        # Write consolidated status as done
+        path = job_dir / "status.json"
+        existing = {}
+        if path.exists():
+            with open(path) as f:
+                existing = json.load(f)
+        existing["status"] = "done"
+        
+        token_log_msg = f"Batch complete. Total Tokens -> Primary ({primary_name}): Prompt={total_primary_prompt}, Completion={total_primary_completion}"
+        if total_secondary_prompt > 0 or total_secondary_completion > 0:
+            token_log_msg += f" | Secondary ({secondary_name}): Prompt={total_secondary_prompt}, Completion={total_secondary_completion}"
+        token_log_msg += f" | Grand Total={total_primary_prompt + total_primary_completion + total_secondary_prompt + total_secondary_completion}"
+        existing["message"] = token_log_msg
+        with open(path, "w") as f:
+            json.dump(existing, f, indent=2)
+
+    except Exception as e:
+        logger.exception("Batch pipeline failed")
+        _set_status(job_dir, "error", f"Pipeline failed: {str(e)}")
 
 
 def _run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None:
@@ -644,7 +900,7 @@ def _run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None:
         _save_tesseract_data(job_dir, word_boxes)
 
         _set_status(job_dir, "primary_extraction", f"Running primary extraction ({primary_name})...")
-        model_data = pipeline.run_primary_extraction("", processed_images)
+        model_data, primary_token_usage = pipeline.run_primary_extraction("", processed_images)
 
         fields: list[StructuredField] = []
         overall_confidence = 0.0
@@ -684,7 +940,19 @@ def _run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None:
         _save_checkpoint(job_dir, "mapped", fields, overall_confidence, raw_text, sections=model_sections)
 
         _set_status(job_dir, "secondary_verification", f"Running secondary verification ({secondary_name})...")
-        fields = pipeline.verify_secondary(fields, word_boxes, str(job_dir), prefix=secondary_name)
+        fields, secondary_token_usage = pipeline.verify_secondary(fields, word_boxes, str(job_dir), prefix=secondary_name)
+
+        token_usage = {
+            "primary": primary_token_usage,
+            "secondary": secondary_token_usage,
+            "total": {
+                "prompt_tokens": (primary_token_usage.get("prompt_tokens", 0) or 0) + (secondary_token_usage.get("prompt_tokens", 0) or 0),
+                "completion_tokens": (primary_token_usage.get("completion_tokens", 0) or 0) + (secondary_token_usage.get("completion_tokens", 0) or 0),
+                "total_tokens": (primary_token_usage.get("total_tokens", 0) or 0) + (secondary_token_usage.get("total_tokens", 0) or 0),
+            },
+        }
+        logger.info("Token usage: primary=%s secondary=%s total=%s",
+                     primary_token_usage, secondary_token_usage, token_usage["total"])
 
         fields = ExtractionPipeline.fill_missing_template_fields(fields)
         sections_data = _derive_sections(fields, raw_text or "")
@@ -702,6 +970,7 @@ def _run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None:
             "raw_text": raw_text or "",
             "primary_model": primary_name,
             "secondary_model": secondary_name,
+            "token_usage": token_usage,
             "sections": sections_data or [],
             "fields": [
                 {
@@ -812,19 +1081,81 @@ async def stream_status(job_id: str):
 
     async def event_gen():
         last_payload: str | None = None
-        while True:
-            status = _get_status(job_dir)
-            progress = get_job_progress(job_id)
-            payload = {**status, "progress": progress}
-            dumped = json.dumps(payload)
-            # Only send if something changed
-            if dumped != last_payload:
-                last_payload = dumped
-                yield f"data: {dumped}\n\n"
-            if status["status"] in ("done", "error", "incomplete"):
-                yield f"data: {json.dumps({**payload, '_final': True})}\n\n"
-                break
-            await asyncio.sleep(0.5)
+        try:
+            while True:
+                status = _get_status(job_dir)
+                progress = get_job_progress(job_id)
+                payload = {**status, "progress": progress}
+                dumped = json.dumps(payload)
+                # Only send if something changed
+                if dumped != last_payload:
+                    last_payload = dumped
+                    yield f"data: {dumped}\n\n"
+                if status["status"] in ("done", "error", "incomplete"):
+                    yield f"data: {json.dumps({**payload, '_final': True})}\n\n"
+                    break
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("SSE generator error for %s", job_id)
+            try:
+                err_payload = json.dumps({"status": "error", "message": "Stream interrupted", "_final": True})
+                yield f"data: {err_payload}\n\n"
+            except Exception:
+                pass
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+
+@app.get("/stream-batch")
+async def stream_batch(job_ids: str):
+    """SSE endpoint: streams status updates for multiple jobs simultaneously.
+    Accepts comma-separated job_ids. Pushes per-job events and a final _batch_complete event."""
+    ids = [jid.strip() for jid in job_ids.split(",") if jid.strip()]
+    if not ids:
+        raise HTTPException(400, "No job_ids provided")
+
+    job_dirs = {jid: BASE_DIR / jid for jid in ids}
+    for jid, jdir in job_dirs.items():
+        if not jdir.exists():
+            raise HTTPException(404, f"Job not found: {jid}")
+
+    async def event_gen():
+        last: dict[str, str] = {}  # jid -> json dump of last status payload
+        try:
+            while True:
+                all_terminal = True
+                updates: list[str] = []
+                for jid, jdir in job_dirs.items():
+                    status = _get_status(jdir)
+                    progress = get_job_progress(jid)
+                    payload = {"job_id": jid, **status, "progress": progress}
+                    dumped = json.dumps(payload)
+                    if dumped != last.get(jid):
+                        last[jid] = dumped
+                        if status["status"] in ("done", "error", "incomplete"):
+                            final = {**payload, "_final": True}
+                            updates.append(f"data: {json.dumps(final)}\n\n")
+                        else:
+                            updates.append(f"data: {dumped}\n\n")
+                    if status["status"] not in ("done", "error", "incomplete"):
+                        all_terminal = False
+                if updates:
+                    yield "".join(updates)
+                if all_terminal:
+                    yield f"data: {json.dumps({'_batch_complete': True, 'total': len(ids)})}\n\n"
+                    break
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("SSE batch generator error")
+            try:
+                err_payload = json.dumps({"_batch_complete": True, "total": len(ids), "error": "Stream interrupted"})
+                yield f"data: {err_payload}\n\n"
+            except Exception:
+                pass
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
 
@@ -899,10 +1230,7 @@ async def upload(file: UploadFile = File(...)):
                 logger.warning("Failed to insert PDF into DB: %s", e)
 
         _set_status(job_dir, "queued", "PDF uploaded, starting pipeline...")
-        thread = threading.Thread(
-            target=_run_pipeline, args=(job_dir, str(pdf_path)), daemon=True
-        )
-        thread.start()
+        _executor.submit(_run_pipeline, job_dir, str(pdf_path))
         return {"job_id": job_id, "status": "queued", "pdf_id": pdf_id, "input_type": "pdf"}
 
     if ext in IMAGE_EXTENSIONS:
@@ -955,12 +1283,7 @@ async def upload(file: UploadFile = File(...)):
         _set_status(job_dir, "queued",
             f"ZIP extracted: {len(image_paths)} images. Classifying pages...")
 
-        thread = threading.Thread(
-            target=_run_image_pipeline_from_zip,
-            args=(job_dir, image_paths),
-            daemon=True,
-        )
-        thread.start()
+        _executor.submit(_run_image_pipeline_from_zip, job_dir, image_paths)
         return {
             "job_id": job_id,
             "status": "queued",
@@ -1006,12 +1329,7 @@ async def upload_images(files: list[UploadFile] = File(...)):
     _set_status(job_dir, "queued",
         f"{len(image_files)} images uploaded. Classifying pages...")
 
-    thread = threading.Thread(
-        target=_run_image_pipeline_from_zip,
-        args=(job_dir, saved_paths),
-        daemon=True,
-    )
-    thread.start()
+    _executor.submit(_run_image_pipeline_from_zip, job_dir, saved_paths)
 
     return {
         "job_id": job_id,
@@ -1033,27 +1351,33 @@ async def upload_batch(files: list[UploadFile] = File(...)):
 
     results: list[dict] = []
 
-    for f in pdf_files:
-        content = await f.read()
-        file_hash = hashlib.sha256(content).hexdigest()
+    if pdf_files:
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        job_id = f"{str(uuid.uuid4())[:8]}_{ts}"
+        job_id = f"batch_{str(uuid.uuid4())[:8]}_{ts}"
         job_dir = BASE_DIR / job_id
         job_dir.mkdir(parents=True)
-        pdf_path = job_dir / "input.pdf"
-        with open(pdf_path, "wb") as fout:
-            fout.write(content)
-        with open(job_dir / "file_hash.txt", "w") as fout:
-            fout.write(file_hash)
+        
+        pdf_dir = job_dir / "pdfs"
+        pdf_dir.mkdir(exist_ok=True)
+        
+        pdfs_info = []
+        for f in pdf_files:
+            content = await f.read()
+            pdf_path = pdf_dir / f.filename
+            with open(pdf_path, "wb") as fout:
+                fout.write(content)
+            pdfs_info.append({"filename": f.filename, "path": str(pdf_path.resolve())})
+            
+        names = ", ".join(f.filename for f in pdf_files[:3])
+        if len(pdf_files) > 3:
+            names += f" (+{len(pdf_files)-3} more)"
+            
         with open(job_dir / "original_name.txt", "w") as fout:
-            fout.write(f.filename)
-
-        _set_status(job_dir, "queued", f"PDF batch: {f.filename}")
-        thread = threading.Thread(
-            target=_run_pipeline, args=(job_dir, str(pdf_path)), daemon=True
-        )
-        thread.start()
-        results.append({"job_id": job_id, "filename": f.filename, "type": "pdf", "status": "queued"})
+            fout.write(f"Batch: {names}")
+            
+        _set_status(job_dir, "queued", f"Processing PDF Batch: {names}")
+        _executor.submit(_run_batch_pdfs_pipeline, job_dir, pdfs_info)
+        results.append({"job_id": job_id, "filename": f"Batch: {names}", "type": "pdf", "status": "queued"})
 
     if image_files:
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
@@ -1076,12 +1400,7 @@ async def upload_batch(files: list[UploadFile] = File(...)):
             fout.write(names)
         _set_status(job_dir, "queued",
             f"{len(image_files)} images batch. Classifying pages...")
-        thread = threading.Thread(
-            target=_run_image_pipeline_from_zip,
-            args=(job_dir, saved_paths),
-            daemon=True,
-        )
-        thread.start()
+        _executor.submit(_run_image_pipeline_from_zip, job_dir, saved_paths)
         results.append({"job_id": job_id, "filename": f"images_{len(image_files)}", "type": "image_set", "status": "queued"})
 
     for f in zip_files:
@@ -1100,12 +1419,7 @@ async def upload_batch(files: list[UploadFile] = File(...)):
         image_paths = extract_zip(str(zip_path), str(extract_dir))
         _set_status(job_dir, "queued",
             f"ZIP batch: {f.filename} ({len(image_paths)} images)")
-        thread = threading.Thread(
-            target=_run_image_pipeline_from_zip,
-            args=(job_dir, image_paths),
-            daemon=True,
-        )
-        thread.start()
+        _executor.submit(_run_image_pipeline_from_zip, job_dir, image_paths)
         results.append({"job_id": job_id, "filename": f.filename, "type": "zip", "status": "queued"})
 
     return {
@@ -1128,7 +1442,7 @@ def _validate_images(image_paths: list[str]) -> tuple[bool, str]:
 
 def _run_image_pipeline_from_zip(job_dir: Path, image_paths: list[str]) -> None:
     """Classify images, reorder, then run image pipeline."""
-    if not _acquire_slot(job_dir):
+    if not _wait_for_memory(job_dir):
         return
     try:
         import traceback
@@ -1184,7 +1498,6 @@ def _run_image_pipeline_from_zip(job_dir: Path, image_paths: list[str]) -> None:
         _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
     finally:
         _cleanup_intermediate(job_dir)
-        _release_slot()
 
 
 @app.get("/validate/{job_id}")
@@ -1233,10 +1546,7 @@ async def process_folder(data: dict):
                 with open(job_dir / "original_name.txt", "w") as f:
                     f.write(item["name"])
                 _set_status(job_dir, "queued", f"Folder batch: {item['name']}")
-                thread = threading.Thread(
-                    target=_run_pipeline, args=(job_dir, str(pdf_path)), daemon=True
-                )
-                thread.start()
+                _executor.submit(_run_pipeline, job_dir, str(pdf_path))
                 results.append({"job_id": job_id, "name": item["name"], "type": "pdf", "status": "queued"})
 
             elif item["type"] == "image_set":
@@ -1254,12 +1564,7 @@ async def process_folder(data: dict):
                     continue
                 _set_status(job_dir, "queued",
                     f"Image set: {item['name']} ({len(item['images'])} images)")
-                thread = threading.Thread(
-                    target=_run_image_pipeline_from_zip,
-                    args=(job_dir, item["images"]),
-                    daemon=True,
-                )
-                thread.start()
+                _executor.submit(_run_image_pipeline_from_zip, job_dir, item["images"])
                 results.append({"job_id": job_id, "name": item["name"], "type": "image_set", "status": "queued"})
 
         except Exception as e:
@@ -1289,10 +1594,7 @@ async def retry_job(job_id: str):
         valid, err = _validate_pdf(str(pdf_path))
         if not valid:
             raise HTTPException(400, f"Cannot retry: {err}")
-        thread = threading.Thread(
-            target=_run_pipeline, args=(job_dir, str(pdf_path)), daemon=True
-        )
-        thread.start()
+        _executor.submit(_run_pipeline, job_dir, str(pdf_path))
         return {"job_id": job_id, "status": "restarted", "input_type": "pdf"}
 
     if img_dir.exists():
@@ -1301,12 +1603,7 @@ async def retry_job(job_id: str):
             if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
         ])
         if image_paths:
-            thread = threading.Thread(
-                target=_run_image_pipeline_from_zip,
-                args=(job_dir, image_paths),
-                daemon=True,
-            )
-            thread.start()
+            _executor.submit(_run_image_pipeline_from_zip, job_dir, image_paths)
             return {"job_id": job_id, "status": "restarted", "input_type": "image_set"}
 
     raise HTTPException(400, "No input files found for this job")
@@ -1354,12 +1651,35 @@ async def get_tesseract_data(job_id: str):
 
 
 @app.get("/pages/{job_id}/{page_num}")
-async def get_page_image(job_id: str, page_num: int, width: int = 0, original: int = 0):
+async def get_page_image(job_id: str, page_num: int, width: int = 0, original: int = 0, pdf_name: str = None):
     job_dir = BASE_DIR / job_id
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
 
     pages_dir = job_dir / "pages"
+    if pdf_name:
+        result_path = job_dir / "results" / "result.json"
+        idx = -1
+        if result_path.exists():
+            try:
+                with open(result_path) as f:
+                    r = json.load(f)
+                pdf_names = r.get("pdf_names", [])
+                if pdf_name in pdf_names:
+                    idx = pdf_names.index(pdf_name)
+            except Exception:
+                pass
+        
+        if idx == -1:
+            for sub in job_dir.iterdir():
+                if sub.is_dir() and sub.name.startswith("pdf_"):
+                    orig_path = sub / "original_name.txt"
+                    if orig_path.exists() and orig_path.read_text().strip() == pdf_name:
+                        pages_dir = sub / "pages"
+                        break
+        else:
+            pages_dir = job_dir / f"pdf_{idx}" / "pages"
+
     if not pages_dir.exists():
         raise HTTPException(404, "Pages directory not found")
 
@@ -1430,6 +1750,39 @@ async def correct_field(job_id: str, body: dict):
                 break
         with open(result_path, "w") as f:
             json.dump(result_data, f, indent=2)
+
+    return {"status": "saved"}
+
+
+@app.post("/update-raw-text/{job_id}")
+async def update_raw_text(job_id: str, body: dict):
+    """Update the raw transcription text for a job."""
+    job_dir = BASE_DIR / job_id
+    if not job_dir.exists():
+        raise HTTPException(404, "Job not found")
+
+    new_raw_text = body.get("raw_text", "")
+    
+    # Update result.json
+    result_path = job_dir / "results" / "result.json"
+    if result_path.exists():
+        try:
+            with open(result_path) as f:
+                result_data = json.load(f)
+            result_data["raw_text"] = new_raw_text
+            with open(result_path, "w") as f:
+                json.dump(result_data, f, indent=2)
+        except Exception as e:
+            logger.error("Failed to update raw_text in result.json: %s", e)
+
+    # Update result.md
+    md_path = job_dir / "results" / "result.md"
+    try:
+        md_path.parent.mkdir(exist_ok=True)
+        with open(md_path, "w") as f:
+            f.write(new_raw_text)
+    except Exception as e:
+        logger.error("Failed to update result.md: %s", e)
 
     return {"status": "saved"}
 
@@ -1515,6 +1868,7 @@ async def list_jobs():
             num_pdfs = None
             pdf_names = []
             overall_confidence = None
+            processing_time = None
             if result_path.exists():
                 with open(result_path) as f:
                     r = json.load(f)
@@ -1522,6 +1876,7 @@ async def list_jobs():
                 num_pages = r.get("num_pages")
                 num_pdfs = r.get("num_pdfs", 1)
                 pdf_names = r.get("pdf_names", [])
+                processing_time = r.get("processing_time")
             jobs.append({
                 "job_id": d.name,
                 "status": status.get("status"),
@@ -1530,6 +1885,7 @@ async def list_jobs():
                 "num_pages": num_pages,
                 "num_pdfs": num_pdfs,
                 "pdf_names": pdf_names,
+                "processing_time": processing_time,
                 "created_at": _extract_epoch_from_job_id(d.name),
             })
     jobs.sort(key=lambda j: (j["created_at"], j["job_id"]), reverse=True)

@@ -110,6 +110,8 @@ class PipelineResult:
     fields: list[StructuredField] | None = None
     num_pages: int = 1
     processing_time: float = 0.0
+    per_stage_timing: dict[str, float] | None = None
+    token_usage: dict | None = None
     raw_model_json: dict | None = None
     raw_text: str = ""
     sections: list[dict] | None = None
@@ -135,7 +137,11 @@ class ExtractionPipeline:
         self.secondary_client = secondary_client or get_model_client("secondary")
 
     @staticmethod
-    def _confidence_tier_to_int(tier: str) -> int:
+    def _parse_confidence(field_dict: dict) -> int:
+        raw = field_dict.get("confidence")
+        if isinstance(raw, (int, float)) and 0 <= raw <= 100:
+            return int(raw)
+        tier = field_dict.get("confidence_tier", "medium")
         if tier == "high":
             return 85
         elif tier == "medium":
@@ -185,6 +191,14 @@ class ExtractionPipeline:
             gray = denoise(gray, self.config.denoise_strength)
             rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
 
+            # Downscale wide images for faster LLM inference
+            max_w = self.config.max_image_width
+            if max_w and rgb.shape[1] > max_w:
+                scale = max_w / rgb.shape[1]
+                new_w = max_w
+                new_h = int(rgb.shape[0] * scale)
+                rgb = cv2.resize(rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
             Image.fromarray(rgb).save(str(out_path))
             pages[page_num] = rgb
 
@@ -225,6 +239,14 @@ class ExtractionPipeline:
             gray = denoise(gray, self.config.denoise_strength)
             rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
 
+            # Downscale wide images for faster LLM inference
+            max_w = self.config.max_image_width
+            if max_w and rgb.shape[1] > max_w:
+                scale = max_w / rgb.shape[1]
+                new_w = max_w
+                new_h = int(rgb.shape[0] * scale)
+                rgb = cv2.resize(rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
             Image.fromarray(rgb).save(str(out_path))
             pages[page_num] = rgb
 
@@ -246,10 +268,11 @@ class ExtractionPipeline:
 
     # ── Stage 3a: Primary model extraction ───────────────────────
 
-    def run_primary_extraction(self, pdf_path: str, page_images: dict[int, str]) -> dict | None:
+    def run_primary_extraction(self, pdf_path: str, page_images: dict[int, str]) -> tuple[dict | None, dict]:
         from src.prompt_templates import PRIMARY_EXTRACTION_PROMPT
 
-        return self.primary_client.extract_structured(pdf_path, page_images, PRIMARY_EXTRACTION_PROMPT)
+        data, token_usage = self.primary_client.extract_structured(pdf_path, page_images, PRIMARY_EXTRACTION_PROMPT)
+        return data, token_usage
 
     # ── Stage 3b: Merge (enhanced with position_hint + confidence weighting) ──
 
@@ -301,8 +324,7 @@ class ExtractionPipeline:
         for gf in raw_fields:
             label = gf.get("label", "")
             value = gf.get("value", "")
-            confidence_tier = gf.get("confidence_tier", "medium")
-            confidence = self._confidence_tier_to_int(confidence_tier)
+            confidence = self._parse_confidence(gf)
             page = gf.get("page", 1)
             section_number = gf.get("section")
             if section_number is None:
@@ -517,7 +539,7 @@ class ExtractionPipeline:
         word_boxes: list[WordBox],
         output_dir: str,
         prefix: str = "",
-    ) -> list[StructuredField]:
+    ) -> tuple[list[StructuredField], dict]:
         from src.prompt_templates import SECONDARY_VERIFICATION_PROMPT
 
         pages_dir = Path(output_dir) / "pages"
@@ -539,7 +561,7 @@ class ExtractionPipeline:
             {
                 "label": f.label,
                 "value": f.value,
-                "confidence_tier": "high" if f.confidence >= 80 else ("medium" if f.confidence >= 50 else "low"),
+                "confidence": f.confidence,
                 "page": f.page,
                 "reason": f.reason,
                 "position_hint": None,
@@ -551,14 +573,14 @@ class ExtractionPipeline:
             "{fields_json}", json.dumps(fields_json, indent=2)
         )
 
-        raw_result = self.secondary_client.extract_structured("", page_images, prompt)
+        raw_result, secondary_token_usage = self.secondary_client.extract_structured("", page_images, prompt)
 
         if raw_result is None:
             logger.warning("Secondary verification failed — keeping primary results")
             for f in fields:
                 f.is_verified = True
                 f.verified_by = prefix or None
-            return fields
+            return fields, secondary_token_usage
 
         # Process verifications
         verif_map: dict[str, dict] = {}
@@ -593,8 +615,7 @@ class ExtractionPipeline:
             for nf in new_fields_data:
                 label = nf.get("label", "")
                 value = nf.get("value", "")
-                tier = nf.get("confidence_tier", "medium")
-                confidence = self._confidence_tier_to_int(tier)
+                confidence = self._parse_confidence(nf)
                 page = nf.get("page", 1)
                 section_number = nf.get("section")
                 if section_number is None:
@@ -623,7 +644,7 @@ class ExtractionPipeline:
 
             logger.info("Secondary model added %d new fields", len(new_fields_data))
 
-        return fields
+        return fields, secondary_token_usage
 
     @staticmethod
     def fill_missing_template_fields(fields: list[StructuredField]) -> list[StructuredField]:
@@ -653,9 +674,21 @@ class ExtractionPipeline:
 
         logger.info("=== Dual pipeline: %s → Tesseract → %s ===", primary_name, secondary_name)
 
-        self.preprocess(pdf_path, job_dir)
+        per_stage = {}
+        token_usage: dict = {
+            "primary": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "secondary": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
 
+        # ── Stage 1: Preprocess ─────────────────────────────────────
+        t1 = time.time()
+        self.preprocess(pdf_path, job_dir)
+        per_stage["preprocessing"] = time.time() - t1
+
+        # ── Stage 2: Bbox detection ─────────────────────────────────
+        t1 = time.time()
         word_boxes = self.run_bbox(pdf_path)
+        per_stage["bbox"] = time.time() - t1
         num_pages = max({wb.page_num for wb in word_boxes}, default=1)
 
         pages_dir = Path(job_dir) / "pages"
@@ -666,8 +699,11 @@ class ExtractionPipeline:
         }
 
         # ── Stage 3a: Primary extraction ──────────────────────────
-        logger.info("[%s] Primary extraction with %s...", primary_name)
-        model_data = self.run_primary_extraction(pdf_path, page_images)
+        logger.info("[%s] Primary extraction with %s...", primary_name, primary_name)
+        t1 = time.time()
+        model_data, primary_token_usage = self.run_primary_extraction(pdf_path, page_images)
+        per_stage["primary_extraction"] = time.time() - t1
+        token_usage["primary"] = primary_token_usage
 
         llm_fields: list[StructuredField] = []
         overall_confidence = 0
@@ -678,11 +714,14 @@ class ExtractionPipeline:
             raw_text = model_data.get("raw_text", "")
 
             # ── Stage 3b: Merge (LLM → StructuredField) ──────────
+            t1 = time.time()
             llm_fields = self.merge_fields(model_data, word_boxes, prefix=primary_name)
+            per_stage["merge"] = time.time() - t1
             logger.info("Primary: %d fields from LLM", len(llm_fields))
         else:
             logger.warning("Primary extraction failed")
             overall_confidence = 0
+            t1 = time.time()
             llm_fields = [
                 StructuredField(
                     label=wb.text,
@@ -694,21 +733,42 @@ class ExtractionPipeline:
                 )
                 for wb in word_boxes
             ]
+            per_stage["merge"] = time.time() - t1
 
         # ── Stage 4: Secondary verification ──────────────────────
-        logger.info("[%s] Secondary verification with %s...", secondary_name)
-        llm_fields = self.verify_secondary(llm_fields, word_boxes, job_dir, prefix=secondary_name)
+        logger.info("[%s] Secondary verification with %s...", secondary_name, secondary_name)
+        t1 = time.time()
+        llm_fields, secondary_usage = self.verify_secondary(llm_fields, word_boxes, job_dir, prefix=secondary_name)
+        per_stage["secondary_verification"] = time.time() - t1
+        token_usage["secondary"] = secondary_usage
         logger.info("After secondary: %d fields total", len(llm_fields))
 
+        # Compute aggregate token usage
+        total_prompt = (primary_token_usage.get("prompt_tokens", 0) or 0) + (secondary_usage.get("prompt_tokens", 0) or 0)
+        total_completion = (primary_token_usage.get("completion_tokens", 0) or 0) + (secondary_usage.get("completion_tokens", 0) or 0)
+        total_total = (primary_token_usage.get("total_tokens", 0) or 0) + (secondary_usage.get("total_tokens", 0) or 0)
+        token_usage["total"] = {
+            "prompt_tokens": total_prompt,
+            "completion_tokens": total_completion,
+            "total_tokens": total_total,
+        }
+        logger.info("Token usage: primary=%s secondary=%s total=%s",
+                     primary_token_usage, secondary_usage, token_usage["total"])
+
         # ── Stage 5: Fill missing template fields ────────────────
+        t1 = time.time()
         llm_fields = self.fill_missing_template_fields(llm_fields)
+        per_stage["template_fill"] = time.time() - t1
 
         elapsed = time.time() - t0
+        per_stage["total"] = elapsed
         return PipelineResult(
             overall_confidence=overall_confidence,
             fields=llm_fields,
             num_pages=num_pages,
             processing_time=elapsed,
+            per_stage_timing=per_stage,
+            token_usage=token_usage,
             raw_model_json=model_data,
             raw_text=raw_text,
             sections=(model_data or {}).get("sections"),

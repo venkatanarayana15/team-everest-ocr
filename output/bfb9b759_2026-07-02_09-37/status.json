@@ -1,0 +1,35 @@
+{
+  "status": "done",
+  "message": "Extraction complete. Results ready for download.",
+  "log": [
+    {
+      "t": "09:37:44",
+      "msg": "PDF batch: DOC-20260620-WA0044..pdf"
+    },
+    {
+      "t": "09:37:46",
+      "msg": "Rendering and enhancing pages..."
+    },
+    {
+      "t": "09:38:07",
+      "msg": "Preprocessing done. 6 pages ready."
+    },
+    {
+      "t": "09:38:07",
+      "msg": "Running Tesseract (CPU) and primary extraction (LLM) in parallel..."
+    },
+    {
+      "t": "09:40:34",
+      "msg": "Gemini verified 113 fields, corrected 1, added 20 new."
+    },
+    {
+      "t": "09:40:34",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "09:40:34",
+      "msg": "Extraction complete. Results ready for download."
+    }
+  ],
+  "pages": 6
+}
