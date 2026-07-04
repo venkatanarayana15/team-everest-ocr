@@ -2,9 +2,13 @@ import hashlib
 import json
 import logging
 import os
+import queue
 import sys
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +22,7 @@ import asyncio
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel
 
 from src.config import Config
 from src.extraction_pipeline import ExtractionPipeline, StructuredField
@@ -83,6 +88,12 @@ MIN_FREE_MEM_MB = int(os.environ.get("MIN_FREE_MEM_MB", "512"))
 _JOB_TIMEOUT = 3600  # 1 hour max wait for memory
 _executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS, thread_name_prefix="ocr")
 
+# ── Zoho / Supabase credentials (for external OCR extract) ─────────────
+ZOHO_CLIENT_ID = os.environ.get("ZOHO_CLIENT_ID", "")
+ZOHO_CLIENT_SECRET = os.environ.get("ZOHO_CLIENT_SECRET", "")
+ZOHO_REFRESH_TOKEN = os.environ.get("ZOHO_REFRESH_TOKEN", "")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
 def _wait_for_memory(job_dir: Path) -> bool:
     """Block until free memory is above threshold. Returns False on timeout."""
@@ -103,11 +114,17 @@ def _wait_for_memory(job_dir: Path) -> bool:
 
 STAGE_PROGRESS: dict[str, int] = {
     "queued": 0,
-    "preprocessing": 15,
-    "primary_extraction": 40,
-    "field_mapping": 55,
-    "secondary_verification": 75,
-    "template_fill": 90,
+    "oauth": 3,
+    "downloading": 10,
+    "converting": 18,
+    "supabase_upload": 25,
+    "pipeline_start": 30,
+    "preprocessing": 35,
+    "primary_extraction": 55,
+    "field_mapping": 70,
+    "secondary_verification": 82,
+    "template_fill": 92,
+    "zoho_update": 96,
     "done": 100,
     "error": 100,
 }
@@ -124,6 +141,23 @@ def update_progress(job_id: str, data: dict) -> None:
 def get_job_progress(job_id: str) -> dict:
     with _progress_lock:
         return _progress_store.get(job_id, {})
+
+
+# ── SSE status queues (push-based, replaces disk polling) ─────────────
+
+_status_queues: dict[str, queue.Queue] = {}
+_status_queues_lock = threading.Lock()
+
+
+def _push_sse(job_id: str, payload: dict) -> None:
+    """Push a status update to any listening SSE consumer for this job."""
+    with _status_queues_lock:
+        q = _status_queues.get(job_id)
+        if q:
+            try:
+                q.put_nowait(payload)
+            except queue.Full:
+                pass
 
 
 # ── Auto-cleanup old jobs ─────────────────────────────────────────
@@ -204,7 +238,7 @@ async def shutdown():
         await close_pool()
 
 
-def _set_status(job_dir: Path, status: str, message: str = "", pages: int = 0) -> None:
+def _set_status(job_dir: Path, status: str, message: str = "", pages: int = 0, fields: list[dict] | None = None) -> None:
     path = job_dir / "status.json"
     existing = {"log": []}
     if path.exists():
@@ -235,21 +269,44 @@ def _set_status(job_dir: Path, status: str, message: str = "", pages: int = 0) -
         start_time = existing_progress.get("start_time")
         if not start_time:
             start_time = time.time()
-        elapsed = round(time.time() - start_time, 1)
+        now = time.time()
 
         pdfs_map = existing_progress.get("pdfs", {})
+        pdf_file_start = existing_progress.get("pdf_file_start", {})
+        if pdf_name not in pdf_file_start:
+            pdf_file_start[pdf_name] = now
+        file_elapsed = round(now - pdf_file_start[pdf_name], 1)
+
         pdfs_map[pdf_name] = {
             "progress": pct,
             "stage": status,
-            "elapsed": elapsed,
+            "elapsed": file_elapsed,
         }
 
         _progress_store[job_dir.name] = {
             "overall": pct,
             "pdfs": pdfs_map,
             "start_time": start_time,
-            "elapsed": elapsed,
+            "pdf_file_start": pdf_file_start,
+            "elapsed": round(now - start_time, 1),
         }
+
+    sse_payload = {
+        "status": status,
+        "message": message or existing.get("message", ""),
+        "log": log,
+        "pages": pages or existing.get("pages", 0),
+        "progress": {
+            "overall": pct,
+            "pdfs": pdfs_map,
+            "start_time": start_time,
+            "elapsed": round(now - start_time, 1),
+        },
+    }
+    if fields is not None:
+        sse_payload["fields"] = fields
+
+    _push_sse(job_dir.name, sse_payload)
 
 
 _last_good_status: dict[str, dict] = {}
@@ -403,7 +460,7 @@ def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
             bbox_cache = job_dir / "bbox_cache.pkl"
             from concurrent.futures import ThreadPoolExecutor as _TempPool
             with _TempPool(max_workers=2) as _pool:
-                _bbox_fut = _pool.submit(pipeline.run_bbox, pdf_path)
+                _bbox_fut = _pool.submit(pipeline.run_bbox_images, page_images)
                 _primary_fut = _pool.submit(
                     pipeline.run_primary_extraction, str(pdf_path), page_images
                 )
@@ -435,6 +492,10 @@ def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
                 fields = pipeline.merge_fields(model_data, word_boxes, prefix=primary_name)
                 _set_status(job_dir, "field_mapping",
                     f"Merged {len(fields)} fields with Tesseract bboxes.",
+                    fields=[
+                        {"label": f.label, "value": f.value, "confidence": f.confidence, "page": f.page}
+                        for f in fields
+                    ],
                 )
             else:
                 _set_status(job_dir, "field_mapping",
@@ -504,6 +565,10 @@ def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
             logger.info("[%s] High confidence (≥95%%), skipping secondary verification.", job_dir.name)
             _set_status(job_dir, "secondary_verification",
                 f"{primary_name} confidence {overall_confidence}% ≥ 95% — skipping verification.",
+                fields=[
+                    {"label": f.label, "value": f.value, "confidence": f.confidence, "page": f.page}
+                    for f in fields
+                ],
             )
             secondary_token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
             for f in fields:
@@ -519,6 +584,10 @@ def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
             new_from_secondary = sum(1 for f in fields if f.verified_by == secondary_name and f.extracted_by is None)
             _set_status(job_dir, "secondary_verification",
                 f"{secondary_name} verified {verified} fields, corrected {corrected}, added {new_from_secondary} new.",
+                fields=[
+                    {"label": f.label, "value": f.value, "confidence": f.confidence, "page": f.page}
+                    for f in fields
+                ],
             )
 
         # Accumulate token usage
@@ -737,6 +806,11 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         total_secondary_prompt = 0
         total_secondary_completion = 0
 
+        # Clear the batch-group entry that _set_status added in upload_batch
+        with _progress_lock:
+            if job_dir.name in _progress_store:
+                _progress_store[job_dir.name]["pdfs"] = {}
+
         # Initialize progress for all PDFs
         for item in pdfs_info:
             _set_batch_pdf_status(job_dir, item["filename"], "queued", 0, "Queued in batch")
@@ -762,8 +836,8 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
             
             _set_batch_pdf_status(job_dir, filename, "primary_extraction", 30, "Extracting fields with primary AI...")
             
-            # Step 2: OCR + Primary
-            word_boxes = pipeline.run_bbox(str(pdf_path))
+            # Step 2: OCR + Primary (run_bbox_images uses pre-rendered 1200px images, ~0.4s vs ~21s)
+            word_boxes = pipeline.run_bbox_images(page_images)
             model_data, primary_token_usage = pipeline.run_primary_extraction(str(pdf_path), page_images)
             
             total_primary_prompt += primary_token_usage.get("prompt_tokens", 0) or 0
@@ -1080,21 +1154,33 @@ async def stream_status(job_id: str):
         raise HTTPException(404, "Job not found")
 
     async def event_gen():
+        q: queue.Queue = queue.Queue(maxsize=50)
+        with _status_queues_lock:
+            _status_queues[job_id] = q
+        loop = asyncio.get_running_loop()
         last_payload: str | None = None
+        last_heartbeat = time.time()
         try:
             while True:
-                status = _get_status(job_dir)
-                progress = get_job_progress(job_id)
-                payload = {**status, "progress": progress}
-                dumped = json.dumps(payload)
-                # Only send if something changed
+                try:
+                    data = await loop.run_in_executor(None, lambda: q.get(timeout=1))
+                except queue.Empty:
+                    now = time.time()
+                    if now - last_heartbeat >= 10:
+                        last_heartbeat = now
+                        yield f"data: {json.dumps({'status': 'heartbeat'})}\n\n"
+                    status = _get_status(job_dir)
+                    progress = get_job_progress(job_id)
+                    if not progress:
+                        continue
+                    data = {**status, "progress": progress}
+                dumped = json.dumps(data)
                 if dumped != last_payload:
                     last_payload = dumped
                     yield f"data: {dumped}\n\n"
-                if status["status"] in ("done", "error", "incomplete"):
-                    yield f"data: {json.dumps({**payload, '_final': True})}\n\n"
+                if data.get("status") in ("done", "error", "incomplete"):
+                    yield f"data: {json.dumps({**data, '_final': True})}\n\n"
                     break
-                await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -1104,6 +1190,9 @@ async def stream_status(job_id: str):
                 yield f"data: {err_payload}\n\n"
             except Exception:
                 pass
+        finally:
+            with _status_queues_lock:
+                _status_queues.pop(job_id, None)
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
 
@@ -1122,31 +1211,48 @@ async def stream_batch(job_ids: str):
             raise HTTPException(404, f"Job not found: {jid}")
 
     async def event_gen():
-        last: dict[str, str] = {}  # jid -> json dump of last status payload
+        # Register a queue for each job in the batch
+        qs: dict[str, queue.Queue] = {}
+        with _status_queues_lock:
+            for jid in ids:
+                q = queue.Queue(maxsize=50)
+                _status_queues[jid] = q
+                qs[jid] = q
+
+        last: dict[str, str] = {}
         try:
             while True:
                 all_terminal = True
                 updates: list[str] = []
                 for jid, jdir in job_dirs.items():
-                    status = _get_status(jdir)
-                    progress = get_job_progress(jid)
-                    payload = {"job_id": jid, **status, "progress": progress}
-                    dumped = json.dumps(payload)
+                    q = qs[jid]
+                    data = None
+                    # Drain queue (non-blocking)
+                    while not q.empty():
+                        try:
+                            data = q.get_nowait()
+                        except queue.Empty:
+                            break
+                    if data is None:
+                        status = _get_status(jdir)
+                        progress = get_job_progress(jid)
+                        data = {"job_id": jid, **status, "progress": progress}
+                    dumped = json.dumps(data)
                     if dumped != last.get(jid):
                         last[jid] = dumped
-                        if status["status"] in ("done", "error", "incomplete"):
-                            final = {**payload, "_final": True}
+                        if data.get("status") in ("done", "error", "incomplete"):
+                            final = {**data, "_final": True}
                             updates.append(f"data: {json.dumps(final)}\n\n")
                         else:
                             updates.append(f"data: {dumped}\n\n")
-                    if status["status"] not in ("done", "error", "incomplete"):
+                    if data.get("status") not in ("done", "error", "incomplete"):
                         all_terminal = False
                 if updates:
                     yield "".join(updates)
                 if all_terminal:
                     yield f"data: {json.dumps({'_batch_complete': True, 'total': len(ids)})}\n\n"
                     break
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.2)
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -1156,6 +1262,10 @@ async def stream_batch(job_ids: str):
                 yield f"data: {err_payload}\n\n"
             except Exception:
                 pass
+        finally:
+            with _status_queues_lock:
+                for jid in ids:
+                    _status_queues.pop(jid, None)
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
 
@@ -1377,7 +1487,8 @@ async def upload_batch(files: list[UploadFile] = File(...)):
             
         _set_status(job_dir, "queued", f"Processing PDF Batch: {names}")
         _executor.submit(_run_batch_pdfs_pipeline, job_dir, pdfs_info)
-        results.append({"job_id": job_id, "filename": f"Batch: {names}", "type": "pdf", "status": "queued"})
+        pdf_names = [f.filename for f in pdf_files]
+        results.append({"job_id": job_id, "filename": f"Batch: {names}", "type": "pdf", "status": "queued", "pdf_names": pdf_names})
 
     if image_files:
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
@@ -2313,3 +2424,237 @@ async def download_result(job_id: str, format: str = "json"):
     return Response(content=content, media_type=media_type, headers={
         "Content-Disposition": f'attachment; filename="result_{ts}.{format}"',
     })
+
+
+# ── OCR Extract (external Zoho Creator → Supabase → pipeline) ─────────
+
+class OcrExtractRequest(BaseModel):
+    record_id: str
+    zoho_app_owner: str
+    zoho_app_link_name: str
+    zoho_report_link_name: str
+    zoho_record_id: str
+    file_field_link_name: str
+    file_names: list[str]
+    bucket: str = "files"
+
+
+@app.post("/api/ocr/extract")
+async def ocr_extract(req: OcrExtractRequest):
+    """Receive push from Zoho Creator Deluge, download files, convert to PDF,
+    upload to Supabase, and run extraction pipeline."""
+    if not req.file_names:
+        raise HTTPException(400, "No file_names provided")
+    if not ZOHO_CLIENT_ID or not ZOHO_CLIENT_SECRET or not ZOHO_REFRESH_TOKEN:
+        raise HTTPException(500, "Zoho OAuth credentials not configured "
+            "(ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN)")
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(500, "Supabase credentials not configured "
+            "(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)")
+
+    job_id = f"ext_{str(uuid.uuid4())[:8]}"
+    job_dir = BASE_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(job_dir / "original_name.txt", "w") as f:
+        f.write(req.record_id)
+
+    _set_status(job_dir, "oauth",
+        f"OCR extract queued for {req.record_id} ({len(req.file_names)} files)")
+    _executor.submit(_run_ocr_extract_pipeline, job_dir, req)
+
+    return {"success": True, "status": "queued", "job_id": job_id}
+
+
+@app.post("/api/ocr/test-zoho-update")
+async def test_zoho_update(req: OcrExtractRequest):
+    """Quick test endpoint — just tries the Zoho Creator PATCH, skips the pipeline."""
+    if not ZOHO_CLIENT_ID or not ZOHO_CLIENT_SECRET or not ZOHO_REFRESH_TOKEN:
+        raise HTTPException(500, "Zoho OAuth credentials not configured")
+    try:
+        token = _get_zoho_access_token()
+        _update_zoho_creator(token, req)
+        return {"success": True, "message": f"OCR_Status=Yes set on {req.zoho_record_id}"}
+    except Exception as e:
+        raise HTTPException(500, f"Zoho update failed: {e}")
+
+
+def _run_ocr_extract_pipeline(job_dir: Path, req: OcrExtractRequest) -> None:
+    """Download files from Zoho Creator → merge to PDF → upload to Supabase → run pipeline → update Zoho."""
+    t0 = time.time()
+    logger.info("OCR extract started | record=%s | files=%d", req.record_id, len(req.file_names))
+    _set_status(job_dir, "oauth", f"Starting OCR extract for {req.record_id}")
+    zoho_updated = False
+
+    try:
+        # ── Step 1: Zoho OAuth ──────────────────────────────────────
+        logger.info("Zoho OAuth | record=%s", req.record_id)
+        access_token = _get_zoho_access_token()
+        _set_status(job_dir, "oauth", "Zoho authentication successful")
+
+        # ── Step 2: Download each file ───────────────────────────────
+        download_dir = job_dir / "downloads"
+        download_dir.mkdir(exist_ok=True)
+        downloaded: list[Path] = []
+
+        for i, file_name in enumerate(req.file_names):
+            _set_status(job_dir, "downloading",
+                f"Downloading {i+1}/{len(req.file_names)}: {file_name}")
+            logger.info("Downloading %d/%d: %s | record=%s",
+                i+1, len(req.file_names), file_name, req.record_id)
+            try:
+                file_bytes = _download_zoho_file(access_token, req, file_name)
+            except Exception as e:
+                msg = f"Download failed for {file_name}: {e}"
+                logger.error(msg)
+                _set_status(job_dir, "error", msg)
+                return
+
+            ext = Path(file_name).suffix.lower()
+            local_path = download_dir / f"{i}_{file_name}"
+            local_path.write_bytes(file_bytes)
+            downloaded.append(local_path)
+            logger.info("Downloaded %d/%d: %s (%d bytes)",
+                i+1, len(req.file_names), file_name, len(file_bytes))
+
+        _set_status(job_dir, "downloading", f"Downloaded {len(downloaded)} files")
+
+        # ── Step 3: Merge all files into a single PDF ────────────────
+        combined_pdf = job_dir / "combined.pdf"
+        _set_status(job_dir, "converting", "Converting to single PDF...")
+        logger.info("Merging %d files to PDF | record=%s", len(downloaded), req.record_id)
+        _merge_to_pdf(downloaded, combined_pdf)
+        pdf_size = combined_pdf.stat().st_size
+        logger.info("Combined PDF created | size=%d bytes | record=%s", pdf_size, req.record_id)
+        _set_status(job_dir, "converting", f"PDF created ({pdf_size/1024:.0f} KB)")
+
+        # ── Step 4: Upload to Supabase ───────────────────────────────
+        supabase_path = f"{req.record_id}/{req.record_id}.pdf"
+        _set_status(job_dir, "supabase_upload", "Uploading to Supabase Storage...")
+        logger.info("Uploading to Supabase | bucket=%s | path=%s", req.bucket, supabase_path)
+        _upload_to_supabase(req.bucket, supabase_path, combined_pdf.read_bytes(), "application/pdf")
+        logger.info("Supabase upload successful | path=%s/%s", req.bucket, supabase_path)
+        _set_status(job_dir, "supabase_upload", "PDF uploaded to Supabase")
+
+        # ── Step 5: Run extraction pipeline ──────────────────────────
+        input_pdf = job_dir / "input.pdf"
+        combined_pdf.rename(input_pdf)
+        _set_status(job_dir, "pipeline_start", "Starting extraction pipeline...")
+        logger.info("Starting extraction pipeline | record=%s", req.record_id)
+
+        try:
+            _run_pipeline(job_dir, str(input_pdf))
+        except Exception as pipe_err:
+            logger.exception("Pipeline failed | record=%s", req.record_id)
+            _set_status(job_dir, "error", f"Pipeline failed: {pipe_err}")
+
+        # ── Step 6: Update Zoho Creator (success only) ───────────────
+        _set_status(job_dir, "zoho_update", "Updating Zoho Creator record...")
+        logger.info("Updating Zoho Creator | record=%s | OCR_Status=updated", req.record_id)
+        try:
+            _update_zoho_creator(access_token, req, "updated")
+            logger.info("Zoho Creator updated | record=%s", req.record_id)
+            _set_status(job_dir, "done", "OCR complete — Zoho record updated")
+        except Exception as zoho_err:
+            logger.error("Zoho Creator update failed | record=%s | error=%s",
+                req.record_id, zoho_err)
+            _set_status(job_dir, "done", f"Pipeline done but Zoho update failed: {zoho_err}")
+
+    except Exception as e:
+        logger.exception("OCR extract failed | record=%s", req.record_id)
+        _set_status(job_dir, "error", f"OCR extract failed: {e}")
+
+    finally:
+        elapsed = round(time.time() - t0, 1)
+        logger.info("OCR extract finished | record=%s | elapsed=%ds", req.record_id, elapsed)
+        cur = _get_status(job_dir).get("status", "unknown")
+        if cur not in ("done", "error"):
+            _set_status(job_dir, "done", f"OCR extract complete ({elapsed}s)")
+
+
+# ── Helper functions ───────────────────────────────────────────────────
+
+
+def _get_zoho_access_token() -> str:
+    """Exchange Zoho refresh token for an access token."""
+    data = urllib.parse.urlencode({
+        "refresh_token": ZOHO_REFRESH_TOKEN,
+        "client_id": ZOHO_CLIENT_ID,
+        "client_secret": ZOHO_CLIENT_SECRET,
+        "grant_type": "refresh_token",
+    }).encode()
+    req = urllib.request.Request(
+        "https://accounts.zoho.com/oauth/v2/token", data=data,
+    )
+    with urllib.request.urlopen(req) as resp:
+        result = json.loads(resp.read())
+    if "access_token" not in result:
+        raise RuntimeError(f"Zoho OAuth failed: {result}")
+    return result["access_token"]
+
+
+def _download_zoho_file(access_token: str, req: OcrExtractRequest, file_name: str) -> bytes:
+    """Download a single file attachment from Zoho Creator."""
+    encoded_path = urllib.parse.quote(file_name, safe='')
+    url = (f"https://www.zohoapis.com/creator/v2.1/data/{req.zoho_app_owner}/"
+           f"{req.zoho_app_link_name}/report/{req.zoho_report_link_name}/"
+           f"{req.zoho_record_id}/{req.file_field_link_name}/download?filepath={encoded_path}")
+    request = urllib.request.Request(
+        url, headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+    )
+    with urllib.request.urlopen(request) as resp:
+        return resp.read()
+
+
+def _upload_to_supabase(bucket: str, path: str, data: bytes, content_type: str) -> None:
+    """Upload bytes to Supabase Storage, overwriting if exists."""
+    url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{path}"
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "x-upsert": "true",
+        "Content-Type": content_type,
+    }
+    request = urllib.request.Request(url, data=data, headers=headers, method='PUT')
+    with urllib.request.urlopen(request) as resp:
+        resp.read()
+
+
+def _update_zoho_creator(access_token: str, req: OcrExtractRequest, status: str = "updated") -> None:
+    """Set OCR_Status on the Zoho Creator record."""
+    url = (f"https://www.zohoapis.com/creator/v2.1/data/{req.zoho_app_owner}/"
+           f"{req.zoho_app_link_name}/report/{req.zoho_report_link_name}/"
+           f"{req.zoho_record_id}")
+    data = json.dumps({"data": {"OCR_Status": status}}).encode()
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json",
+    }
+    request = urllib.request.Request(url, data=data, headers=headers, method='PATCH')
+    with urllib.request.urlopen(request) as resp:
+        resp.read()
+
+
+def _merge_to_pdf(file_paths: list[Path], output_path: Path) -> None:
+    """Merge PDFs and/or images into a single PDF using PyMuPDF."""
+    import fitz
+    merged = fitz.open()
+    for fp in file_paths:
+        ext = fp.suffix.lower()
+        try:
+            if ext in ('.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif', '.tiff', '.tif'):
+                img_doc = fitz.open(fp)
+                pdfbytes = img_doc.convert_to_pdf()
+                img_doc.close()
+                src = fitz.open("pdf", pdfbytes)
+            elif ext == '.pdf':
+                src = fitz.open(fp)
+            else:
+                logger.warning("Skipping unsupported file: %s", fp.name)
+                continue
+            merged.insert_pdf(src)
+            src.close()
+        except Exception as e:
+            logger.warning("Failed to merge %s: %s", fp.name, e)
+    merged.save(str(output_path))
+    merged.close()

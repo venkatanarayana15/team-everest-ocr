@@ -42,3 +42,4 @@ class Config:
     searchable_pdf_font: str = "Helvetica"
     ocr_backend: str = "tesseract"
     max_image_width: int = 1200
+    bbox_render_dpi: int = 150

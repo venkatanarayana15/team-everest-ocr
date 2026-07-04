@@ -1,5 +1,12 @@
 import { useEffect, useRef } from 'react';
 
+interface FieldSummary {
+  label: string;
+  value: string;
+  confidence: number;
+  page: number;
+}
+
 interface Props {
   jobId: string;
   files: Array<{ name: string; jobId?: string }>;
@@ -10,6 +17,7 @@ interface Props {
   perPdfProgress: Record<string, { progress: number; stage: string; elapsed?: number }>;
   logs: Array<{ t: string; msg: string }>;
   elapsed?: number | null;
+  fields?: FieldSummary[];
   onBack: () => void;
   onResumeJob?: (jobId: string) => void;
   onResumeBatch?: () => void;
@@ -52,9 +60,15 @@ const STAGE_MAPPING: Record<string, string> = {
   done: 'done',
 };
 
+function confidenceColor(conf: number): string {
+  if (conf >= 80) return '#22c55e';
+  if (conf >= 50) return '#eab308';
+  return '#ef4444';
+}
+
 export default function PipelineProcessingView({
   jobId, files, status, statusMessage, progress,
-  overallProgress, perPdfProgress, logs, elapsed, onBack,
+  overallProgress, perPdfProgress, logs, elapsed, fields, onBack,
   onResumeJob, onResumeBatch, onStartOver, onViewResults
 }: Props) {
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -292,6 +306,90 @@ export default function PipelineProcessingView({
               }}>
                 {statusMessage}
               </span>
+            </div>
+          )}
+
+          {/* Extracted Fields */}
+          {fields && fields.length > 0 && (
+            <div style={{
+              background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)',
+              padding: '14px 18px', boxShadow: 'var(--shadow-md)',
+              border: '1px solid var(--color-border)',
+            }}>
+              <h3 style={{
+                fontSize: 13, color: 'var(--color-text-secondary)', margin: '0 0 10px 0',
+                fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <span>📋</span>
+                <span>Extracted Fields ({fields.length})</span>
+                <span style={{
+                  fontSize: 10, color: 'var(--color-text-muted)', fontWeight: 400,
+                  fontFamily: 'var(--font-mono)', textTransform: 'none',
+                }}>
+                  live from pipeline
+                </span>
+              </h3>
+              <div style={{ maxHeight: 240, overflow: 'auto' }}>
+                <table style={{
+                  width: '100%', borderCollapse: 'collapse',
+                  fontSize: 12, fontFamily: 'var(--font-mono)',
+                }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-muted)', fontSize: 10 }}>
+                      <th style={{ padding: '4px 8px', textAlign: 'left', fontWeight: 500 }}>Page</th>
+                      <th style={{ padding: '4px 8px', textAlign: 'left', fontWeight: 500 }}>Label</th>
+                      <th style={{ padding: '4px 8px', textAlign: 'left', fontWeight: 500 }}>Value</th>
+                      <th style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 500 }}>Conf</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fields.map((f, i) => (
+                      <tr key={i} style={{
+                        borderBottom: '1px solid var(--color-border-light)',
+                        background: i % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.02)',
+                      }}>
+                        <td style={{
+                          padding: '3px 8px', color: 'var(--color-text-muted)',
+                          textAlign: 'center', fontSize: 10,
+                        }}>
+                          {f.page}
+                        </td>
+                        <td style={{
+                          padding: '3px 8px', color: 'var(--color-text)',
+                          maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }} title={f.label}>
+                          {f.label}
+                        </td>
+                        <td style={{
+                          padding: '3px 8px', color: 'var(--color-text-secondary)',
+                          maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }} title={f.value}>
+                          {f.value || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>empty</span>}
+                        </td>
+                        <td style={{
+                          padding: '3px 8px', textAlign: 'right',
+                        }}>
+                          <span style={{
+                            display: 'inline-block', padding: '1px 6px', borderRadius: 4,
+                            fontSize: 10, fontWeight: 600,
+                            color: confidenceColor(f.confidence) === '#22c55e' ? '#166534'
+                              : confidenceColor(f.confidence) === '#eab308' ? '#854d0e'
+                              : '#991b1b',
+                            background: confidenceColor(f.confidence) === '#22c55e' ? '#dcfce7'
+                              : confidenceColor(f.confidence) === '#eab308' ? '#fef9c3'
+                              : '#fee2e2',
+                          }}>
+                            {f.confidence}%
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 

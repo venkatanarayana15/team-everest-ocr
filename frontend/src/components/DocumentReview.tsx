@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState, useEffect } from 'react';
+import { useRef, useCallback, useState, useEffect, useMemo } from 'react';
 import { pageImageUrl } from '../api/client';
 import type { Field, Section } from '../types';
 import ExtractedDataPanel from './ExtractedDataPanel';
