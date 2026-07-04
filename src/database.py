@@ -230,6 +230,11 @@ async def upsert_ocr_document(
                 len(structured), len(raw_fields),
             )
 
+    logger.info(
+        "Upsert payload: %s",
+        json.dumps(data, indent=2, default=str),
+    )
+
     cols = list(data.keys())
     placeholders = [f"${i + 1}" for i in range(len(cols))]
     values = list(data.values())
