@@ -1,37 +1,227 @@
-Open‑source OCR libraries
-1. Open source - Tesseract -  Printed documents, simple layouts - Very weak; not recommended for handwriting - Mature, widely used, easy to integrate, free - Poor on handwriting and complex forms; tuning is hard
+void update_ocr(Volunteer_Home_Visited_Form rec)
+{
+	if(rec.OCR_Status == "Yes")
+	{
+		info "OCR already completed for record ID: " + rec.Applicant_ID;
+	}
+	else
+	{
+		try 
+		{
+			if(rec.Upload_Home_Visit_Form == null || rec.Upload_Home_Visit_Form.size() == 0)
+			{
+				info "No file found for record ID: " + rec.Applicant_ID;
+			}
+			else
+			{
+				clientId = thisapp.variables.update_ocr.ZOHO_CLIENT_ID;
+				clientSecret = thisapp.variables.update_ocr.ZOHO_CLIENT_SECRET;
+				refreshToken = thisapp.variables.update_ocr.ZOHO_REFRESH_TOKEN;
+				tokenResponse = invokeurl
+				[
+					url :"https://accounts.zoho.com/oauth/v2/token"
+					type :POST
+					parameters:{"refresh_token":refreshToken,"client_id":clientId,"client_secret":clientSecret,"grant_type":"refresh_token"}
+				];
+				accessToken = tokenResponse.get("access_token");
+				if(accessToken == null || accessToken == "")
+				{
+					info "Failed to generate access token: " + tokenResponse;
+				}
+				else
+				{
+					projectUrl = "https://biwwbmxgeumzhyjbxbip.supabase.co";
+					bucketName = "files";
+					supabaseKey = thisapp.variables.update_ocr.SUPABASE_SERVICE_ROLE_KEY;
 
-2. Open source - PaddleOCR- Multi‑language docs, mobile/desktop apps- 	Some support with appropriate models- Fast, accurate on many printed docs, end‑to‑end pipeline- Handwriting still weaker than specialized cloud/document‑AI tools
+					ownerName = "teameverest";
+					appLinkName = "iatc-selection-one-app";
+					reportLinkName = "Volunteer_Home_Visited_Form_Report";
+					fileFieldLinkName = "Upload_Home_Visit_Form";
+					
+					// 🛠️ CRITICAL FIX: Removed the empty () method to stop Zoho from falling back to the internal 18-digit ID
+					applicantId = rec.Applicant_ID_String;
+					// Example: rec.Applicant_ID.Application_Number or rec.Applicant_ID.Form_Status_Field
 
-3. Open source- EasyOCR- Quick prototypes in Python- Limited handwriting support- Simple API, many languages- Accuracy lower than more advanced frameworks for production use
+					allowedExtensions = List();
+					allowedExtensions.add("pdf");
+					allowedExtensions.add("jpg");
+					allowedExtensions.add("jpeg");
+					allowedExtensions.add("png");
+					allowedExtensions.add("webp");
 
-4. Open source- MMOCR- Complex layouts, research/advanced projects- Depends on chosen models- Modular, supports detection + recognition, extensible- Higher complexity, more setup effort
+					fileList = rec.Upload_Home_Visit_Form;
+					uploadedPaths = List();
+					fileIndex = 0;
+					allUploadsOk = true;
 
-5. Open source- Keras‑OCR / TrOCR and similar- Custom pipelines, ML teams- Can be trained/fine‑tuned for handwriting- Flexible, deep‑learning based- Requires ML expertise and compute to tune/train
+					for each originalFileName in fileList
+					{
+						if(originalFileName == null || originalFileName == "")
+						{
+							continue;
+						}
 
-6. Cloud OCR- Google Cloud Vision / Document AI- General OCR on images and PDFs- Has handwriting modes and document AI parsers- Good quality, strong layout analysis, managed service- Paid API, data leaves your environment
+						fileParts = originalFileName.toList(".");
+						extension = "";
 
-7. Cloud OCR- AWS Textract- Forms, tables, key‑value pairs- Some handwriting for specific fields- Strong for structured docs and extraction of fields- Pricing, region constraints, handwriting not perfect
+						if(fileParts.size() > 1)
+						{
+							extension = fileParts.get(fileParts.size() - 1).toLowerCase();
+						}
 
-8. Cloud OCR- Azure Vision Read / Document Intelligence- Printed and handwritten documents, forms- Explicitly supports handwritten notes and mixed content- Very good for handwritten business docs, strong SDKs- Paid, Azure lock‑in, needs configuration per use case
+						if(!allowedExtensions.contains(extension))
+						{
+							info "Unsupported file type for record ID: " + applicantId + ". File: " + originalFileName;
+							continue;
+						}
 
-9. Commercial- ABBYY FineReader / FlexiCapture- Enterprise document capture- Some handwriting support depending on version- High accuracy for printed text, strong layout- Licensing cost, on‑prem/cloud setup effort
+						// 🛠️ FIX: Keep PDFs as standalone names, add sequential suffixes ONLY to images
+						if(extension == "pdf")
+						{
+							newFileName = applicantId + ".pdf";
+						}
+						else
+						{
+							displayIndex = fileIndex + 1;
+							newFileName = applicantId + "_" + displayIndex + "." + extension;
+						}
 
-10. Specialized handwriting- Transkribus- Historical & modern handwriting archives- Yes, handwriting‑focused- Tailored models for handwriting, good accuracy on cursive- Service/platform‑style workflow, not just a small library
+						// folder per applicant: files/{applicantId}/{applicantId}.ext
+						folderPath = applicantId + "/" + newFileName;
 
-11. Specialized handwriting- Other handwriting OCR tools (2026 lists)- Business handwriting (forms, notes)- Yes, but quality varies- Tuned for handwriting, often with form templates- Average accuracy still lower than printed OCR; vendor choice matters
+						// 🛠️ FIXED: Used the proper zoho.encryption wrapper function for URL encoding
+						encodedFilePath = zoho.encryption.urlEncode(originalFileName);
+						downloadUrl = "https://www.zohoapis.com/creator/v2.1/data/" + ownerName + "/" + appLinkName + "/report/" + reportLinkName + "/" + rec.ID + "/" + fileFieldLinkName + "/download?filepath=" + encodedFilePath;
 
-PDF has:
-    Normal (printed) text (questions, labels, templates)
-    Handwritten answers (fill‑in fields, notes, marks)
-You want to extract:
-    The printed text (optional, often already machine‑readable)
-    The handwritten answers (the main value)
+						actualFileObj = invokeurl
+						[
+							url :downloadUrl
+							type :GET
+							headers:{"Authorization":"Zoho-oauthtoken " + accessToken}
+						];
 
-To extract both from a PDF (whether scanned or native) you need a pipeline that:
-1. Detects regions of printed text vs handwritten text within the same page.
-2. Applies the appropriate model for each region:
-    a. printed text → standard OCR model
-    b. handwritten answers → handwriting OCR model
-3. Produces unified output: one clean, machine‑readable result (text, structured data, or searchable PDF).
+						if(actualFileObj == null)
+						{
+							info "Failed to download file '" + originalFileName + "' for record ID: " + applicantId;
+							allUploadsOk = false;
+						}
+						else
+						{
+							actualFileObj.setFileName(newFileName);
+
+							contentType = "application/octet-stream";
+							if(extension == "pdf")
+							{
+								contentType = "application/pdf";
+							}
+							else if(extension == "jpg" || extension == "jpeg")
+							{
+								contentType = "image/jpeg";
+							}
+							else if(extension == "png")
+							{
+								contentType = "image/png";
+							}
+							else if(extension == "webp")
+							{
+								contentType = "image/webp";
+							}
+
+							uploadUrl = projectUrl + "/storage/v1/object/" + bucketName + "/" + folderPath;
+
+							uploadResponse = invokeurl
+							[
+								url :uploadUrl
+								type :PUT
+								parameters:actualFileObj
+								headers:{"Authorization":"Bearer " + supabaseKey,"apikey":supabaseKey,"x-upsert":"true","Content-Type":contentType}
+							];
+
+							info "Supabase upload response for " + folderPath + ": " + uploadResponse;
+
+							if(uploadResponse != null && uploadResponse.toString().toLowerCase().contains("error"))
+							{
+								info "Supabase upload failed for " + folderPath + " -> " + uploadResponse;
+								allUploadsOk = false;
+							}
+							else
+							{
+								uploadedPaths.add(bucketName + "/" + folderPath);
+							}
+						}
+
+						fileIndex = fileIndex + 1;
+					}
+
+					if(uploadedPaths.size() == 0)
+					{
+						info "No files were successfully uploaded for record ID: " + applicantId;
+					}
+					else
+					{
+						// backend processes the whole applicant folder
+						applicantFolderPath = bucketName + "/" + applicantId;
+
+						backendResponse = invokeurl
+						[
+							url :"https://YOUR_BACKEND_DOMAIN/api/ocr/extract"
+							type :POST
+							parameters:{"record_id":applicantId,"folder_path":applicantFolderPath,"file_paths":uploadedPaths,"bucket":bucketName}
+							headers:{"Content-Type":"application/json"}
+								];
+
+						info "Backend OCR response: " + backendResponse;
+
+						if(backendResponse != null && backendResponse.get("success") == true)
+						{
+							update Volunteer_Home_Visited_Form[Applicant_ID == rec.Applicant_ID]
+							[
+								OCR_Status="Yes"
+							];
+							info "OCR completed and status updated for record ID: " + applicantId;
+						}
+						else
+						{
+							info "Backend OCR extraction failed for record ID: " + applicantId + " -> " + backendResponse;
+						}
+					}
+				}
+			}
+		}
+		catch (e)
+		{
+			info "Exception in update_ocr for record ID " + rec.Applicant_ID + ": " + e;
+		}
+	}
+}
+
+
+
+
+
+void update_ocr(Volunteer_Home_Visited_Form rec)
+{
+	if(rec.OCR_Status == "Yes")
+	{
+		return;
+	}
+	payload = Map();
+	payload.put("record_id",rec.Applicant_ID_String);
+	payload.put("zoho_app_owner","teameverest");
+	payload.put("zoho_app_link_name","iatc-selection-one-app");
+	payload.put("zoho_report_link_name","Volunteer_Home_Visited_Form_Report");
+	payload.put("zoho_record_id",rec.ID.toString());
+	payload.put("file_field_link_name","Upload_Home_Visit_Form");
+	payload.put("file_names",rec.Upload_Home_Visit_Form);
+	payload.put("bucket","files");
+	response = invokeurl
+	[
+		url :"https://tapping-illicitly-capture.ngrok-free.dev/api/ocr/extract"
+		type :POST
+		body:payload.toString()
+		headers:{"Content-Type":"application/json"}
+	];
+	info response;
+}
 

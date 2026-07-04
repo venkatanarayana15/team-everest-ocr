@@ -30,7 +30,9 @@ def deskew(image: np.ndarray, max_angle: int = 5) -> np.ndarray:
 
 
 def denoise(image: np.ndarray, h: int = 10) -> np.ndarray:
-    return cv2.fastNlMeansDenoising(image, h=h)
+    # fastNlMeansDenoising is extremely slow on high-res images (taking minutes per document).
+    # Replaced with medianBlur which is highly optimized and takes only milliseconds.
+    return cv2.medianBlur(image, 3)
 
 
 def adaptive_threshold(image: np.ndarray, block_size: int = 15, c: int = 2) -> np.ndarray:
@@ -46,11 +48,3 @@ def preprocess(image: np.ndarray, config: Config) -> np.ndarray:
     gray = deskew(gray, config.deskew_max_angle)
     gray = denoise(gray, config.denoise_strength)
     return adaptive_threshold(gray, config.binarization_block_size, config.binarization_c)
-
-
-def preprocess_region(image: np.ndarray, bbox: tuple, config: Config) -> np.ndarray:
-    x1, y1, x2, y2 = bbox
-    crop = image[y1:y2, x1:x2]
-    if crop.size == 0:
-        return np.zeros((100, 100), dtype=np.uint8)
-    return preprocess(crop, config)

@@ -3,7 +3,7 @@
 This repository contains a production-oriented OCR extraction pipeline for a fixed 6-page questionnaire, with FastAPI backend, React frontend, Tesseract OCR, LLM-based structured extraction and verification, validation, deduplication, and PostgreSQL persistence.
 
 ## Working model
-- Act like a senior/staff engineer: optimize for reliability, debuggability, maintainability, safe failure modes, and clear rollback paths.
+- Act like a 20 years experienced senior/staff engineer: optimize for reliability, debuggability, maintainability, safe failure modes, and clear rollback paths.
 - Prefer small, reviewable changes over broad refactors unless the task explicitly requires architectural work.
 - Preserve existing behavior unless the task explicitly asks to change product behavior.
 - When a requirement is ambiguous, choose the safer and more observable implementation.
@@ -22,13 +22,17 @@ This repository contains a production-oriented OCR extraction pipeline for a fix
 - Run tests: `uv run python tests/test_backend.py`
 
 ## Repository map
-- `src/server.py`: API endpoints, upload flows, checkpoint/resume, section derivation fallback, dedup, DB save, validation endpoints
-- `src/extraction_pipeline.py`: core pipeline models and orchestration, including `StructuredField`, `PipelineResult`, merge logic, verify logic
+- `src/server.py`: (~1190 lines) API endpoints, upload flows, SSE streaming, cleanup, dedup, DB save, validation, Zoho API stubs
+- `src/zoho_integration.py`: Zoho Creator OAuth, file download, Supabase upload, Creator PATCH, `OcrExtractRequest` model, `_run_ocr_extract_pipeline()`
+- `src/pipeline_runner.py`: Pipeline orchestration — `run_pipeline`, `run_batch_pdfs_pipeline`, `run_image_pipeline`, `run_image_pipeline_from_zip`, render helpers, section derivation, page markers
+- `src/status.py`: SSE push queues, `_set_status` (per-file elapsed + fields), progress store, checkpoint save/load, `_cleanup_intermediate`
+- `src/extraction_pipeline.py`: core pipeline models — `StructuredField`, `TextLine`, `ExtractionPipeline` class with merge & verify logic
 - `src/prompt_templates.py`: LLM prompts and questionnaire template grounding
 - `src/database.py`: PostgreSQL schema and CRUD logic for `pdfs`, `extraction_results`, `extracted_fields`, `corrections_log`
-- `src/backends.py`: OCR backend integration, including static Tesseract path handling and `process_images()`
+- `src/backends.py`: OCR backend integration (TesseractBackend), static Tesseract path handling
 - `src/input_handler.py`: input-type detection, ZIP extraction, folder scanning, mixed-batch routing
 - `src/page_classifier.py`: 6-page content-based page classification and ordering
+- `src/config.py`: configuration model (8 active fields)
 - `frontend/src/pages/UploadPage.tsx`: upload modes, sidebar, dedup dialog, batch UI
 - `frontend/src/pages/ReviewPage.tsx`: extraction review and DB save action
 - `frontend/src/components/FieldList.tsx`: page-to-section grouping, empty section rendering, Y-order display

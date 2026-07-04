@@ -59,8 +59,6 @@ SECTION_HEADERS: dict[int, list[str]] = {
     6: ["Scholarship Information", "Volunteer Observation"],
 }
 
-PAGE_COUNTS = {1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1}
-
 FIELD_NUMBER_PATTERNS: dict[int, list[re.Pattern]] = {
     1: [re.compile(r"^\s*1\.\d")],
     2: [re.compile(r"^\s*2\.\d"), re.compile(r"^\s*3\.\d")],

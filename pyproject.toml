@@ -28,8 +28,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
 ]
 
-[project.scripts]
-ocr-extract = "src.pipeline:main"
+
 
 [tool.uv]
 package = false

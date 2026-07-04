@@ -1,0 +1,27 @@
+{
+  "batch": true,
+  "num_pdfs": 5,
+  "pdfs": [
+    {
+      "name": "sample_000.pdf",
+      "error": "name 'self' is not defined"
+    },
+    {
+      "name": "sample_001.pdf",
+      "error": "name 'self' is not defined"
+    },
+    {
+      "name": "sample_002.pdf",
+      "error": "name 'self' is not defined"
+    },
+    {
+      "name": "sample_003.pdf",
+      "error": "name 'self' is not defined"
+    },
+    {
+      "name": "sample_004.pdf",
+      "error": "name 'self' is not defined"
+    }
+  ],
+  "processing_time": 98.24
+}

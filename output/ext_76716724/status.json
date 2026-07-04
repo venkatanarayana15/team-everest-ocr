@@ -1,0 +1,91 @@
+{
+  "status": "secondary_verification",
+  "message": "Running secondary verification (OpenAICompatible)...",
+  "log": [
+    {
+      "t": "10:24:23",
+      "msg": "OCR extract queued for TEMP-2026-8975 (6 files)"
+    },
+    {
+      "t": "10:24:23",
+      "msg": "Starting OCR extract for TEMP-2026-8975"
+    },
+    {
+      "t": "10:24:23",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "10:24:24",
+      "msg": "Zoho authentication successful"
+    },
+    {
+      "t": "10:24:24",
+      "msg": "Downloading 1/6: 1782577443925158_IMG_7054.jpeg"
+    },
+    {
+      "t": "10:24:28",
+      "msg": "Downloading 2/6: 1782577444412284_IMG_7055.jpeg"
+    },
+    {
+      "t": "10:24:33",
+      "msg": "Downloading 3/6: 1782577439881777_IMG_7056.jpeg"
+    },
+    {
+      "t": "10:24:37",
+      "msg": "Downloading 4/6: 1782577439507750_IMG_7057.jpeg"
+    },
+    {
+      "t": "10:24:42",
+      "msg": "Downloading 5/6: 1782577439724674_IMG_7058.jpeg"
+    },
+    {
+      "t": "10:24:46",
+      "msg": "Downloading 6/6: 1782577442276546_IMG_7059.jpeg"
+    },
+    {
+      "t": "10:24:48",
+      "msg": "Downloaded 6 files"
+    },
+    {
+      "t": "10:24:48",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "10:24:48",
+      "msg": "PDF created (14331 KB)"
+    },
+    {
+      "t": "10:24:48",
+      "msg": "Uploading to Supabase Storage..."
+    },
+    {
+      "t": "10:25:02",
+      "msg": "PDF uploaded to Supabase"
+    },
+    {
+      "t": "10:25:02",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "10:25:02",
+      "msg": "Preprocessing PDF (TEMP-2026-8975)..."
+    },
+    {
+      "t": "10:26:17",
+      "msg": "Preprocessing done."
+    },
+    {
+      "t": "10:26:17",
+      "msg": "Running Tesseract + primary extraction (OpenAICompatible)..."
+    },
+    {
+      "t": "10:28:51",
+      "msg": "Merged 76 fields."
+    },
+    {
+      "t": "10:28:51",
+      "msg": "Running secondary verification (OpenAICompatible)..."
+    }
+  ],
+  "pages": 6
+}

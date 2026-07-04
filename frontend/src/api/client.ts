@@ -93,12 +93,6 @@ export async function listPDFs(): Promise<any[]> {
   return res.json();
 }
 
-export async function saveToDB(jobId: string): Promise<any> {
-  const res = await fetch(`${API}/save-to-db/${jobId}`, { method: 'POST' });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
-
 export async function getTesseractData(jobId: string): Promise<any> {
   const res = await fetch(`${API}/tesseract-data/${jobId}`);
   if (!res.ok) throw new Error('Failed to get tesseract data');
