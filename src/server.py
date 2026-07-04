@@ -38,6 +38,18 @@ from src.zoho_integration import (
     _run_ocr_extract_pipeline, _get_zoho_access_token, _update_zoho_creator,
 )
 
+try:
+    from src.database import (
+        get_pool,
+        close_pool,
+        upsert_ocr_document,
+    )
+    DB_AVAILABLE = True
+except ImportError as e:
+    DB_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("Database module not available (%s). Dedup + DB features disabled.", e)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)-7s] %(name)s: %(message)s",
@@ -115,6 +127,14 @@ def _stop_cleanup_thread() -> None:
 
 @app.on_event("startup")
 async def startup():
+    global DB_AVAILABLE
+    if DB_AVAILABLE and os.environ.get("DATABASE_URL"):
+        try:
+            await get_pool()
+            logger.info("Database pool initialized")
+        except Exception as e:
+            logger.warning("Failed to init DB pool: %s — disabling DB features", e)
+            DB_AVAILABLE = False
     _start_cleanup_thread()
     logger.info("Auto-cleanup thread started (every %ds, max age %ds)", CLEANUP_INTERVAL_SEC, JOB_MAX_AGE_SEC)
 
@@ -122,6 +142,8 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     _stop_cleanup_thread()
+    if DB_AVAILABLE:
+        await close_pool()
 
 
 # ── Endpoints ─────────────────────────────────────────────────────
@@ -886,6 +908,49 @@ DOWNLOAD_FORMATS = {
     "txt": ("result.txt", "text/plain; charset=utf-8"),
     "html": ("result.html", "text/html; charset=utf-8"),
 }
+
+
+@app.post("/save-to-db/{job_id}")
+async def save_result_to_db(job_id: str):
+    """Save extraction results to PostgreSQL."""
+    if not DB_AVAILABLE:
+        raise HTTPException(503, "Database not available")
+
+    job_dir = BASE_DIR / job_id
+    if not job_dir.exists():
+        raise HTTPException(404, "Job not found")
+
+    result_path = job_dir / "results" / "result.json"
+    if not result_path.exists():
+        raise HTTPException(400, "No results yet for this job")
+
+    with open(result_path) as f:
+        result_data = json.load(f)
+
+    name_path = job_dir / "original_name.txt"
+    orig_name = name_path.read_text().strip() if name_path.exists() else f"job_{job_id}.pdf"
+
+    logger.info("/save-to-db: START — job=%s file=%r", job_id, orig_name)
+
+    doc_id = await upsert_ocr_document(
+        job_id=job_id,
+        file_name=orig_name,
+        status="done",
+        processing_time=result_data.get("processing_time"),
+        confidence_score=result_data.get("overall_confidence"),
+        num_pdfs=result_data.get("num_pdfs"),
+        result_json=result_data,
+    )
+
+    if doc_id:
+        logger.info("/save-to-db: SUCCESS — job=%s doc_id=%s", job_id, doc_id)
+    else:
+        logger.warning("/save-to-db: upsert returned no id — job=%s", job_id)
+
+    return {
+        "status": "saved",
+        "doc_id": doc_id,
+    }
 
 
 @app.get("/download/{job_id}")

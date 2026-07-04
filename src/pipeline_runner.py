@@ -310,6 +310,43 @@ def _run_core_extraction(
     }
 
 
+def _save_to_db(job_dir: Path) -> None:
+    results_path = job_dir / "results" / "result.json"
+    if not results_path.exists():
+        return
+    try:
+        from src.database import upsert_ocr_document
+    except ImportError:
+        logger = logging.getLogger(__name__)
+        logger.info("DB module not available, skipping auto-save")
+        return
+
+    import asyncio
+    logger = logging.getLogger(__name__)
+    try:
+        with open(results_path) as f:
+            result_data = json.load(f)
+        name_path = job_dir / "original_name.txt"
+        orig_name = name_path.read_text().strip() if name_path.exists() else job_dir.name
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(upsert_ocr_document(
+                job_id=job_dir.name,
+                file_name=orig_name,
+                status="done",
+                processing_time=result_data.get("processing_time"),
+                confidence_score=result_data.get("overall_confidence"),
+                num_pdfs=result_data.get("num_pdfs"),
+                result_json=result_data,
+            ))
+        finally:
+            loop.close()
+        logger.info("Auto-save to DB succeeded for job %s", job_dir.name)
+    except Exception as e:
+        logger.warning("Auto-save to DB failed for job %s: %s", job_dir.name, e)
+
+
 def run_pipeline(job_dir: Path, pdf_path: str) -> None:
     if not _wait_for_memory(job_dir):
         return
@@ -357,6 +394,7 @@ def run_pipeline(job_dir: Path, pdf_path: str) -> None:
         _save_results(job_dir, res, job_dir.name)
         _print_field_report(job_dir, res)
         _set_status(job_dir, "done", "Extraction complete. Results ready for download.")
+        _save_to_db(job_dir)
     except Exception as e:
         logger.exception("Pipeline failed")
         _set_status(job_dir, "error", f"{type(e).__name__}: {e}")

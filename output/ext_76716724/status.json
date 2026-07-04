@@ -1,6 +1,6 @@
 {
-  "status": "secondary_verification",
-  "message": "Running secondary verification (OpenAICompatible)...",
+  "status": "done",
+  "message": "OCR complete \u2014 Zoho record updated",
   "log": [
     {
       "t": "10:24:23",
@@ -85,6 +85,26 @@
     {
       "t": "10:28:51",
       "msg": "Running secondary verification (OpenAICompatible)..."
+    },
+    {
+      "t": "10:30:14",
+      "msg": "Filling missing template fields..."
+    },
+    {
+      "t": "10:30:14",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "10:30:14",
+      "msg": "Extraction complete. Results ready for download."
+    },
+    {
+      "t": "10:30:14",
+      "msg": "Updating Zoho Creator record..."
+    },
+    {
+      "t": "10:30:16",
+      "msg": "OCR complete \u2014 Zoho record updated"
     }
   ],
   "pages": 6

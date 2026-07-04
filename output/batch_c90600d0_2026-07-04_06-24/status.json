@@ -1,0 +1,31 @@
+{
+  "status": "done",
+  "message": "Batch complete. Total Tokens -> Primary (openai): Prompt=225238, Completion=5193 | Grand Total=230431",
+  "log": [
+    {
+      "t": "06:24:56",
+      "msg": "Processing PDF Batch: DOC-20260620-WA0044..pdf"
+    },
+    {
+      "t": "06:24:57",
+      "msg": "[DOC-20260620-WA0044..pdf] Queued in batch"
+    },
+    {
+      "t": "06:24:57",
+      "msg": "[DOC-20260620-WA0044..pdf] Rendering pages..."
+    },
+    {
+      "t": "06:25:25",
+      "msg": "[DOC-20260620-WA0044..pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "06:27:32",
+      "msg": "[DOC-20260620-WA0044..pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "06:27:32",
+      "msg": "[DOC-20260620-WA0044..pdf] Done"
+    }
+  ],
+  "pages": 0
+}
