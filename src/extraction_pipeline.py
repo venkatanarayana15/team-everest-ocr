@@ -1,8 +1,6 @@
 import json
 import logging
-import os
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -102,19 +100,6 @@ class StructuredField:
     extracted_by: str | None = None
     verified_by: str | None = None
     original_value: str | None = None
-
-
-@dataclass
-class PipelineResult:
-    overall_confidence: int
-    fields: list[StructuredField] | None = None
-    num_pages: int = 1
-    processing_time: float = 0.0
-    per_stage_timing: dict[str, float] | None = None
-    token_usage: dict | None = None
-    raw_model_json: dict | None = None
-    raw_text: str = ""
-    sections: list[dict] | None = None
 
 
 @dataclass
@@ -276,8 +261,7 @@ class ExtractionPipeline:
 
     # ── Stage 3b: Merge (enhanced with position_hint + confidence weighting) ──
 
-    @staticmethod
-    def _group_words_into_lines(word_boxes: list[WordBox], page: int, y_tolerance: int = 20) -> list[TextLine]:
+    def _group_words_into_lines(self, word_boxes: list[WordBox], page: int, y_tolerance: int = 20) -> list[TextLine]:
         page_words = sorted(
             [wb for wb in word_boxes if wb.page_num == page],
             key=lambda w: (w.bbox[1], w.bbox[0]),
@@ -295,17 +279,21 @@ class ExtractionPipeline:
 
         result: list[TextLine] = []
         for group in lines:
-            xs = [w.bbox[0] for w in group]
-            ys = [w.bbox[1] for w in group]
-            xe = [w.bbox[2] for w in group]
-            ye = [w.bbox[3] for w in group]
             result.append(TextLine(
                 text=" ".join(w.text for w in group),
-                bbox=(min(xs), min(ys), max(xe), max(ye)),
+                bbox=self._words_bbox(group),
                 page=page,
                 words=group,
             ))
         return result
+
+    @staticmethod
+    def _words_bbox(words: list[WordBox]) -> tuple[int, int, int, int]:
+        xs = [w.bbox[0] for w in words]
+        ys = [w.bbox[1] for w in words]
+        xe = [w.bbox[2] for w in words]
+        ye = [w.bbox[3] for w in words]
+        return (min(xs), min(ys), max(xe), max(ye))
 
     def merge_fields(
         self,
@@ -322,34 +310,42 @@ class ExtractionPipeline:
         }
 
         for gf in raw_fields:
-            label = gf.get("label", "")
-            value = gf.get("value", "")
-            confidence = self._parse_confidence(gf)
-            page = gf.get("page", 1)
-            section_number = gf.get("section")
-            if section_number is None:
-                section_number = self._infer_section_from_label(label)
-            needs_clarification = gf.get("needs_clarification", False)
-            position_hint = gf.get("position_hint")
-            label_bbox, value_bbox = self._find_field_bboxes(
-                value, label, page, lines_by_page.get(page, []),
-                position_hint=position_hint,
-            )
-
-            fields.append(StructuredField(
-                label=label,
-                value=value,
-                confidence=confidence,
-                page=page,
-                section_number=section_number,
-                bbox=label_bbox,
-                value_bbox=value_bbox,
-                needs_clarification=needs_clarification,
-                reason=gf.get("reason"),
-                extracted_by=prefix or None,
-            ))
+            fields.append(self._create_structured_field(gf, lines_by_page, prefix))
 
         return fields
+
+    def _create_structured_field(
+        self,
+        gf: dict,
+        lines_by_page: dict[int, list[TextLine]],
+        prefix: str = "",
+    ) -> StructuredField:
+        label = gf.get("label", "")
+        value = gf.get("value", "")
+        confidence = self._parse_confidence(gf)
+        page = gf.get("page", 1)
+        section_number = gf.get("section")
+        if section_number is None:
+            section_number = self._infer_section_from_label(label)
+        needs_clarification = gf.get("needs_clarification", False)
+        position_hint = gf.get("position_hint")
+        label_bbox, value_bbox = self._find_field_bboxes(
+            value, label, page, lines_by_page.get(page, []),
+            position_hint=position_hint,
+        )
+
+        return StructuredField(
+            label=label,
+            value=value,
+            confidence=confidence,
+            page=page,
+            section_number=section_number,
+            bbox=label_bbox,
+            value_bbox=value_bbox,
+            needs_clarification=needs_clarification,
+            reason=gf.get("reason"),
+            extracted_by=prefix or None,
+        )
 
     def _find_field_bboxes(
         self, value: str, label: str, page: int, lines: list[TextLine],
@@ -463,21 +459,13 @@ class ExtractionPipeline:
                 if colon_word and len(best_line.words) > 1:
                     right_words = [wb for wb in best_line.words if wb.bbox[0] > colon_word.bbox[0]]
                     if right_words:
-                        xs = [w.bbox[0] for w in right_words]
-                        ys = [w.bbox[1] for w in right_words]
-                        xe = [w.bbox[2] for w in right_words]
-                        ye = [w.bbox[3] for w in right_words]
-                        return (min(xs), min(ys), max(xe), max(ye))
+                        return self._words_bbox(right_words)
 
             if value_lower:
                 mid_x = (best_line.bbox[0] + best_line.bbox[2]) / 2
                 right_words = [wb for wb in best_line.words if wb.bbox[0] > mid_x]
                 if right_words:
-                    xs = [w.bbox[0] for w in right_words]
-                    ys = [w.bbox[1] for w in right_words]
-                    xe = [w.bbox[2] for w in right_words]
-                    ye = [w.bbox[3] for w in right_words]
-                    return (min(xs), min(ys), max(xe), max(ye))
+                    return self._words_bbox(right_words)
             return best_line.bbox
 
         # ── No position_hint — try all strategies in order ────────────
@@ -493,11 +481,7 @@ class ExtractionPipeline:
             if value_words:
                 value_words.sort(key=lambda x: x[0], reverse=True)
                 chosen = [vw[1] for vw in value_words[:3]]
-                xs = [w.bbox[0] for w in chosen]
-                ys = [w.bbox[1] for w in chosen]
-                xe = [w.bbox[2] for w in chosen]
-                ye = [w.bbox[3] for w in chosen]
-                return (min(xs), min(ys), max(xe), max(ye))
+                return self._words_bbox(chosen)
 
         # Strategy 2: Colon split — words to the right of colon
         colon_idx = best_line.text.find(":")
@@ -513,11 +497,7 @@ class ExtractionPipeline:
             if colon_word and len(best_line.words) > 1:
                 right_words = [wb for wb in best_line.words if wb.bbox[0] > colon_word.bbox[0]]
                 if right_words:
-                    xs = [w.bbox[0] for w in right_words]
-                    ys = [w.bbox[1] for w in right_words]
-                    xe = [w.bbox[2] for w in right_words]
-                    ye = [w.bbox[3] for w in right_words]
-                    return (min(xs), min(ys), max(xe), max(ye))
+                    return self._words_bbox(right_words)
 
         # Strategy 3: Next line below
         best_idx = lines.index(best_line)
@@ -555,7 +535,7 @@ class ExtractionPipeline:
             for f in fields:
                 f.is_verified = True
                 f.verified_by = prefix or None
-            return fields
+            return fields, {}
 
         fields_json = [
             {
@@ -613,34 +593,11 @@ class ExtractionPipeline:
                 lines_by_page[p] = self._group_words_into_lines(word_boxes, p)
 
             for nf in new_fields_data:
-                label = nf.get("label", "")
-                value = nf.get("value", "")
-                confidence = self._parse_confidence(nf)
-                page = nf.get("page", 1)
-                section_number = nf.get("section")
-                if section_number is None:
-                    section_number = self._infer_section_from_label(label)
-                needs_clarification = nf.get("needs_clarification", False)
-                position_hint = nf.get("position_hint")
-                label_bbox, value_bbox = self._find_field_bboxes(
-                    value, label, page, lines_by_page.get(page, []),
-                    position_hint=position_hint,
-                )
-                fields.append(StructuredField(
-                    label=label,
-                    value=value,
-                    confidence=confidence,
-                    page=page,
-                    section_number=section_number,
-                    bbox=label_bbox,
-                    value_bbox=value_bbox,
-                    needs_clarification=needs_clarification,
-                    reason=nf.get("reason"),
-                    is_verified=True,
-                    verifier_confidence=confidence,
-                    verification_note="Added by secondary model",
-                    verified_by=prefix or None,
-                ))
+                field_obj = self._create_structured_field(nf, lines_by_page, prefix)
+                field_obj.is_verified = True
+                field_obj.verifier_confidence = field_obj.confidence
+                field_obj.verification_note = "Added by secondary model"
+                fields.append(field_obj)
 
             logger.info("Secondary model added %d new fields", len(new_fields_data))
 
@@ -663,113 +620,4 @@ class ExtractionPipeline:
                 ))
         return fields
 
-    # ── Dual-model pipeline ────────────────────────────────────────
 
-    def run_dual(self, pdf_path: str, job_dir: str) -> PipelineResult:
-        t0 = time.time()
-        os.makedirs(job_dir, exist_ok=True)
-
-        primary_name = type(self.primary_client).__name__.replace("Client", "")
-        secondary_name = type(self.secondary_client).__name__.replace("Client", "")
-
-        logger.info("=== Dual pipeline: %s → Tesseract → %s ===", primary_name, secondary_name)
-
-        per_stage = {}
-        token_usage: dict = {
-            "primary": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-            "secondary": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-        }
-
-        # ── Stage 1: Preprocess ─────────────────────────────────────
-        t1 = time.time()
-        self.preprocess(pdf_path, job_dir)
-        per_stage["preprocessing"] = time.time() - t1
-
-        # ── Stage 2: Bbox detection ─────────────────────────────────
-        t1 = time.time()
-        word_boxes = self.run_bbox(pdf_path)
-        per_stage["bbox"] = time.time() - t1
-        num_pages = max({wb.page_num for wb in word_boxes}, default=1)
-
-        pages_dir = Path(job_dir) / "pages"
-        page_images = {
-            int(p.stem.split("_")[1]): str(p)
-            for p in sorted(pages_dir.glob("page_*.png"))
-            if "_original" not in p.stem
-        }
-
-        # ── Stage 3a: Primary extraction ──────────────────────────
-        logger.info("[%s] Primary extraction with %s...", primary_name, primary_name)
-        t1 = time.time()
-        model_data, primary_token_usage = self.run_primary_extraction(pdf_path, page_images)
-        per_stage["primary_extraction"] = time.time() - t1
-        token_usage["primary"] = primary_token_usage
-
-        llm_fields: list[StructuredField] = []
-        overall_confidence = 0
-        raw_text = ""
-
-        if model_data:
-            overall_confidence = model_data.get("overall_confidence", 0)
-            raw_text = model_data.get("raw_text", "")
-
-            # ── Stage 3b: Merge (LLM → StructuredField) ──────────
-            t1 = time.time()
-            llm_fields = self.merge_fields(model_data, word_boxes, prefix=primary_name)
-            per_stage["merge"] = time.time() - t1
-            logger.info("Primary: %d fields from LLM", len(llm_fields))
-        else:
-            logger.warning("Primary extraction failed")
-            overall_confidence = 0
-            t1 = time.time()
-            llm_fields = [
-                StructuredField(
-                    label=wb.text,
-                    value=wb.text,
-                    confidence=int(wb.confidence),
-                    page=wb.page_num,
-                    bbox=wb.bbox,
-                    extracted_by=primary_name,
-                )
-                for wb in word_boxes
-            ]
-            per_stage["merge"] = time.time() - t1
-
-        # ── Stage 4: Secondary verification ──────────────────────
-        logger.info("[%s] Secondary verification with %s...", secondary_name, secondary_name)
-        t1 = time.time()
-        llm_fields, secondary_usage = self.verify_secondary(llm_fields, word_boxes, job_dir, prefix=secondary_name)
-        per_stage["secondary_verification"] = time.time() - t1
-        token_usage["secondary"] = secondary_usage
-        logger.info("After secondary: %d fields total", len(llm_fields))
-
-        # Compute aggregate token usage
-        total_prompt = (primary_token_usage.get("prompt_tokens", 0) or 0) + (secondary_usage.get("prompt_tokens", 0) or 0)
-        total_completion = (primary_token_usage.get("completion_tokens", 0) or 0) + (secondary_usage.get("completion_tokens", 0) or 0)
-        total_total = (primary_token_usage.get("total_tokens", 0) or 0) + (secondary_usage.get("total_tokens", 0) or 0)
-        token_usage["total"] = {
-            "prompt_tokens": total_prompt,
-            "completion_tokens": total_completion,
-            "total_tokens": total_total,
-        }
-        logger.info("Token usage: primary=%s secondary=%s total=%s",
-                     primary_token_usage, secondary_usage, token_usage["total"])
-
-        # ── Stage 5: Fill missing template fields ────────────────
-        t1 = time.time()
-        llm_fields = self.fill_missing_template_fields(llm_fields)
-        per_stage["template_fill"] = time.time() - t1
-
-        elapsed = time.time() - t0
-        per_stage["total"] = elapsed
-        return PipelineResult(
-            overall_confidence=overall_confidence,
-            fields=llm_fields,
-            num_pages=num_pages,
-            processing_time=elapsed,
-            per_stage_timing=per_stage,
-            token_usage=token_usage,
-            raw_model_json=model_data,
-            raw_text=raw_text,
-            sections=(model_data or {}).get("sections"),
-        )

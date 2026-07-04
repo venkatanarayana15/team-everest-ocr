@@ -111,8 +111,7 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
   const [loading, setLoading] = useState(true);
   const [selectedField, setSelectedField] = useState<Field | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [savingToDb, setSavingToDb] = useState(false);
-  const [dbSaved, setDbSaved] = useState(false);
+
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [textView, setTextView] = useState(false);
   const [rightPanelFormat, setRightPanelFormat] = useState<'fields' | 'txt'>('fields');
@@ -289,20 +288,6 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
       console.error('Failed to update raw text:', e);
     }
   }, [selectedJobId]);
-
-  const handleSaveToDb = useCallback(async () => {
-    if (savingToDb || dbSaved) return;
-    setSavingToDb(true);
-    try {
-      const result = await saveToDB(selectedJobId);
-      if (result.status === 'saved') {
-        setDbSaved(true);
-      }
-    } catch (e: any) {
-      console.error('Save to DB failed:', e);
-    }
-    setSavingToDb(false);
-  }, [selectedJobId, savingToDb, dbSaved]);
 
   const currentJobInfo = jobStatuses[selectedJobId];
   const currentStatus = currentJobInfo?.status || '';
@@ -536,22 +521,6 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
                 📝 Edit Page Text
               </button>
             </div>
-          )}
-          <div style={{ flex: 1 }} />
-          {selectedJobId && (
-            <button
-              onClick={handleSaveToDb}
-              disabled={savingToDb || dbSaved}
-              style={{
-                padding: '6px 16px', fontSize: 13, fontWeight: 600,
-                border: 'none', borderRadius: 'var(--radius-md)',
-                cursor: savingToDb || dbSaved ? 'default' : 'pointer',
-                background: dbSaved ? 'var(--color-success-light)' : savingToDb ? 'var(--color-bg)' : 'var(--color-primary)',
-                color: dbSaved ? 'var(--color-success-dark)' : savingToDb ? 'var(--color-text-muted)' : '#fff',
-                transition: 'all var(--transition-fast)',
-              }}>
-              {dbSaved ? '✓ Saved to Database' : savingToDb ? 'Saving...' : 'Save to Database'}
-            </button>
           )}
         </div>
 

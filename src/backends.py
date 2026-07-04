@@ -151,60 +151,11 @@ class TesseractBackend(OCRBackend):
         return OCRResult(pages_data=pages_data, word_boxes=all_boxes)
 
 
-# ─── Gemini API Backend ───────────────────────────────────────────
-
-
-class GeminiBackend(OCRBackend):
-    def __init__(self, api_key: str | None = None, model_name: str = "gemini-2.5-flash"):
-        self.api_key = api_key
-        self.model_name = model_name
-
-    def process(self, pdf_path: str, config: Config) -> OCRResult:
-        import google.generativeai as genai
-
-        def _load_dotenv(path: str = ".env") -> None:
-            if not os.path.exists(path):
-                return
-            with open(path) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#") or "=" not in line:
-                        continue
-                    k, _, v = line.partition("=")
-                    os.environ.setdefault(k.strip(), v.strip())
-
-        _load_dotenv()
-        key = self.api_key or os.environ.get("GEMINI_API_KEY")
-        if not key:
-            raise ValueError("Gemini API key required. Set GEMINI_API_KEY env var or pass --gemini-key.")
-        genai.configure(api_key=key)
-
-        prompt = (
-            "Perform a clean OCR text extraction of this document. "
-            "Return the output in structured Markdown, preserving tables and checkmarks."
-        )
-
-        logger.info("Uploading: %s", pdf_path)
-        sample_file = genai.upload_file(path=pdf_path, mime_type="application/pdf")
-        logger.info("Uploaded: %s", sample_file.name)
-
-        model = genai.GenerativeModel(self.model_name)
-        logger.info("Calling %s...", self.model_name)
-        response = model.generate_content([sample_file, prompt])
-        text = response.text
-
-        if hasattr(response, "usage_metadata"):
-            logger.info("Tokens: %s", response.usage_metadata)
-
-        return OCRResult(raw_text=text)
-
-
 # ─── Factory ───────────────────────────────────────────────────────
 
 
 _backends: dict[str, type[OCRBackend]] = {
     "tesseract": TesseractBackend,
-    "gemini": GeminiBackend,
 }
 
 
