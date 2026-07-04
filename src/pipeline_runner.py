@@ -328,6 +328,13 @@ def _save_to_db(job_dir: Path) -> None:
             result_data = json.load(f)
         name_path = job_dir / "original_name.txt"
         orig_name = name_path.read_text().strip() if name_path.exists() else job_dir.name
+        logger.info(
+            "Uploading extracted data to Supabase... (file=%r, fields=%d, confidence=%s, time=%.2fs)",
+            orig_name,
+            len(result_data.get("fields", [])),
+            result_data.get("overall_confidence", "N/A"),
+            result_data.get("processing_time", 0),
+        )
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
