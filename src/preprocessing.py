@@ -6,13 +6,18 @@ from src.config import Config
 
 def to_grayscale(image: np.ndarray) -> np.ndarray:
     if len(image.shape) == 3:
-        return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        return cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     return image
 
 
 def deskew(image: np.ndarray, max_angle: int = 5) -> np.ndarray:
     """Deskew using edge detection so it works on both grayscale and binary images."""
-    edges = cv2.Canny(image, 50, 150, apertureSize=3)
+    h, w = image.shape[:2]
+    # Downscale for angle calculation to make it extremely fast (milliseconds instead of seconds)
+    scale = 500.0 / max(h, w)
+    small = cv2.resize(image, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+
+    edges = cv2.Canny(small, 50, 150, apertureSize=3)
     coords = np.column_stack(np.where(edges > 0))
     if len(coords) < 50:
         return image
@@ -21,7 +26,7 @@ def deskew(image: np.ndarray, max_angle: int = 5) -> np.ndarray:
         angle = 90 + angle
     if abs(angle) > max_angle or abs(angle) < 0.5:
         return image
-    h, w = image.shape[:2]
+    
     center = (w // 2, h // 2)
     M = cv2.getRotationMatrix2D(center, angle, 1.0)
     return cv2.warpAffine(

@@ -150,3 +150,9 @@ export async function deleteJob(jobId: string): Promise<any> {
   if (!res.ok) throw new Error('Failed to delete job');
   return res.json();
 }
+
+export async function saveToDB(jobId: string): Promise<any> {
+  const res = await fetch(`${API}/save-to-db/${jobId}`, { method: 'POST' });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}

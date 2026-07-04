@@ -485,6 +485,31 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
             {textView ? '🖼️ Side-by-Side' : '📝 Full Text'}
           </button>
 
+          <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px' }} />
+
+          <button
+            onClick={async () => {
+              try {
+                await saveToDB(selectedJobId);
+                alert('Saved to database successfully!');
+              } catch (e: any) {
+                alert('Failed to save to database: ' + (e.message || 'Unknown error'));
+              }
+            }}
+            style={{
+              padding: '6px 12px', fontSize: 12, fontWeight: 600,
+              border: '1px solid var(--color-border-hover)',
+              borderRadius: 'var(--radius-md)',
+              cursor: 'pointer',
+              background: 'var(--color-surface)',
+              color: 'var(--color-text)',
+              transition: 'all var(--transition-fast)',
+            }}
+            title="Save extraction results to database"
+          >
+            💾 Save to DB
+          </button>
+
           {!textView && (
             <div style={{
               display: 'flex',
