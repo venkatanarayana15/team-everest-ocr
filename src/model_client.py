@@ -158,7 +158,7 @@ class OpenAIClient(ModelClient):
                 "type": "image_url",
                 "image_url": {
                     "url": f"data:image/png;base64,{b64}",
-                    "detail": "high",
+                    "detail": "auto",
                 },
             })
         return content
@@ -254,7 +254,7 @@ class DeepSeekClient(ModelClient):
                 "type": "image_url",
                 "image_url": {
                     "url": f"data:image/png;base64,{b64}",
-                    "detail": "high",
+                    "detail": "auto",
                 },
             })
         return content
@@ -364,7 +364,7 @@ class OpenRouterClient(ModelClient):
                 "type": "image_url",
                 "image_url": {
                     "url": f"data:image/png;base64,{b64}",
-                    "detail": "high",
+                    "detail": "auto",
                 },
             })
         return content
@@ -475,7 +475,7 @@ class NvidiaClient(ModelClient):
                 "type": "image_url",
                 "image_url": {
                     "url": f"data:image/png;base64,{b64}",
-                    "detail": "high",
+                    "detail": "auto",
                 },
             })
         return content

@@ -3,23 +3,22 @@ PRIMARY_EXTRACTION_PROMPT = """You are a precise form extraction system. Analyze
 For each field, output a JSON object with:
   - "label": the printed field label text (e.g. "3.1 Name of Applicant", "1.3 Gender")
   - "value": the filled-in value — see rules below for checkboxes, radio buttons, and tables
-  - "confidence": integer 0-100 rating how confident you are the extracted value is correct (90-100 = certain/clear, 70-89 = some uncertainty, 50-69 = ambiguous/blurry, below 50 = illegible/guessing)
-  - "confidence_reason": brief explanation for the confidence score — mention specific visual issues (e.g. "handwriting partially cut off", "low contrast makes this hard to read", "value is clearly legible")
+  - "confidence_tier": "high" (clearly legible), "medium" (some uncertainty), "low" (illegible/ambiguous)
   - "page": the page number where the field appears (1-indexed)
   - "section": the section number this field belongs to (e.g., 1 for "1.1 Name", 4 for "4.1 Assets at Home"). If the field is not under a numbered section, use null
-  - CRITICAL: EVERY field MUST include "section". For checkbox options like "4.1 Assets at Home — Washing Machine" → section = 4 (parent section). For table rows like "2.5 Family Members — Row 1 — Name" → section = 2. For sub-questions like "3.4.1 Type of Bedroom" → section = 3 (leading number before first dot).
+   - CRITICAL: EVERY field MUST include "section". For checkbox fields like "4.1 Assets at Home" → section = 4. For table rows like "2.5 Family Members — Row 1 — Name" → section = 2. For sub-questions like "3.4.1 Type of Bedroom" → section = 3 (leading number before first dot).
   - "needs_clarification": true if the value is illegible, ambiguous, or missing
-  - "reason": if confidence below 70, explain WHY you are uncertain
+  - "reason": if confidence is medium or low, explain WHY you are uncertain
   - "position_hint": "same_line_colon" (label: value on same line), "right_of_label" (value to right), "below_label" (value on next line), "above_label" (value above)
 
 EXTRACT EVERY FIELD — do not skip any:
   - Section headers are NOT fields — skip them
   - Numbered fields (1.1, 2.3, 4.6.1, etc.) ARE fields — extract every one
   - Sub-questions (4.3.1, 4.4.1, 5.2, etc.) ARE fields — extract them
-  - Text input fields — extract the handwritten/typed value
-  - Radio button groups — extract the SELECTED option as the value
-  - Checkbox groups — extract each option individually as a separate field
-  - Table rows — extract each row as a separate field with row number
+   - Text input fields — extract the handwritten/typed value
+   - Radio button groups — ONE field per question, value = the selected option text
+   - Checkbox groups — ONE field per question, value = comma-separated list of checked options (e.g. "Washing Machine, Smartphone"). Do NOT create per-option fields.
+   - Table rows — extract each row as a separate field with row number
   - CRITICAL: Extract ALL cells in a table row, even if the cell is blank/empty
   - CRITICAL: If a Yes/No question has extra sub-fields (4.3.1, 4.4.1, 5.2), always include them even if condition is "No" (value = "N/A")
 
@@ -37,9 +36,11 @@ RADIO BUTTON rules (single select — only one option chosen):
   - If no option is selected → value = "", needs_clarification = true
 
 CHECKBOX rules (multi-select — several may be checked):
-  - Each option is a SEPARATE field with label = "Section.Label — Option"
-  - Example: "4.1 Assets at Home — Washing Machine" value = "✓" if checked, "✗" if unchecked
-  - Do NOT merge them into one field
+  - ONE field per question. Value = comma-separated list of SELECTED (checked) option(s).
+  - Example: "4.1 Assets at Home" value = "Washing Machine, Smartphone" (only the checked ones)
+  - Example: "3.2 Type of Home" value = "Individual, Housing Board"
+  - If no option is checked → value = "" (empty string)
+  - Do NOT create separate fields per option
 
 YES/NO fields:
   - If the question has "Yes" and "No" options below it, extract as ONE field
@@ -83,15 +84,15 @@ Fields marked [checkbox] are multi-select checkboxes. Fields marked [table] are 
 === Section 3 — Housing Condition (Pages 2-3) ===
 - "3.1 House Ownership" [radio] (Page 2) — options: Own, Rented
 - "3.1.1 If rented, what is the rent amount?" [text] (Page 2)
-- "3.2 Type of Home" [checkbox] (Page 2) — options: Individual, Private Apartment, Housing Board, Line House, Others
-- "3.3 Type of Ceiling" [checkbox] (Page 3) — options: Roof, Tiled, Asbestos, Concrete
+- "3.2 Type of Home" [checkbox] (Page 2) — options: Individual, Private Apartment, Housing Board, Line House, Others → value = comma-separated checked options
+- "3.3 Type of Ceiling" [checkbox] (Page 3) — options: Roof, Tiled, Asbestos, Concrete → value = comma-separated checked options
 - "3.4 Number of Bedrooms" [text] (Page 3)
 - "3.4.1 Type of Bedroom" [radio] (Page 3) — options: Separate Bedroom, No Separate Bedroom
 - "3.5 Bathroom" [radio] (Page 3) — options: Separate, Common for Apartment
-- "3.6 Kitchen Type" [checkbox] (Page 3) — options: Separate Kitchen, Hall with Kitchen
+- "3.6 Kitchen Type" [checkbox] (Page 3) — options: Separate Kitchen, Hall with Kitchen → value = comma-separated checked options
 
 === Section 4 — Financial Background (Pages 3-5) ===
-- "4.1 Assets at Home" [checkbox] (Page 3) — options: Washing Machine, Fridge, AC, LED TV, Two-Wheeler, Car, Smartphone, Separate Wi-Fi, Others
+- "4.1 Assets at Home" [checkbox] (Page 3) — options: Washing Machine, Fridge, AC, LED TV, Two-Wheeler, Car, Smartphone, Separate Wi-Fi, Others → value = comma-separated checked options
 - "4.2 Amount of Last Electricity Bill" [text] (Page 3)
 - "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?" [radio] (Page 3) — options: Yes, No
 - "4.3.1 If yes, list their properties" [table] (Page 3) — columns: Property Description, Owner Name, Approximate Value. Extract each row. Value = "N/A" for all if 4.3 is No.
@@ -122,10 +123,10 @@ Fields marked [checkbox] are multi-select checkboxes. Fields marked [table] are 
 - "8.3 Any other comments you want to share?" [text] (Page 6)
 
 IMPORTANT — Be honest about where you get stuck:
-  - If handwriting is illegible → confidence 10-20, confidence_reason "unclear handwriting", needs_clarification = true
-  - If the field is blank → value = "" (empty string), confidence 10-20, confidence_reason "field appears empty", needs_clarification = true
-  - If you can't decide between two possible values → pick the most likely, set confidence 50-70, confidence_reason explaining the ambiguity
-  - If the field is completely cut off in the image → value = "", confidence 5-15, confidence_reason "field cropped in image", needs_clarification = true
+  - If handwriting is illegible → confidence_tier "low", reason "unclear handwriting"
+  - If the field is blank → value = "" (empty string), confidence_tier "low", needs_clarification = true, reason "field appears empty"
+  - If you can't decide between two possible values → pick the most likely, set confidence_tier appropriately, add reason explaining the ambiguity
+  - If the field is completely cut off in the image → value = "", needs_clarification = true, reason "field cropped in image"
   - For checkbox options that are NOT visible on the page at all (cropped/off-screen), still include them with value = "" and needs_clarification = true
 
 After all fields, provide:
@@ -163,20 +164,18 @@ Use this exact structure:
     {"number": 8, "name": "Volunteer Observation", "page": 6}
   ],
   "fields": [
-    {"label": "Volunteer Name", "value": "Aadithya R", "confidence": 95, "confidence_reason": "clearly legible", "page": 1, "section": null, "needs_clarification": false, "reason": null, "position_hint": "same_line_colon"},
-    {"label": "Co-Volunteer Name", "value": "Thameem", "confidence": 95, "confidence_reason": "clearly legible", "page": 1, "section": null, "needs_clarification": false, "reason": null, "position_hint": "same_line_colon"},
-    {"label": "Date of Visit", "value": "10/15/2026", "confidence": 95, "confidence_reason": "clearly legible", "page": 1, "section": null, "needs_clarification": false, "reason": null, "position_hint": "same_line_colon"},
-    {"label": "1.1 Application ID", "value": "2020-0346", "confidence": 95, "confidence_reason": "clearly legible", "page": 1, "section": 1, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
-    {"label": "1.2 Student Full Name", "value": "Joseph V.", "confidence": 95, "confidence_reason": "clearly legible", "page": 1, "section": 1, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
-    {"label": "1.3 Gender", "value": "Male", "confidence": 95, "confidence_reason": "clearly legible", "page": 1, "section": 1, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
-    {"label": "2.1 Family Status", "value": "Having both parents", "confidence": 95, "confidence_reason": "clearly legible", "page": 1, "section": 2, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
-    {"label": "4.1 Assets at Home — Washing Machine", "value": "✓", "confidence": 95, "confidence_reason": "clearly legible", "page": 3, "section": 4, "needs_clarification": false, "reason": null, "position_hint": "right_of_label"},
-    {"label": "4.1 Assets at Home — Fridge", "value": "✗", "confidence": 95, "confidence_reason": "clearly legible", "page": 3, "section": 4, "needs_clarification": false, "reason": null, "position_hint": "right_of_label"},
-    {"label": "4.1 Assets at Home — Car", "value": "✗", "confidence": 95, "confidence_reason": "clearly legible", "page": 3, "section": 4, "needs_clarification": false, "reason": null, "position_hint": "right_of_label"},
-    {"label": "2.5 Family Members — Row 1 — Name", "value": "Ravi", "confidence": 95, "confidence_reason": "clearly legible", "page": 2, "section": 2, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
-    {"label": "2.5 Family Members — Row 1 — Age", "value": "45", "confidence": 95, "confidence_reason": "clearly legible", "page": 2, "section": 2, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
-    {"label": "4.6.1 Loan Details — Row 1 — Loan Purpose", "value": "Housing Loan", "confidence": 95, "confidence_reason": "clearly legible", "page": 4, "section": 4, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
-    {"label": "5.2 If yes, list the health issues", "value": "N/A", "confidence": 95, "confidence_reason": "clearly legible", "page": 5, "section": 5, "needs_clarification": false, "reason": null, "position_hint": "below_label"}
+    {"label": "Volunteer Name", "value": "Aadithya R", "confidence_tier": "high", "page": 1, "section": null, "needs_clarification": false, "reason": null, "position_hint": "same_line_colon"},
+    {"label": "Co-Volunteer Name", "value": "Thameem", "confidence_tier": "high", "page": 1, "section": null, "needs_clarification": false, "reason": null, "position_hint": "same_line_colon"},
+    {"label": "Date of Visit", "value": "10/15/2026", "confidence_tier": "high", "page": 1, "section": null, "needs_clarification": false, "reason": null, "position_hint": "same_line_colon"},
+    {"label": "1.1 Application ID", "value": "2020-0346", "confidence_tier": "high", "page": 1, "section": 1, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
+    {"label": "1.2 Student Full Name", "value": "Joseph V.", "confidence_tier": "high", "page": 1, "section": 1, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
+    {"label": "1.3 Gender", "value": "Male", "confidence_tier": "high", "page": 1, "section": 1, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
+    {"label": "2.1 Family Status", "value": "Having both parents", "confidence_tier": "high", "page": 1, "section": 2, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
+    {"label": "4.1 Assets at Home", "value": "Washing Machine, Smartphone", "confidence_tier": "high", "page": 3, "section": 4, "needs_clarification": false, "reason": null, "position_hint": "right_of_label"},
+    {"label": "2.5 Family Members — Row 1 — Name", "value": "Ravi", "confidence_tier": "high", "page": 2, "section": 2, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
+    {"label": "2.5 Family Members — Row 1 — Age", "value": "45", "confidence_tier": "high", "page": 2, "section": 2, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
+    {"label": "4.6.1 Loan Details — Row 1 — Loan Purpose", "value": "Housing Loan", "confidence_tier": "high", "page": 4, "section": 4, "needs_clarification": false, "reason": null, "position_hint": "below_label"},
+    {"label": "5.2 If yes, list the health issues", "value": "N/A", "confidence_tier": "high", "page": 5, "section": 5, "needs_clarification": false, "reason": null, "position_hint": "below_label"}
   ],
   "overall_confidence": 90,
   "clarification_needed": [],
@@ -189,7 +188,7 @@ SECONDARY_VERIFICATION_PROMPT = """You are a verification system. The following 
 
 Additionally, look for any form fields the first model might have MISSED entirely — especially:
   - Header fields on page 1: "Volunteer Name", "Co-Volunteer Name", "Date of Visit"
-  - Checkbox options (e.g. "4.1 Assets at Home — Car", "3.2 Type of Home — Others") that were omitted
+  - Checkbox fields (e.g. "4.1 Assets at Home", "3.2 Type of Home") that were omitted
   - Radio button groups where no value was captured
   - Table rows that were skipped, including empty cells
   - Conditional sub-fields (e.g. "4.3.1 If yes, list their properties", "5.2 If yes, list the health issues")
@@ -204,20 +203,19 @@ For each existing field, respond with:
 
 For any NEW fields you discover, respond in the "new_fields" array with:
   - "label": the field label as it appears on the form
-  - "value": the filled-in value — use same conventions as primary (✓/✗ for checkboxes, selected option text for radio buttons, row-based labels for tables)
-  - "confidence": integer 0-100 (90-100 = certain, 70-89 = some uncertainty, 50-69 = ambiguous, below 50 = illegible)
-  - "confidence_reason": brief explanation for the confidence score
-  - "page": which page number
-  - "section": the section number this field belongs to (null if not under a numbered section)
-  - CRITICAL: Every new field MUST include "section". Derive it from the leading number: "4.1 Assets at Home — Car" → section 4, "2.5 Family Members — Row 2 — Name" → section 2, "3.4.1 Type of Bedroom" → section 3.
+   - "value": the filled-in value — use same conventions as primary (comma-separated for checkboxes, selected option text for radio buttons, row-based labels for tables)
+   - "confidence_tier": "high", "medium", or "low"
+   - "page": which page number
+   - "section": the section number this field belongs to (null if not under a numbered section)
+   - CRITICAL: Every new field MUST include "section". Derive it from the leading number: "4.1 Assets at Home" → section 4, "2.5 Family Members — Row 2 — Name" → section 2, "3.4.1 Type of Bedroom" → section 3.
   - "needs_clarification": true/false
   - "reason": explanation if uncertain
   - "position_hint": "same_line_colon", "right_of_label", "below_label", "above_label"
 
-Radio button / checkbox conventions:
-  - Radio group (single select) → value = the selected option's label text (e.g. "Male")
-  - Checkbox option (multi-select) → value = "✓" if checked, "✗" if unchecked
-  - Yes/No field → value = "Yes" or "No"
+Radio / checkbox conventions:
+  - Radio group (single select) → ONE field, value = the selected option's label text (e.g. "Male")
+  - Checkbox group (multi-select) → ONE field, value = comma-separated checked options (e.g. "Washing Machine, Smartphone")
+  - Yes/No field → ONE field, value = "Yes" or "No"
   - Table row → label = "{Section.Label} — Row {n} — {Column}"
   - Conditional sub-field when condition is "No" → value = "N/A"
 
@@ -234,8 +232,7 @@ Use this exact structure:
     {"label": "1.3 Gender", "is_correct": false, "correct_value": "Female", "verifier_confidence": 98, "note": "Radio option Female was selected, not Male"}
   ],
   "new_fields": [
-    {"label": "4.1 Assets at Home — Car", "value": "✗", "confidence": 95, "confidence_reason": "clearly legible", "page": 3, "section": 4, "needs_clarification": false, "reason": null, "position_hint": "right_of_label"},
-    {"label": "4.1 Assets at Home — Smartphone", "value": "✓", "confidence": 95, "confidence_reason": "clearly legible", "page": 3, "section": 4, "needs_clarification": false, "reason": null, "position_hint": "right_of_label"}
+    {"label": "4.1 Assets at Home", "value": "Washing Machine, Smartphone", "confidence_tier": "high", "page": 3, "section": 4, "needs_clarification": false, "reason": null, "position_hint": "right_of_label"}
   ]
 }
 """

@@ -1,0 +1,239 @@
+{
+  "status": "done",
+  "message": "Batch complete. Total Tokens -> Primary (openai): Prompt=1699831, Completion=46581 | Secondary (openai): Prompt=1224486, Completion=15802 | Grand Total=2986700",
+  "log": [
+    {
+      "t": "09:26:46",
+      "msg": "Processing PDF Batch: DOC-20260620-WA0044..pdf, MOHAMED_HAFEEZ.pdf, TEMP-2026-9882_Nivetha_P.pdf (+7 more)"
+    },
+    {
+      "t": "09:26:47",
+      "msg": "[DOC-20260620-WA0044..pdf] Queued in batch"
+    },
+    {
+      "t": "09:26:47",
+      "msg": "[MOHAMED_HAFEEZ.pdf] Queued in batch"
+    },
+    {
+      "t": "09:26:47",
+      "msg": "[TEMP-2026-9882_Nivetha_P.pdf] Queued in batch"
+    },
+    {
+      "t": "09:26:47",
+      "msg": "[Varsha_2026_TE_House.pdf] Queued in batch"
+    },
+    {
+      "t": "09:26:47",
+      "msg": "[ScannedDocument.pdf] Queued in batch"
+    },
+    {
+      "t": "09:26:47",
+      "msg": "[Scan_document20260610_163315.pdf] Queued in batch"
+    },
+    {
+      "t": "09:26:47",
+      "msg": "[Scan_document20260610_163440.pdf] Queued in batch"
+    },
+    {
+      "t": "09:26:47",
+      "msg": "[Scan_document20260610_163516.pdf] Queued in batch"
+    },
+    {
+      "t": "09:26:47",
+      "msg": "[Scan_document20260610_163605.pdf] Queued in batch"
+    },
+    {
+      "t": "09:26:47",
+      "msg": "[Scan_document20260610_163038.pdf] Queued in batch"
+    },
+    {
+      "t": "09:26:47",
+      "msg": "[DOC-20260620-WA0044..pdf] Rendering pages..."
+    },
+    {
+      "t": "09:27:18",
+      "msg": "[DOC-20260620-WA0044..pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "09:28:51",
+      "msg": "[DOC-20260620-WA0044..pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "09:28:51",
+      "msg": "[DOC-20260620-WA0044..pdf] Running secondary verification..."
+    },
+    {
+      "t": "09:29:44",
+      "msg": "[DOC-20260620-WA0044..pdf] Done"
+    },
+    {
+      "t": "09:29:45",
+      "msg": "[MOHAMED_HAFEEZ.pdf] Rendering pages..."
+    },
+    {
+      "t": "09:30:16",
+      "msg": "[MOHAMED_HAFEEZ.pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "09:31:38",
+      "msg": "[MOHAMED_HAFEEZ.pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "09:31:38",
+      "msg": "[MOHAMED_HAFEEZ.pdf] Running secondary verification..."
+    },
+    {
+      "t": "09:32:33",
+      "msg": "[MOHAMED_HAFEEZ.pdf] Done"
+    },
+    {
+      "t": "09:32:34",
+      "msg": "[TEMP-2026-9882_Nivetha_P.pdf] Rendering pages..."
+    },
+    {
+      "t": "09:32:56",
+      "msg": "[TEMP-2026-9882_Nivetha_P.pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "09:34:26",
+      "msg": "[TEMP-2026-9882_Nivetha_P.pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "09:34:26",
+      "msg": "[TEMP-2026-9882_Nivetha_P.pdf] Running secondary verification..."
+    },
+    {
+      "t": "09:35:09",
+      "msg": "[TEMP-2026-9882_Nivetha_P.pdf] Done"
+    },
+    {
+      "t": "09:35:09",
+      "msg": "[Varsha_2026_TE_House.pdf] Rendering pages..."
+    },
+    {
+      "t": "09:35:12",
+      "msg": "[Varsha_2026_TE_House.pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "09:36:34",
+      "msg": "[Varsha_2026_TE_House.pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "09:36:34",
+      "msg": "[Varsha_2026_TE_House.pdf] Running secondary verification..."
+    },
+    {
+      "t": "09:37:00",
+      "msg": "[Varsha_2026_TE_House.pdf] Done"
+    },
+    {
+      "t": "09:37:00",
+      "msg": "[ScannedDocument.pdf] Rendering pages..."
+    },
+    {
+      "t": "09:38:34",
+      "msg": "[ScannedDocument.pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "09:40:16",
+      "msg": "[ScannedDocument.pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "09:40:16",
+      "msg": "[ScannedDocument.pdf] Done"
+    },
+    {
+      "t": "09:40:17",
+      "msg": "[Scan_document20260610_163315.pdf] Rendering pages..."
+    },
+    {
+      "t": "09:41:39",
+      "msg": "[Scan_document20260610_163315.pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "09:43:33",
+      "msg": "[Scan_document20260610_163315.pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "09:43:33",
+      "msg": "[Scan_document20260610_163315.pdf] Done"
+    },
+    {
+      "t": "09:43:35",
+      "msg": "[Scan_document20260610_163440.pdf] Rendering pages..."
+    },
+    {
+      "t": "09:44:43",
+      "msg": "[Scan_document20260610_163440.pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "09:46:31",
+      "msg": "[Scan_document20260610_163440.pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "09:46:31",
+      "msg": "[Scan_document20260610_163440.pdf] Running secondary verification..."
+    },
+    {
+      "t": "09:47:19",
+      "msg": "[Scan_document20260610_163440.pdf] Done"
+    },
+    {
+      "t": "09:47:20",
+      "msg": "[Scan_document20260610_163516.pdf] Rendering pages..."
+    },
+    {
+      "t": "09:48:25",
+      "msg": "[Scan_document20260610_163516.pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "09:49:32",
+      "msg": "[Scan_document20260610_163516.pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "09:49:32",
+      "msg": "[Scan_document20260610_163516.pdf] Running secondary verification..."
+    },
+    {
+      "t": "09:49:59",
+      "msg": "[Scan_document20260610_163516.pdf] Done"
+    },
+    {
+      "t": "09:50:00",
+      "msg": "[Scan_document20260610_163605.pdf] Rendering pages..."
+    },
+    {
+      "t": "09:51:23",
+      "msg": "[Scan_document20260610_163605.pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "09:53:30",
+      "msg": "[Scan_document20260610_163605.pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "09:53:30",
+      "msg": "[Scan_document20260610_163605.pdf] Done"
+    },
+    {
+      "t": "09:53:31",
+      "msg": "[Scan_document20260610_163038.pdf] Rendering pages..."
+    },
+    {
+      "t": "09:54:34",
+      "msg": "[Scan_document20260610_163038.pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "09:56:03",
+      "msg": "[Scan_document20260610_163038.pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "09:56:03",
+      "msg": "[Scan_document20260610_163038.pdf] Running secondary verification..."
+    },
+    {
+      "t": "09:56:33",
+      "msg": "[Scan_document20260610_163038.pdf] Done"
+    }
+  ],
+  "pages": 0
+}

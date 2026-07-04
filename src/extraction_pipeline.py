@@ -647,20 +647,27 @@ class ExtractionPipeline:
         return fields, secondary_token_usage
 
     @staticmethod
+    @staticmethod
+    def _checkbox_sub_option(label: str) -> bool:
+        return "\u2014" in label
+
     def fill_missing_template_fields(fields: list[StructuredField]) -> list[StructuredField]:
         existing_labels = {f.label for f in fields}
         for tpl in KNOWN_TEMPLATE_FIELDS:
-            if tpl["label"] not in existing_labels:
-                fields.append(StructuredField(
-                    label=tpl["label"],
-                    value="",
-                    confidence=0,
-                    page=tpl["page"],
-                    section_number=tpl["section_number"],
-                    needs_clarification=True,
-                    reason="Not extracted by LLM",
-                    extracted_by="template_fill",
-                ))
+            if tpl["label"] in existing_labels:
+                continue
+            if ExtractionPipeline._checkbox_sub_option(tpl["label"]):
+                continue
+            fields.append(StructuredField(
+                label=tpl["label"],
+                value="",
+                confidence=0,
+                page=tpl["page"],
+                section_number=tpl["section_number"],
+                needs_clarification=True,
+                reason="Not extracted by LLM",
+                extracted_by="template_fill",
+            ))
         return fields
 
     # ── Dual-model pipeline ────────────────────────────────────────

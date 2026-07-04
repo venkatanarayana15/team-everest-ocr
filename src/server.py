@@ -1,4 +1,3 @@
-import hashlib
 import json
 import logging
 import os
@@ -30,7 +29,6 @@ from src.page_classifier import PageClassifier
 
 try:
     from src.database import (
-        find_pdf_by_hash,
         insert_pdf,
         list_pdfs as db_list_pdfs,
         insert_extraction_result,
@@ -40,6 +38,7 @@ try:
         get_last_job_id_by_pdf_id,
         get_pool,
         close_pool,
+        upsert_ocr_document,
     )
     DB_AVAILABLE = True
 except ImportError as e:
@@ -253,6 +252,61 @@ def _set_status(job_dir: Path, status: str, message: str = "", pages: int = 0) -
 
 
 _last_good_status: dict[str, dict] = {}
+
+
+def _save_to_db(
+    job_id: str,
+    file_name: str,
+    result_dict: dict,
+    status: str = "done",
+) -> None:
+    """Run upsert_ocr_document from a sync worker thread.
+
+    asyncpg pools are bound to the event loop they were created on.  The
+    pipeline threads run outside FastAPI's main loop, so we must ensure the
+    call runs on a *fresh* event loop with its own pool.  We reset the module-
+    level pool reference before each call; get_pool() recreates it on the
+    current loop automatically.
+    """
+    if not DB_AVAILABLE:
+        logger.warning("_save_to_db: DB not available — skipping (job=%s)", job_id)
+        return
+
+    logger.info("_save_to_db: called — job=%s file=%r status=%s", job_id, file_name, status)
+
+    import src.database as _db_mod  # reset cached pool so asyncpg recreates it
+
+    async def _run():
+        _db_mod._pool = None  # force fresh pool for this loop
+        try:
+            doc_id = await upsert_ocr_document(
+                job_id=job_id,
+                file_name=file_name,
+                status=status,
+                processing_time=result_dict.get("processing_time"),
+                confidence_score=result_dict.get("overall_confidence"),
+                num_pdfs=result_dict.get("num_pdfs"),
+                result_json=result_dict,
+            )
+            if doc_id:
+                logger.info("_save_to_db: row saved — job=%s doc_id=%s", job_id, doc_id)
+            else:
+                logger.warning("_save_to_db: upsert returned no id — job=%s", job_id)
+        finally:
+            # Close this thread's pool so connections aren't leaked
+            if _db_mod._pool:
+                try:
+                    await _db_mod._pool.close()
+                except Exception:
+                    pass
+                _db_mod._pool = None
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:
+        import traceback as _tb
+        logger.error("_save_to_db FAILED for job=%s: %s\n%s", job_id, exc, _tb.format_exc())
+
 
 def _get_status(job_dir: Path) -> dict:
     path = job_dir / "status.json"
@@ -657,10 +711,23 @@ def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
         token_log_msg += f" | Total={token_usage['total'].get('total_tokens', 0)}"
         _set_status(job_dir, "done", token_log_msg)
 
+        # ── Persist to Supabase ────────────────────────────────────────
+        _save_to_db(
+            job_id=job_dir.name,
+            file_name=pdf_name,
+            result_dict=result_dict,
+        )
+
     except Exception as e:
         tb = traceback.format_exc()
         logger.error("Pipeline failed: %s\n%s", e, tb)
         _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
+        _save_to_db(
+            job_id=job_dir.name,
+            file_name=job_dir.name,
+            result_dict={},
+            status="failed",
+        )
     finally:
         _cleanup_intermediate(job_dir)
 
@@ -717,6 +784,7 @@ def _set_batch_pdf_status(job_dir: Path, pdf_name: str, status: str, pct: int, m
 def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
     t0 = time.time()
     try:
+        # pyrefly: ignore [missing-import]
         from src.model_client import get_model_client
         config = Config(output_dir=str(job_dir / "output"))
         primary = get_model_client("primary")
@@ -724,6 +792,7 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         primary_name = type(primary).__name__.replace("Client", "").lower()
         secondary_name = type(secondary).__name__.replace("Client", "").lower()
 
+        # pyrefly: ignore [missing-import]
         from src.extraction_pipeline import ExtractionPipeline
         pipeline = ExtractionPipeline(config, primary_client=primary, secondary_client=secondary)
 
@@ -753,7 +822,6 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
             sub_dir = job_dir / f"pdf_{idx}"
             sub_dir.mkdir(exist_ok=True)
             
-            # Step 1: Preprocess
             pages = pipeline.preprocess(str(pdf_path), str(sub_dir))
             page_images = {
                 int(p.stem.split("_")[1]): str(p)
@@ -762,7 +830,6 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
             
             _set_batch_pdf_status(job_dir, filename, "primary_extraction", 30, "Extracting fields with primary AI...")
             
-            # Step 2: OCR + Primary
             word_boxes = pipeline.run_bbox(str(pdf_path))
             model_data, primary_token_usage = pipeline.run_primary_extraction(str(pdf_path), page_images)
             
@@ -772,12 +839,12 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
             _set_batch_pdf_status(job_dir, filename, "field_mapping", 60, "Mapping fields to bounding boxes...")
             
             fields = []
+            pdf_raw_text = ""
             if model_data:
-                raw_text = model_data.get("raw_text", "")
-                raw_text = _insert_page_markers(raw_text, model_data.get("fields", []))
+                pdf_raw_text = model_data.get("raw_text", "")
+                pdf_raw_text = _insert_page_markers(pdf_raw_text, model_data.get("fields", []))
                 fields = pipeline.merge_fields(model_data, word_boxes, prefix=primary_name)
             else:
-                raw_text = ""
                 fields = [
                     StructuredField(label=wb.text, value=wb.text, confidence=int(wb.confidence), page=wb.page_num, bbox=wb.bbox, extracted_by=primary_name)
                     for wb in word_boxes
@@ -785,7 +852,6 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 
             fields = ExtractionPipeline.fill_missing_template_fields(fields)
             
-            # Step 5: Verification
             overall_confidence = model_data.get("overall_confidence", 0) if model_data else 0
             secondary_token_usage = {}
             if overall_confidence < 95:
@@ -794,62 +860,52 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 total_secondary_prompt += secondary_token_usage.get("prompt_tokens", 0) or 0
                 total_secondary_completion += secondary_token_usage.get("completion_tokens", 0) or 0
                 
-            # Tag fields with file names
-            for f in fields:
-                f.file = filename
-                
-            all_fields.extend(fields)
-            
-            if raw_text:
-                all_raw_text.append(f"--- Page {total_pages + 1} ---\n--- File: {filename} ---\n{raw_text}")
-                
-            total_pages += len(pages)
-            confidences.append(overall_confidence)
-            
             pdf_times[filename] = round(time.time() - pdf_t0, 1)
             _set_batch_pdf_status(job_dir, filename, "done", 100, "Done")
 
-        overall_conf = round(sum(confidences) / len(confidences)) if confidences else 0
+            # Save each PDF as its own DB row
+            pdf_result = {
+                "overall_confidence": overall_confidence,
+                "num_pages": len(pages),
+                "num_pdfs": 1,
+                "processing_time": pdf_times[filename],
+                "raw_text": pdf_raw_text,
+                "primary_model": primary_name,
+                "secondary_model": secondary_name,
+                "sections": [],
+                "pdf_names": [filename],
+                "fields": [
+                    {
+                        "label": f.label,
+                        "value": f.value,
+                        "confidence": f.confidence,
+                        "page": f.page,
+                        "section_number": f.section_number,
+                        "bbox": list(f.bbox) if f.bbox else None,
+                        "value_bbox": list(f.value_bbox) if f.value_bbox else None,
+                        "needs_clarification": f.needs_clarification,
+                        "reason": f.reason,
+                        "is_verified": f.is_verified,
+                        "extracted_by": f.extracted_by,
+                        "verified_by": f.verified_by,
+                        "original_value": f.original_value,
+                        "file": filename,
+                    }
+                    for f in fields
+                ],
+            }
+            _save_to_db(
+                job_id=f"{job_dir.name}_{filename}",
+                file_name=filename,
+                result_dict=pdf_result,
+            )
+
         elapsed = time.time() - t0
-        
-        result_dict = {
-            "overall_confidence": overall_conf,
-            "num_pages": total_pages,
-            "num_pdfs": len(pdfs_info),
-            "processing_time": round(elapsed, 2),
-            "pdf_times": pdf_times,
-            "raw_text": "\n\n".join(all_raw_text),
-            "primary_model": primary_name,
-            "secondary_model": secondary_name,
-            "sections": [],
-            "pdf_names": [item["filename"] for item in pdfs_info],
-            "fields": [
-                {
-                    "label": f.label,
-                    "value": f.value,
-                    "confidence": f.confidence,
-                    "page": f.page,
-                    "section_number": f.section_number,
-                    "bbox": list(f.bbox) if f.bbox else None,
-                    "value_bbox": list(f.value_bbox) if f.value_bbox else None,
-                    "needs_clarification": f.needs_clarification,
-                    "reason": f.reason,
-                    "is_verified": f.is_verified,
-                    "extracted_by": f.extracted_by,
-                    "verified_by": f.verified_by,
-                    "original_value": f.original_value,
-                    "file": getattr(f, "file", None) or filename,
-                }
-                for f in all_fields
-            ]
-        }
+        overall_conf = round(sum(confidences) / len(confidences)) if confidences else 0
         
         results_dir = job_dir / "results"
         results_dir.mkdir(exist_ok=True)
-        with open(results_dir / "result.json", "w") as f:
-            json.dump(result_dict, f, indent=2)
-            
-        # Write consolidated status as done
+        
         path = job_dir / "status.json"
         existing = {}
         if path.exists():
@@ -875,6 +931,7 @@ def _run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None:
     try:
         import traceback
         import time
+        # pyrefly: ignore [missing-import]
         from src.model_client import get_model_client
 
         t0 = time.time()
@@ -1040,10 +1097,28 @@ def _run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None:
 
         _set_status(job_dir, "done", "Extraction complete. Results ready for download.")
 
+        # ── Persist image pipeline result to Supabase ─────────────────
+        img_name = (
+            (job_dir / "original_name.txt").read_text().strip()
+            if (job_dir / "original_name.txt").exists()
+            else job_dir.name
+        )
+        _save_to_db(
+            job_id=job_dir.name,
+            file_name=img_name,
+            result_dict=result_dict,
+        )
+
     except Exception as e:
         tb = traceback.format_exc()
         logger.error("Image pipeline failed: %s\n%s", e, tb)
         _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
+        _save_to_db(
+            job_id=job_dir.name,
+            file_name=job_dir.name,
+            result_dict={},
+            status="failed",
+        )
 
 
 def _save_tesseract_data(job_dir: Path, word_boxes: list) -> None:
@@ -1173,26 +1248,7 @@ async def upload(file: UploadFile = File(...)):
         if len(content) == 0:
             raise HTTPException(400, "Empty file uploaded")
 
-        file_hash = hashlib.sha256(content).hexdigest()
         file_size = len(content)
-
-        if DB_AVAILABLE:
-            try:
-                existing = await find_pdf_by_hash(file_hash)
-                if existing:
-                    existing_job_id = await get_last_job_id_by_pdf_id(existing["id"])
-                    return {
-                        "duplicate": True,
-                        "existing_job_id": existing_job_id,
-                        "pdf": {
-                            "id": existing["id"],
-                            "filename": existing["filename"],
-                            "uploaded_at": existing["uploaded_at"].isoformat() if existing.get("uploaded_at") else None,
-                        },
-                        "message": f"'{existing['filename']}' was already uploaded.",
-                    }
-            except Exception as e:
-                logger.warning("Dedup check failed: %s", e)
 
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
         job_id = f"{str(uuid.uuid4())[:8]}_{ts}"
@@ -1212,8 +1268,6 @@ async def upload(file: UploadFile = File(...)):
             shutil.rmtree(job_dir, ignore_errors=True)
             raise HTTPException(400, f"Corrupted PDF upload: {err}")
 
-        with open(job_dir / "file_hash.txt", "w") as f:
-            f.write(file_hash)
         with open(job_dir / "original_name.txt", "w") as f:
             f.write(file.filename)
 
@@ -1222,7 +1276,6 @@ async def upload(file: UploadFile = File(...)):
             try:
                 pdf_id = await insert_pdf(
                     filename=file.filename,
-                    file_hash=file_hash,
                     file_size=file_size,
                     file_path=str(pdf_path),
                 )
@@ -1532,17 +1585,14 @@ async def process_folder(data: dict):
     for item in items:
         try:
             if item["type"] == "pdf":
-                content = open(item["path"], "rb").read()
-                file_hash = hashlib.sha256(content).hexdigest()
                 ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
                 job_id = f"{str(uuid.uuid4())[:8]}_{ts}"
                 job_dir = BASE_DIR / job_id
                 job_dir.mkdir(parents=True)
                 pdf_path = job_dir / "input.pdf"
+                content = open(item["path"], "rb").read()
                 with open(pdf_path, "wb") as f:
                     f.write(content)
-                with open(job_dir / "file_hash.txt", "w") as f:
-                    f.write(file_hash)
                 with open(job_dir / "original_name.txt", "w") as f:
                     f.write(item["name"])
                 _set_status(job_dir, "queued", f"Folder batch: {item['name']}")
@@ -1928,8 +1978,6 @@ async def list_uploaded_pdfs():
         if not has_pdf and not has_images:
             continue
 
-        hash_path = d / "file_hash.txt"
-        file_hash = hash_path.read_text().strip() if hash_path.exists() else ""
         name_path = d / "original_name.txt"
         orig_name = name_path.read_text().strip() if name_path.exists() else ""
         result_path = d / "results" / "result.json"
@@ -1939,7 +1987,6 @@ async def list_uploaded_pdfs():
 
         entry = {
             "filename": orig_name or d.name,
-            "file_hash": file_hash,
             "job_id": d.name,
             "status": status_data.get("status"),
             "uploaded_at": d.stat().st_mtime,
@@ -1954,17 +2001,6 @@ async def list_uploaded_pdfs():
             except Exception:
                 pass
         pdfs.append(entry)
-
-    if DB_AVAILABLE:
-        try:
-            db_rows = await db_list_pdfs(limit=100)
-            db_by_hash = {r["file_hash"]: r for r in db_rows if r.get("file_hash")}
-            for entry in pdfs:
-                if entry["file_hash"] in db_by_hash:
-                    db_r = db_by_hash[entry["file_hash"]]
-                    entry["overall_confidence"] = entry["overall_confidence"] or db_r.get("overall_confidence")
-        except Exception as e:
-            logger.warning("Failed to supplement PDFs from DB: %s", e)
 
     return pdfs
 
@@ -1986,94 +2022,36 @@ async def save_result_to_db(job_id: str):
     with open(result_path) as f:
         result_data = json.load(f)
 
-    # Find or create PDF record
-    hash_path = job_dir / "file_hash.txt"
-    file_hash = hash_path.read_text().strip() if hash_path.exists() else ""
     name_path = job_dir / "original_name.txt"
     orig_name = name_path.read_text().strip() if name_path.exists() else f"job_{job_id}.pdf"
+    pdf_path = job_dir / "input.pdf"
 
-    pdf_id = None
-    if file_hash:
-        existing_pdf = await find_pdf_by_hash(file_hash)
-        if existing_pdf:
-            pdf_id = existing_pdf["id"]
-        else:
-            pdf_path = job_dir / "input.pdf"
-            pdf_id = await insert_pdf(
-                filename=orig_name,
-                file_hash=file_hash,
-                file_size=pdf_path.stat().st_size if pdf_path.exists() else 0,
-                file_path=str(pdf_path) if pdf_path.exists() else "",
-            )
+    logger.info("/save-to-db: START — job=%s file=%r", job_id, orig_name)
 
-    if pdf_id is None:
-        raise HTTPException(500, "Could not find or create PDF record")
+    doc_id = await upsert_ocr_document(
+        job_id=job_id,
+        file_name=orig_name,
+        file_size=pdf_path.stat().st_size if pdf_path.exists() else None,
+        file_path=str(pdf_path) if pdf_path.exists() else None,
+        status="done",
+        processing_time=result_data.get("processing_time"),
+        confidence_score=result_data.get("overall_confidence"),
+        num_pages=result_data.get("num_pages"),
+        raw_text=result_data.get("raw_text"),
+        result_json=result_data,
+        primary_model=result_data.get("primary_model"),
+        secondary_model=result_data.get("secondary_model"),
+        token_usage=result_data.get("token_usage"),
+    )
 
-    existing_result = await get_result_by_job_id(job_id)
-
-    fields: list[StructuredField] = []
-    for f_data in result_data.get("fields", []):
-        fields.append(StructuredField(
-            label=f_data.get("label", ""),
-            value=f_data.get("value", ""),
-            confidence=f_data.get("confidence", 0),
-            page=f_data.get("page", 1),
-            section_number=f_data.get("section_number"),
-            bbox=tuple(f_data["bbox"]) if f_data.get("bbox") else None,
-            value_bbox=tuple(f_data["value_bbox"]) if f_data.get("value_bbox") else None,
-            needs_clarification=f_data.get("needs_clarification", False),
-            reason=f_data.get("reason"),
-            is_verified=f_data.get("is_verified", False),
-            verifier_confidence=f_data.get("verifier_confidence"),
-            verification_note=f_data.get("verification_note"),
-            extracted_by=f_data.get("extracted_by"),
-            verified_by=f_data.get("verified_by"),
-            original_value=f_data.get("original_value"),
-        ))
-
-    sections_data = result_data.get("sections", [])
-
-    if existing_result:
-        # Update existing
-        result_id = existing_result["id"]
-        await update_extraction_result(
-            job_id=job_id,
-            status="done",
-            overall_confidence=result_data.get("overall_confidence"),
-            processing_time=result_data.get("processing_time"),
-            raw_text=result_data.get("raw_text", ""),
-            result_json=result_data,
-            sections_json=sections_data,
-        )
-        # Also update fields (delete + re-insert)
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM extracted_fields WHERE result_id = $1",
-                result_id,
-            )
-        inserted = await insert_extracted_fields(result_id, fields)
+    if doc_id:
+        logger.info("/save-to-db: SUCCESS — job=%s doc_id=%s", job_id, doc_id)
     else:
-        result_id = await insert_extraction_result(
-            job_id=job_id,
-            pdf_id=pdf_id,
-            status="done",
-            overall_confidence=result_data.get("overall_confidence", 0),
-            num_pages=result_data.get("num_pages", 0),
-            processing_time=result_data.get("processing_time", 0.0),
-            raw_text=result_data.get("raw_text", ""),
-            primary_model=result_data.get("primary_model", ""),
-            secondary_model=result_data.get("secondary_model", ""),
-            result_json=result_data,
-            sections_json=sections_data,
-        )
-        inserted = await insert_extracted_fields(result_id, fields)
+        logger.warning("/save-to-db: upsert returned no id — job=%s (check DB logs above)", job_id)
 
     return {
         "status": "saved",
-        "pdf_id": pdf_id,
-        "result_id": result_id,
-        "fields_inserted": inserted,
+        "doc_id": doc_id,
     }
 
 

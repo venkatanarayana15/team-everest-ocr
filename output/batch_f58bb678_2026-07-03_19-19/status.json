@@ -1,0 +1,35 @@
+{
+  "status": "done",
+  "message": "Batch complete. Total Tokens -> Primary (openai): Prompt=157234, Completion=4897 | Secondary (openai): Prompt=157747, Completion=3637 | Grand Total=323515",
+  "log": [
+    {
+      "t": "19:19:22",
+      "msg": "Processing PDF Batch: Scan_document20260610_163440.pdf"
+    },
+    {
+      "t": "19:19:31",
+      "msg": "[Scan_document20260610_163440.pdf] Queued in batch"
+    },
+    {
+      "t": "19:19:32",
+      "msg": "[Scan_document20260610_163440.pdf] Rendering pages..."
+    },
+    {
+      "t": "19:20:23",
+      "msg": "[Scan_document20260610_163440.pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "19:22:20",
+      "msg": "[Scan_document20260610_163440.pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "19:22:20",
+      "msg": "[Scan_document20260610_163440.pdf] Running secondary verification..."
+    },
+    {
+      "t": "19:23:13",
+      "msg": "[Scan_document20260610_163440.pdf] Done"
+    }
+  ],
+  "pages": 0
+}
