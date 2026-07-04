@@ -1,0 +1,99 @@
+{
+  "status": "done",
+  "message": "Pipeline done but Zoho update failed: HTTP Error 401: ",
+  "log": [
+    {
+      "t": "18:23:34",
+      "msg": "OCR extract queued for TEMP-2026-10525 (1 files)"
+    },
+    {
+      "t": "18:23:34",
+      "msg": "Starting OCR extract for TEMP-2026-10525"
+    },
+    {
+      "t": "18:23:35",
+      "msg": "Zoho authentication successful"
+    },
+    {
+      "t": "18:23:35",
+      "msg": "Downloading 1/1: 1782638471409146_Scan_document2026-06-28_14-50-11.pdf"
+    },
+    {
+      "t": "18:23:46",
+      "msg": "Downloaded 1 files"
+    },
+    {
+      "t": "18:23:46",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "18:23:46",
+      "msg": "PDF created (21957 KB)"
+    },
+    {
+      "t": "18:23:46",
+      "msg": "Uploading to Supabase Storage..."
+    },
+    {
+      "t": "18:23:52",
+      "msg": "PDF uploaded to Supabase"
+    },
+    {
+      "t": "18:23:52",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "18:23:55",
+      "msg": "Rendering and enhancing pages..."
+    },
+    {
+      "t": "18:25:17",
+      "msg": "Preprocessing done. 6 pages ready."
+    },
+    {
+      "t": "18:25:17",
+      "msg": "Running Tesseract (CPU) and primary extraction (LLM) in parallel..."
+    },
+    {
+      "t": "18:26:39",
+      "msg": "Tesseract detected 733 words across 6 pages."
+    },
+    {
+      "t": "18:26:39",
+      "msg": "OpenAI extracted 85 fields (confidence: 90%). Merging with bounding boxes..."
+    },
+    {
+      "t": "18:26:39",
+      "msg": "Merged 85 fields with Tesseract bboxes."
+    },
+    {
+      "t": "18:26:39",
+      "msg": "Filling missing template fields before verification..."
+    },
+    {
+      "t": "18:26:39",
+      "msg": "Running secondary verification (OpenAI)..."
+    },
+    {
+      "t": "18:27:30",
+      "msg": "OpenAI verified 87 fields, corrected 3, added 0 new."
+    },
+    {
+      "t": "18:27:30",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "18:27:30",
+      "msg": "Extraction complete. Token Consumption -> Primary (OpenAI): Prompt=9057, Completion=7971 | Secondary (OpenAI): Prompt=10745, Completion=4556 | Total=32329"
+    },
+    {
+      "t": "18:27:30",
+      "msg": "Updating Zoho Creator record..."
+    },
+    {
+      "t": "18:27:30",
+      "msg": "Pipeline done but Zoho update failed: HTTP Error 401: "
+    }
+  ],
+  "pages": 6
+}

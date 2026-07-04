@@ -5,11 +5,15 @@ export function subscribeToJob(jobId: string, onMessage: (data: any) => void): (
   es.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
+      if (data.status === 'heartbeat') return;
       onMessage(data);
       if (data._final) es.close();
     } catch { /* ignore parse errors */ }
   };
-  es.onerror = () => { es.close(); };
+  es.onerror = () => {
+    // Do NOT close — native EventSource auto-reconnects on error.
+    // Closing here would kill the connection until page refresh.
+  };
   return () => es.close();
 }
 
@@ -19,11 +23,14 @@ export function subscribeToBatch(jobIds: string[], onMessage: (data: any) => voi
   es.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
+      if (data.status === 'heartbeat') return;
       onMessage(data);
       if (data._batch_complete) es.close();
     } catch { /* ignore */ }
   };
-  es.onerror = () => { es.close(); };
+  es.onerror = () => {
+    // Do NOT close — native EventSource auto-reconnects on error.
+  };
   return () => es.close();
 }
 

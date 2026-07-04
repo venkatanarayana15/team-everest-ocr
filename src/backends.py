@@ -49,67 +49,75 @@ class TesseractBackend(OCRBackend):
     """Lightweight bounding-box detection using Tesseract OCR.
     Returns word-level text + coordinates. No GPU needed, no C++ crashes."""
 
+    @staticmethod
+    def _page_result(
+        arr: np.ndarray, page_num: int
+    ) -> tuple[int, list[WordBox], dict]:
+        import pytesseract
+
+        t0 = time.perf_counter()
+        data = pytesseract.image_to_data(arr, output_type=pytesseract.Output.DICT)
+
+        word_texts: list[str] = []
+        word_confidences: list[float] = []
+        word_bboxes: list[tuple[int, int, int, int]] = []
+        word_boxes: list[WordBox] = []
+
+        for j in range(len(data["text"])):
+            text = data["text"][j].strip()
+            conf = int(data["conf"][j])
+            if not text or conf < 0:
+                continue
+            left = data["left"][j]
+            top = data["top"][j]
+            w = data["width"][j]
+            h = data["height"][j]
+            bbox = (left, top, left + w, top + h)
+            word_texts.append(text)
+            word_confidences.append(conf)
+            word_bboxes.append(bbox)
+            word_boxes.append(WordBox(
+                text=text, page_num=page_num, bbox=bbox, confidence=conf,
+            ))
+
+        elapsed = time.perf_counter() - t0
+        logger.info("Page %d: %d words in %.2fs", page_num, len(word_texts), elapsed)
+
+        return page_num, word_boxes, {
+            "word_texts": word_texts,
+            "word_confidences": word_confidences,
+            "word_bboxes": word_bboxes,
+        }
+
     def process(self, pdf_path: str, config: Config) -> OCRResult:
         import fitz
         from PIL import Image
-        import pytesseract
+        from concurrent.futures import ThreadPoolExecutor
 
         doc = fitz.open(pdf_path)
-        all_boxes: list[WordBox] = []
-        pages_data: dict[int, dict] = {}
+        pages_arr: list[tuple[np.ndarray, int]] = []
 
         for i in range(len(doc)):
             page = doc[i]
-            mat = fitz.Matrix(config.render_dpi / 72, config.render_dpi / 72)
+            mat = fitz.Matrix(config.bbox_render_dpi / 72, config.bbox_render_dpi / 72)
             pix = page.get_pixmap(matrix=mat)
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            arr = np.array(img)
+            pages_arr.append((np.array(img), i + 1))
 
-            page_num = i + 1
-            t0 = time.perf_counter()
-
-            data = pytesseract.image_to_data(arr, output_type=pytesseract.Output.DICT)
-
-            word_texts: list[str] = []
-            word_confidences: list[float] = []
-            word_bboxes: list[tuple[int, int, int, int]] = []
-
-            for j in range(len(data["text"])):
-                text = data["text"][j].strip()
-                conf = int(data["conf"][j])
-                if not text or conf < 0:
-                    continue
-                left = data["left"][j]
-                top = data["top"][j]
-                w = data["width"][j]
-                h = data["height"][j]
-                bbox = (left, top, left + w, top + h)
-                word_texts.append(text)
-                word_confidences.append(conf)
-                word_bboxes.append(bbox)
-
-                all_boxes.append(WordBox(
-                    text=text,
-                    page_num=page_num,
-                    bbox=bbox,
-                    confidence=conf,
-                ))
-
-            pages_data[page_num] = {
-                "word_texts": word_texts,
-                "word_confidences": word_confidences,
-                "word_bboxes": word_bboxes,
-            }
-
-            elapsed = time.perf_counter() - t0
-            logger.info(
-                "Page %d: %d words in %.2fs",
-                page_num, len(word_texts), elapsed,
-            )
-
-        num_pages = len(doc)
         doc.close()
-        logger.info("Tesseract done: %d total words across %d pages", len(all_boxes), num_pages)
+
+        all_boxes: list[WordBox] = []
+        pages_data: dict[int, dict] = {}
+        num_workers = min(len(pages_arr), 6)
+
+        with ThreadPoolExecutor(max_workers=num_workers) as pool:
+            futures = [pool.submit(self._page_result, arr, pn) for arr, pn in pages_arr]
+            for f in futures:
+                page_num, word_boxes, page_dict = f.result()
+                all_boxes.extend(word_boxes)
+                pages_data[page_num] = page_dict
+
+        logger.info("Tesseract done: %d total words across %d pages", len(all_boxes), len(pages_data))
         return OCRResult(pages_data=pages_data, word_boxes=all_boxes)
 
     def process_images(
@@ -120,53 +128,24 @@ class TesseractBackend(OCRBackend):
         Unlike process(), this takes already-rendered images and assigns
         page numbers directly from the dict keys.
         """
-        import pytesseract
         from PIL import Image
+        from concurrent.futures import ThreadPoolExecutor
+
+        pages_arr: list[tuple[np.ndarray, int]] = []
+        for page_num in sorted(image_paths):
+            img = Image.open(image_paths[page_num])
+            pages_arr.append((np.array(img), page_num))
 
         all_boxes: list[WordBox] = []
         pages_data: dict[int, dict] = {}
+        num_workers = min(len(pages_arr), 6)
 
-        for page_num in sorted(image_paths):
-            img_path = image_paths[page_num]
-            t0 = time.perf_counter()
-
-            img = Image.open(img_path)
-            arr = np.array(img)
-            data = pytesseract.image_to_data(arr, output_type=pytesseract.Output.DICT)
-
-            word_texts: list[str] = []
-            word_confidences: list[float] = []
-            word_bboxes: list[tuple[int, int, int, int]] = []
-
-            for j in range(len(data["text"])):
-                text = data["text"][j].strip()
-                conf = int(data["conf"][j])
-                if not text or conf < 0:
-                    continue
-                left = data["left"][j]
-                top = data["top"][j]
-                w = data["width"][j]
-                h = data["height"][j]
-                bbox = (left, top, left + w, top + h)
-                word_texts.append(text)
-                word_confidences.append(conf)
-                word_bboxes.append(bbox)
-
-                all_boxes.append(WordBox(
-                    text=text,
-                    page_num=page_num,
-                    bbox=bbox,
-                    confidence=conf,
-                ))
-
-            pages_data[page_num] = {
-                "word_texts": word_texts,
-                "word_confidences": word_confidences,
-                "word_bboxes": word_bboxes,
-            }
-
-            elapsed = time.perf_counter() - t0
-            logger.info("Image page %d: %d words in %.2fs", page_num, len(word_texts), elapsed)
+        with ThreadPoolExecutor(max_workers=num_workers) as pool:
+            futures = [pool.submit(self._page_result, arr, pn) for arr, pn in pages_arr]
+            for f in futures:
+                page_num, word_boxes, page_dict = f.result()
+                all_boxes.extend(word_boxes)
+                pages_data[page_num] = page_dict
 
         logger.info("Tesseract done: %d total words across %d image pages", len(all_boxes), len(image_paths))
         return OCRResult(pages_data=pages_data, word_boxes=all_boxes)

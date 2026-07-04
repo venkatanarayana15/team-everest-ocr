@@ -1,0 +1,35 @@
+{
+  "status": "done",
+  "message": "Batch complete. Total Tokens -> Primary (openai): Prompt=9057, Completion=7062 | Secondary (openai): Prompt=9964, Completion=3928 | Grand Total=30011",
+  "log": [
+    {
+      "t": "05:37:52",
+      "msg": "Processing PDF Batch: MOHAMED_HAFEEZ.pdf"
+    },
+    {
+      "t": "05:37:54",
+      "msg": "[MOHAMED_HAFEEZ.pdf] Queued in batch"
+    },
+    {
+      "t": "05:37:54",
+      "msg": "[MOHAMED_HAFEEZ.pdf] Rendering pages..."
+    },
+    {
+      "t": "05:38:22",
+      "msg": "[MOHAMED_HAFEEZ.pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "05:40:00",
+      "msg": "[MOHAMED_HAFEEZ.pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "05:40:00",
+      "msg": "[MOHAMED_HAFEEZ.pdf] Running secondary verification..."
+    },
+    {
+      "t": "05:40:52",
+      "msg": "[MOHAMED_HAFEEZ.pdf] Done"
+    }
+  ],
+  "pages": 0
+}

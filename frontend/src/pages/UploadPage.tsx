@@ -191,6 +191,7 @@ export default function UploadPage({ onDone, onBack }: Props) {
   const [perPdfProgress, setPdfProgresses] = useState<Record<string, { progress: number; stage: string; elapsed?: number }>>({});
   const [overallProgress, setOverallProgress] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState<number | null>(null);
+  const [extractedFields, setExtractedFields] = useState<Array<{ label: string; value: string; confidence: number; page: number }>>([]);
   const [batchJobIds, setBatchJobIds] = useState<string[]>([]);
   const batchJobIdsRef = useRef<string[]>([]);
 
@@ -255,6 +256,7 @@ export default function UploadPage({ onDone, onBack }: Props) {
     if (data.message) setStatusMsg(data.message);
     if (data.pages && data.pages > 0) setNumPages(data.pages);
     if (data.log) syncLogs(data.log);
+    if (data.fields) setExtractedFields(data.fields);
 
     const stageOrder = STAGES.map((st) => st.key);
     const idx = stageOrder.indexOf(data.status);
@@ -301,6 +303,7 @@ export default function UploadPage({ onDone, onBack }: Props) {
   }, [stopSSE, handleSSEMessage]);
 
   const handleBatchSSEMessage = useCallback((data: any) => {
+    if (data.fields) setExtractedFields(data.fields);
     if (data._batch_complete) {
       addLog('✅ All batch items processed!');
       setOverallProgress(100);
@@ -311,22 +314,36 @@ export default function UploadPage({ onDone, onBack }: Props) {
       return;
     }
 
-    const jobName = data.original_name || data.job_id;
-    
+    if (data.status) setCurrentStatus(data.status);
+
+    const pdfs = data.progress?.pdfs;
+    const jobName = (pdfs && typeof pdfs === 'object' && Object.keys(pdfs).length > 0
+      ? Object.keys(pdfs)[0]
+      : data.original_name || data.job_id) || '';
+
     setPdfProgresses((prev) => {
-      const next = {
-        ...prev,
-        [jobName]: {
+      const next = { ...prev };
+      if (pdfs && typeof pdfs === 'object' && Object.keys(pdfs).length > 0) {
+        for (const [name, pp] of Object.entries(pdfs) as [string, any][]) {
+          next[name] = {
+            progress: pp.progress ?? data.progress?.overall ?? 0,
+            stage: pp.stage || data.status,
+            elapsed: pp.elapsed ?? data.progress?.elapsed,
+          };
+        }
+      } else {
+        next[jobName] = {
           progress: data.progress?.overall ?? 0,
           stage: data.status,
           elapsed: data.progress?.elapsed,
-        }
-      };
+        };
+      }
       
       const values = Object.values(next);
       if (values.length > 0) {
-        const sum = values.reduce((acc, curr) => acc + curr.progress, 0);
-        setOverallProgress(Math.round(sum / batchJobIdsRef.current.length));
+        const avg = Math.round(values.reduce((acc, curr) => acc + curr.progress, 0) / values.length);
+        setProgress(avg);
+        setOverallProgress(avg);
       }
       return next;
     });
@@ -612,7 +629,12 @@ export default function UploadPage({ onDone, onBack }: Props) {
 
   if (phase !== 'idle') {
     const processingFiles = batchResults.length > 0
-      ? batchResults.map(r => ({ name: r.filename || r.name, jobId: r.job_id }))
+      ? batchResults.flatMap(r => {
+          if (r.pdf_names && Array.isArray(r.pdf_names)) {
+            return r.pdf_names.map((name: string) => ({ name, jobId: r.job_id }));
+          }
+          return { name: r.filename || r.name, jobId: r.job_id };
+        })
       : files.map(f => ({ name: f.name, jobId: jobId || undefined }));
 
     return (
@@ -626,6 +648,7 @@ export default function UploadPage({ onDone, onBack }: Props) {
         perPdfProgress={perPdfProgress}
         logs={logs}
         elapsed={elapsedTime}
+        fields={extractedFields}
         onBack={onBack || (() => {})}
         onResumeJob={handleResumeJob}
         onResumeBatch={handleResumeBatch}

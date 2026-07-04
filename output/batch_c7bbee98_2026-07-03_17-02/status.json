@@ -1,0 +1,35 @@
+{
+  "status": "done",
+  "message": "Batch complete. Total Tokens -> Primary (openai): Prompt=11097, Completion=9004 | Secondary (openai): Prompt=12646, Completion=382 | Grand Total=33129",
+  "log": [
+    {
+      "t": "17:02:42",
+      "msg": "Processing PDF Batch: TEMP-2026-9882_Nivetha_P.pdf"
+    },
+    {
+      "t": "17:02:42",
+      "msg": "[TEMP-2026-9882_Nivetha_P.pdf] Queued in batch"
+    },
+    {
+      "t": "17:02:42",
+      "msg": "[TEMP-2026-9882_Nivetha_P.pdf] Rendering pages..."
+    },
+    {
+      "t": "17:03:01",
+      "msg": "[TEMP-2026-9882_Nivetha_P.pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "17:04:51",
+      "msg": "[TEMP-2026-9882_Nivetha_P.pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "17:04:51",
+      "msg": "[TEMP-2026-9882_Nivetha_P.pdf] Running secondary verification..."
+    },
+    {
+      "t": "17:05:00",
+      "msg": "[TEMP-2026-9882_Nivetha_P.pdf] Done"
+    }
+  ],
+  "pages": 0
+}

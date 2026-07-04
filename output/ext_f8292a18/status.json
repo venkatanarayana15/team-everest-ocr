@@ -1,0 +1,99 @@
+{
+  "status": "done",
+  "message": "OCR complete \u2014 Zoho record updated",
+  "log": [
+    {
+      "t": "03:10:54",
+      "msg": "OCR extract queued for TEMP-2026-9164 (1 files)"
+    },
+    {
+      "t": "03:10:54",
+      "msg": "Starting OCR extract for TEMP-2026-9164"
+    },
+    {
+      "t": "03:10:55",
+      "msg": "Zoho authentication successful"
+    },
+    {
+      "t": "03:10:55",
+      "msg": "Downloading 1/1: 1782027329598800_TEMP-2026-9164_Fouziya_Banu_.pdf"
+    },
+    {
+      "t": "03:11:00",
+      "msg": "Downloaded 1 files"
+    },
+    {
+      "t": "03:11:00",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "03:11:00",
+      "msg": "PDF created (3762 KB)"
+    },
+    {
+      "t": "03:11:00",
+      "msg": "Uploading to Supabase Storage..."
+    },
+    {
+      "t": "03:11:03",
+      "msg": "PDF uploaded to Supabase"
+    },
+    {
+      "t": "03:11:03",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "03:11:06",
+      "msg": "Rendering and enhancing pages..."
+    },
+    {
+      "t": "03:15:27",
+      "msg": "Preprocessing done. 6 pages ready."
+    },
+    {
+      "t": "03:15:27",
+      "msg": "Running Tesseract (CPU) and primary extraction (LLM) in parallel..."
+    },
+    {
+      "t": "03:16:31",
+      "msg": "Tesseract detected 603 words across 6 pages."
+    },
+    {
+      "t": "03:16:31",
+      "msg": "OpenAI extracted 76 fields (confidence: 90%). Merging with bounding boxes..."
+    },
+    {
+      "t": "03:16:31",
+      "msg": "Merged 76 fields with Tesseract bboxes."
+    },
+    {
+      "t": "03:16:31",
+      "msg": "Filling missing template fields before verification..."
+    },
+    {
+      "t": "03:16:31",
+      "msg": "Running secondary verification (OpenAI)..."
+    },
+    {
+      "t": "03:17:06",
+      "msg": "OpenAI verified 77 fields, corrected 0, added 0 new."
+    },
+    {
+      "t": "03:17:06",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "03:17:06",
+      "msg": "Extraction complete. Token Consumption -> Primary (OpenAI): Prompt=11097, Completion=7241 | Secondary (OpenAI): Prompt=12222, Completion=4086 | Total=34646"
+    },
+    {
+      "t": "03:17:06",
+      "msg": "Updating Zoho Creator record..."
+    },
+    {
+      "t": "03:17:08",
+      "msg": "OCR complete \u2014 Zoho record updated"
+    }
+  ],
+  "pages": 6
+}
