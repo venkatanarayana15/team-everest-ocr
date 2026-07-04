@@ -8,6 +8,18 @@ _CHECKED = {"✓", "●"}
 _CHECK_MARK = "\u2611"
 _UNCHECK_MARK = "\u2610"
 
+SECTION_TITLES: dict[int | None, str] = {
+    None: "Header Information",
+    1: "Section 1 — Student Profile",
+    2: "Section 2 — Family Background",
+    3: "Section 3 — Housing Condition",
+    4: "Section 4 — Financial Background",
+    5: "Section 5 — Health Information",
+    6: "Section 6 — Student Commitment",
+    7: "Section 7 — Scholarship Information",
+    8: "Section 8 — Volunteer Observation",
+}
+
 
 def _format_job_datetime(job_id: str) -> str:
     parts = job_id.split("_")
@@ -24,6 +36,77 @@ def _is_option(value: str) -> bool:
 
 def _is_checked(value: str) -> bool:
     return value in _CHECKED
+
+
+def _render_section_fields(lines: list[str], fields: list[dict]) -> None:
+    """Render a group of fields (all belonging to the same section) into lines."""
+    regular: list[dict] = []
+    checkbox_groups: dict[str, list[tuple[str, str]]] = {}
+    table_groups: dict[str, dict[int, dict[str, str]]] = {}
+
+    for f in fields:
+        label = f["label"]
+        value = f.get("value") or ""
+
+        table_match = _TABLE_ROW_RE.match(label)
+        if table_match:
+            group_key = table_match.group(1).strip()
+            row_num = int(table_match.group(2))
+            col_name = table_match.group(3).strip()
+            table_groups.setdefault(group_key, {})
+            table_groups[group_key].setdefault(row_num, {})
+            table_groups[group_key][row_num][col_name] = value
+            continue
+
+        last_dash = label.rfind(" — ")
+        if last_dash > 0 and _is_option(value):
+            group_key = label[:last_dash].strip()
+            option = label[last_dash + 3:].strip()
+            checkbox_groups.setdefault(group_key, [])
+            checkbox_groups[group_key].append((option, value))
+            continue
+
+        regular.append(f)
+
+    if checkbox_groups:
+        lines.append("")
+    for group_key, options in checkbox_groups.items():
+        for option, val in options:
+            symbol = _CHECK_MARK if _is_checked(val) else _UNCHECK_MARK
+            lines.append(f"{symbol} **{option}**")
+        lines.append("")
+
+    if table_groups:
+        lines.append("")
+    for group_key, rows in table_groups.items():
+        sorted_row_nums = sorted(rows.keys())
+        all_cols: list[str] = []
+        seen = set()
+        for rn in sorted_row_nums:
+            for col in rows[rn]:
+                if col not in seen:
+                    all_cols.append(col)
+                    seen.add(col)
+        if not all_cols:
+            continue
+        header = "| # | " + " | ".join(f"**{c}**" for c in all_cols) + " |"
+        sep = "|---|" + "|".join(["---"] * len(all_cols)) + "|"
+        lines.append(header)
+        lines.append(sep)
+        for rn in sorted_row_nums:
+            row_data = rows[rn]
+            cells = " | ".join(row_data.get(col, "") or "—" for col in all_cols)
+            lines.append(f"| {rn} | {cells} |")
+        lines.append("")
+
+    if regular:
+        lines.append("")
+    for f in regular:
+        label = f["label"]
+        value = f.get("value") or ""
+        lines.append(f"- **{label}:** {value}")
+    if regular:
+        lines.append("")
 
 
 def _render_markdown(data: dict, job_id: str) -> str:
@@ -53,73 +136,17 @@ def _render_markdown(data: dict, job_id: str) -> str:
         lines.append(f"## Page {page_num}")
         lines.append("")
 
-        regular: list[dict] = []
-        checkbox_groups: dict[str, list[tuple[str, str]]] = {}
-        table_groups: dict[str, dict[int, dict[str, str]]] = {}
-
+        section_fields: dict[int | None, list[dict]] = {}
         for f in page_fields:
-            label = f["label"]
-            value = f["value"] or ""
+            section_fields.setdefault(f.get("section_number"), []).append(f)
 
-            table_match = _TABLE_ROW_RE.match(label)
-            if table_match:
-                group_key = table_match.group(1).strip()
-                row_num = int(table_match.group(2))
-                col_name = table_match.group(3).strip()
-                table_groups.setdefault(group_key, {})
-                table_groups[group_key].setdefault(row_num, {})
-                table_groups[group_key][row_num][col_name] = value
-                continue
+        section_keys = sorted(section_fields.keys(), key=lambda x: -1 if x is None else (x if x is not None else 0))
 
-            last_dash = label.rfind(" — ")
-            if last_dash > 0 and _is_option(value):
-                group_key = label[:last_dash].strip()
-                option = label[last_dash + 3:].strip()
-                checkbox_groups.setdefault(group_key, [])
-                checkbox_groups[group_key].append((option, value))
-                continue
-
-            regular.append(f)
-
-        for group_key, options in checkbox_groups.items():
-            lines.append(f"### {group_key}")
-            lines.append("")
-            for option, val in options:
-                symbol = _CHECK_MARK if _is_checked(val) else _UNCHECK_MARK
-                lines.append(f"{symbol} **{option}**")
-            lines.append("")
-
-        for group_key, rows in table_groups.items():
-            lines.append(f"### {group_key}")
-            lines.append("")
-            sorted_row_nums = sorted(rows.keys())
-            all_cols: list[str] = []
-            seen = set()
-            for rn in sorted_row_nums:
-                for col in rows[rn]:
-                    if col not in seen:
-                        all_cols.append(col)
-                        seen.add(col)
-
-            if not all_cols:
-                continue
-
-            header = "| # | " + " | ".join(f"**{c}**" for c in all_cols) + " |"
-            sep = "|---|" + "|".join(["---"] * len(all_cols)) + "|"
-            lines.append(header)
-            lines.append(sep)
-            for rn in sorted_row_nums:
-                row_data = rows[rn]
-                cells = " | ".join(row_data.get(col, "") or "—" for col in all_cols)
-                lines.append(f"| {rn} | {cells} |")
-            lines.append("")
-
-        if regular:
-            for f in regular:
-                label = f["label"]
-                value = f["value"] or ""
-                lines.append(f"- **{label}:** {value}")
-            lines.append("")
+        for sec_num in section_keys:
+            sec_fields = section_fields[sec_num]
+            sec_title = SECTION_TITLES.get(sec_num, f"Section {sec_num}")
+            lines.append(f"### {sec_title}")
+            _render_section_fields(lines, sec_fields)
 
     return "\n".join(lines)
 
@@ -137,27 +164,45 @@ def _render_text(data: dict, job_id: str) -> str:
         "=" * 60,
         "",
     ]
+
+    fields = data.get("fields", [])
+    if not fields:
+        return "\n".join(lines)
+
     pages: dict[int, list[dict]] = {}
-    for f in data.get("fields", []):
+    for f in fields:
         pages.setdefault(f["page"], []).append(f)
+
     for page_num in sorted(pages):
         page_fields = pages[page_num]
         lines.append(f"Page {page_num}:")
         lines.append("-" * 40)
+
+        section_fields: dict[int | None, list[dict]] = {}
         for f in page_fields:
-            label = f["label"]
-            value = f["value"] or "(empty)"
-            conf = f["confidence"]
-            badges = []
-            if f.get("needs_clarification"):
-                badges.append("needs clarification")
-            if f.get("is_verified"):
-                badges.append("verified")
-            badge_str = f" ({', '.join(badges)})" if badges else ""
-            lines.append(f"  {label}: {value} (conf: {conf}%){badge_str}")
-            if f.get("reason"):
-                lines.append(f"    Reason: {f['reason']}")
-            if f.get("verification_note") and f["verification_note"] != "High confidence, auto-accepted":
-                lines.append(f"    Note: {f['verification_note']}")
-        lines.append("")
+            section_fields.setdefault(f.get("section_number"), []).append(f)
+
+        section_keys = sorted(section_fields.keys(), key=lambda x: -1 if x is None else (x if x is not None else 0))
+
+        for sec_num in section_keys:
+            sec_fields = section_fields[sec_num]
+            sec_title = SECTION_TITLES.get(sec_num, f"Section {sec_num}")
+            lines.append(f"  [{sec_title}]")
+            for f in sec_fields:
+                label = f["label"]
+                value = f.get("value") or "(empty)"
+                conf = f["confidence"]
+                badges = []
+                if f.get("needs_clarification"):
+                    badges.append("needs clarification")
+                if f.get("is_verified"):
+                    badges.append("verified")
+                badge_str = f" ({', '.join(badges)})" if badges else ""
+                lines.append(f"    {label}: {value} (conf: {conf}%){badge_str}")
+                if f.get("reason"):
+                    lines.append(f"      Reason: {f['reason']}")
+                if f.get("verification_note") and f["verification_note"] != "High confidence, auto-accepted":
+                    lines.append(f"      Note: {f['verification_note']}")
+            lines.append("")
+
     return "\n".join(lines)

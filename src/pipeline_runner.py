@@ -328,11 +328,16 @@ def _save_to_db(job_dir: Path) -> None:
             result_data = json.load(f)
         name_path = job_dir / "original_name.txt"
         orig_name = name_path.read_text().strip() if name_path.exists() else job_dir.name
+        fields_data = result_data.get("fields", [])
+        low_conf = sum(1 for f in fields_data if f.get("confidence", 0) < 70)
+        needs_review = sum(1 for f in fields_data if f.get("needs_clarification", False))
         logger.info(
-            "Uploading extracted data to Supabase... (file=%r, fields=%d, confidence=%s, time=%.2fs)",
+            "Uploading extracted data to Supabase... (file=%r, fields=%d, confidence=%s, "
+            "low_conf=%d, needs_review=%d, time=%.2fs)",
             orig_name,
-            len(result_data.get("fields", [])),
+            len(fields_data),
             result_data.get("overall_confidence", "N/A"),
+            low_conf, needs_review,
             result_data.get("processing_time", 0),
         )
         loop = asyncio.new_event_loop()
@@ -402,9 +407,15 @@ def run_pipeline(job_dir: Path, pdf_path: str) -> None:
         _print_field_report(job_dir, res)
         _set_status(job_dir, "done", "Extraction complete. Results ready for download.")
         _save_to_db(job_dir)
+        print(f"{'='*80}")
+        print(f"  SUMMARY: 1 file processed — 1 succeeded, 0 failed")
+        print(f"{'='*80}\n")
     except Exception as e:
         logger.exception("Pipeline failed")
         _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
+        print(f"{'='*80}")
+        print(f"  SUMMARY: 1 file processed — 0 succeeded, 1 failed")
+        print(f"{'='*80}\n")
     finally:
         _cleanup_intermediate(job_dir)
 
@@ -492,7 +503,7 @@ def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 conf = r.get("overall_confidence", "?")
                 print(f"  ✓ {name}  —  {len(fields)} fields, {pages} pages, {conf}%")
         print(f"{'─'*80}")
-        print(f"  SUCCESS: {success}/{len(pdfs_info)}  |  FAILED: {failed}  |  Time: {combined.get('processing_time', '?')}s")
+        print(f"  FILES: {len(pdfs_info)} total  |  SUCCESS: {success}  |  FAILED: {failed}  |  Time: {combined.get('processing_time', '?')}s")
         print(f"{'='*80}\n")
         _set_status(job_dir, "done", f"Batch complete: {success}/{len(pdfs_info)} succeeded.")
     except Exception as e:
@@ -671,34 +682,29 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     for f in fields:
         pages.setdefault(f["page"], []).append(f)
 
+    total_review = sum(1 for f in fields if f.get("needs_clarification"))
     print(f"\n{'='*80}")
     print(f"  FILE: {display_name}")
     print(f"  STATUS: {status_str}  |  Confidence: {conf}%  |  Time: {elapsed}s")
-    print(f"{'='*80}")
+    print(f"  FIELDS: {len(fields)} total  |  {total_review} need review  |  Pages: {len(pages)}")
+    print(f"{'─'*80}")
 
     for page_num in sorted(pages):
         page_fields = pages[page_num]
         sec_names = sec_by_page.get(page_num, [])
         sec_label = f" ({', '.join(sec_names)})" if sec_names else ""
         needs_review = sum(1 for f in page_fields if f.get("needs_clarification"))
-        review_suffix = f"  ⚠ {needs_review} need review" if needs_review else ""
-        print(f"\n  Page {page_num}{sec_label} — {len(page_fields)} fields{review_suffix}")
-        print(f"  {'─'*76}")
+        review_suffix = f"  ⚠ {needs_review}" if needs_review else ""
+        print(f"\n  Page {page_num}{sec_label}{review_suffix}")
+        print(f"  {'─'*72}")
         for f in page_fields:
             label = f.get("label", "?")
-            value = (f.get("value") or "—")[:42]
-            pct = f.get("confidence", 0)
-            badges = []
-            if f.get("needs_clarification"):
-                badges.append("⚠")
-            if f.get("is_verified"):
-                badges.append("✓")
-            badge_str = f"  {' '.join(badges)}" if badges else ""
-            print(f"    {label:<48} {value:<22} {pct}%{badge_str}")
-
-    total_review = sum(1 for f in fields if f.get("needs_clarification"))
-    print(f"\n{'─'*80}")
-    print(f"  TOTAL: {len(fields)} fields across {len(pages)} pages  |  {total_review} need review  |  {elapsed}s")
+            value = (f.get("value") or "—")
+            print(f"    {label:<58} {value}")
+        print(f"  {'─'*72}")
+        high_conf = sum(1 for f in page_fields if f.get("confidence", 0) >= 90)
+        low_conf = sum(1 for f in page_fields if f.get("confidence", 0) < 70)
+        print(f"  Fields: {len(page_fields)}  |  High: {high_conf}  |  Low: {low_conf}")
     print(f"{'='*80}\n")
 
 
