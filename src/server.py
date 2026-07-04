@@ -6,18 +6,18 @@ import queue
 import sys
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
-import psutil
-
 import asyncio
+
+import httpx
+
+import psutil
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -2461,7 +2461,7 @@ async def ocr_extract(req: OcrExtractRequest):
 
     _set_status(job_dir, "oauth",
         f"OCR extract queued for {req.record_id} ({len(req.file_names)} files)")
-    _executor.submit(_run_ocr_extract_pipeline, job_dir, req)
+    asyncio.create_task(_run_ocr_extract_pipeline_async(job_dir, req))
 
     return {"success": True, "status": "queued", "job_id": job_id}
 
@@ -2472,50 +2472,53 @@ async def test_zoho_update(req: OcrExtractRequest):
     if not ZOHO_CLIENT_ID or not ZOHO_CLIENT_SECRET or not ZOHO_REFRESH_TOKEN:
         raise HTTPException(500, "Zoho OAuth credentials not configured")
     try:
-        token = _get_zoho_access_token()
-        _update_zoho_creator(token, req)
-        return {"success": True, "message": f"OCR_Status=Yes set on {req.zoho_record_id}"}
+        token = await _get_zoho_access_token_async()
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120)) as client:
+            await _update_zoho_creator_async(client, token, req, "updated")
+        return {"success": True, "message": f"OCR_Status=updated set on {req.zoho_record_id}"}
     except Exception as e:
         raise HTTPException(500, f"Zoho update failed: {e}")
 
 
-def _run_ocr_extract_pipeline(job_dir: Path, req: OcrExtractRequest) -> None:
-    """Download files from Zoho Creator → merge to PDF → upload to Supabase → run pipeline → update Zoho."""
+async def _run_ocr_extract_pipeline_async(job_dir: Path, req: OcrExtractRequest) -> None:
+    """Download from Zoho → merge → upload to Supabase → run pipeline → update Zoho (all async)."""
     t0 = time.time()
     logger.info("OCR extract started | record=%s | files=%d", req.record_id, len(req.file_names))
     _set_status(job_dir, "oauth", f"Starting OCR extract for {req.record_id}")
-    zoho_updated = False
 
     try:
         # ── Step 1: Zoho OAuth ──────────────────────────────────────
         logger.info("Zoho OAuth | record=%s", req.record_id)
-        access_token = _get_zoho_access_token()
+        access_token = await _get_zoho_access_token_async()
         _set_status(job_dir, "oauth", "Zoho authentication successful")
 
-        # ── Step 2: Download each file ───────────────────────────────
+        # ── Step 2: Download each file (in parallel) ────────────────
         download_dir = job_dir / "downloads"
         download_dir.mkdir(exist_ok=True)
+        total_files = len(req.file_names)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120)) as zoho_client:
+            download_tasks = [
+                _download_and_save_file(
+                    zoho_client,
+                    access_token,
+                    req,
+                    file_name,
+                    idx,
+                    total_files,
+                    job_dir,
+                    download_dir,
+                )
+                for idx, file_name in enumerate(req.file_names)
+            ]
+            results = await asyncio.gather(*download_tasks, return_exceptions=True)
+
         downloaded: list[Path] = []
-
-        for i, file_name in enumerate(req.file_names):
-            _set_status(job_dir, "downloading",
-                f"Downloading {i+1}/{len(req.file_names)}: {file_name}")
-            logger.info("Downloading %d/%d: %s | record=%s",
-                i+1, len(req.file_names), file_name, req.record_id)
-            try:
-                file_bytes = _download_zoho_file(access_token, req, file_name)
-            except Exception as e:
-                msg = f"Download failed for {file_name}: {e}"
-                logger.error(msg)
-                _set_status(job_dir, "error", msg)
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error("Download failed | record=%s | error=%s", req.record_id, result)
+                _set_status(job_dir, "error", f"Download failed: {result}")
                 return
-
-            ext = Path(file_name).suffix.lower()
-            local_path = download_dir / f"{i}_{file_name}"
-            local_path.write_bytes(file_bytes)
-            downloaded.append(local_path)
-            logger.info("Downloaded %d/%d: %s (%d bytes)",
-                i+1, len(req.file_names), file_name, len(file_bytes))
+            downloaded.append(result)
 
         _set_status(job_dir, "downloading", f"Downloaded {len(downloaded)} files")
 
@@ -2523,7 +2526,7 @@ def _run_ocr_extract_pipeline(job_dir: Path, req: OcrExtractRequest) -> None:
         combined_pdf = job_dir / "combined.pdf"
         _set_status(job_dir, "converting", "Converting to single PDF...")
         logger.info("Merging %d files to PDF | record=%s", len(downloaded), req.record_id)
-        _merge_to_pdf(downloaded, combined_pdf)
+        await asyncio.to_thread(_merge_to_pdf, downloaded, combined_pdf)
         pdf_size = combined_pdf.stat().st_size
         logger.info("Combined PDF created | size=%d bytes | record=%s", pdf_size, req.record_id)
         _set_status(job_dir, "converting", f"PDF created ({pdf_size/1024:.0f} KB)")
@@ -2532,33 +2535,34 @@ def _run_ocr_extract_pipeline(job_dir: Path, req: OcrExtractRequest) -> None:
         supabase_path = f"{req.record_id}/{req.record_id}.pdf"
         _set_status(job_dir, "supabase_upload", "Uploading to Supabase Storage...")
         logger.info("Uploading to Supabase | bucket=%s | path=%s", req.bucket, supabase_path)
-        _upload_to_supabase(req.bucket, supabase_path, combined_pdf.read_bytes(), "application/pdf")
+        pdf_bytes = await asyncio.to_thread(combined_pdf.read_bytes)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120)) as supabase_client:
+            await _upload_to_supabase_async(
+                supabase_client, req.bucket, supabase_path, pdf_bytes, "application/pdf"
+            )
         logger.info("Supabase upload successful | path=%s/%s", req.bucket, supabase_path)
         _set_status(job_dir, "supabase_upload", "PDF uploaded to Supabase")
 
         # ── Step 5: Run extraction pipeline ──────────────────────────
         input_pdf = job_dir / "input.pdf"
-        combined_pdf.rename(input_pdf)
+        await asyncio.to_thread(combined_pdf.rename, input_pdf)
         _set_status(job_dir, "pipeline_start", "Starting extraction pipeline...")
         logger.info("Starting extraction pipeline | record=%s", req.record_id)
 
         try:
-            _run_pipeline(job_dir, str(input_pdf))
+            await asyncio.to_thread(_run_pipeline, job_dir, str(input_pdf))
         except Exception as pipe_err:
             logger.exception("Pipeline failed | record=%s", req.record_id)
             _set_status(job_dir, "error", f"Pipeline failed: {pipe_err}")
+            return
 
         # ── Step 6: Update Zoho Creator (success only) ───────────────
         _set_status(job_dir, "zoho_update", "Updating Zoho Creator record...")
         logger.info("Updating Zoho Creator | record=%s | OCR_Status=updated", req.record_id)
-        try:
-            _update_zoho_creator(access_token, req, "updated")
-            logger.info("Zoho Creator updated | record=%s", req.record_id)
-            _set_status(job_dir, "done", "OCR complete — Zoho record updated")
-        except Exception as zoho_err:
-            logger.error("Zoho Creator update failed | record=%s | error=%s",
-                req.record_id, zoho_err)
-            _set_status(job_dir, "done", f"Pipeline done but Zoho update failed: {zoho_err}")
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120)) as zoho_client:
+            await _update_zoho_creator_async(zoho_client, access_token, req, "updated")
+        logger.info("Zoho Creator updated | record=%s", req.record_id)
+        _set_status(job_dir, "done", "OCR complete — Zoho record updated")
 
     except Exception as e:
         logger.exception("OCR extract failed | record=%s", req.record_id)
@@ -2575,38 +2579,66 @@ def _run_ocr_extract_pipeline(job_dir: Path, req: OcrExtractRequest) -> None:
 # ── Helper functions ───────────────────────────────────────────────────
 
 
-def _get_zoho_access_token() -> str:
+async def _download_and_save_file(
+    client: httpx.AsyncClient,
+    access_token: str,
+    req: OcrExtractRequest,
+    file_name: str,
+    idx: int,
+    total: int,
+    job_dir: Path,
+    download_dir: Path,
+) -> Path:
+    _set_status(job_dir, "downloading", f"Downloading {idx+1}/{total}: {file_name}")
+    logger.info("Downloading %d/%d: %s | record=%s", idx + 1, total, file_name, req.record_id)
+    file_bytes = await _download_zoho_file_async(client, access_token, req, file_name)
+    local_path = download_dir / f"{idx}_{file_name}"
+    await asyncio.to_thread(local_path.write_bytes, file_bytes)
+    logger.info("Downloaded %d/%d: %s (%d bytes)", idx + 1, total, file_name, len(file_bytes))
+    return local_path
+
+
+async def _get_zoho_access_token_async() -> str:
     """Exchange Zoho refresh token for an access token."""
-    data = urllib.parse.urlencode({
+    data = {
         "refresh_token": ZOHO_REFRESH_TOKEN,
         "client_id": ZOHO_CLIENT_ID,
         "client_secret": ZOHO_CLIENT_SECRET,
         "grant_type": "refresh_token",
-    }).encode()
-    req = urllib.request.Request(
-        "https://accounts.zoho.com/oauth/v2/token", data=data,
-    )
-    with urllib.request.urlopen(req) as resp:
-        result = json.loads(resp.read())
+    }
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30)) as client:
+        resp = await client.post("https://accounts.zoho.com/oauth/v2/token", data=data)
+        resp.raise_for_status()
+        result = resp.json()
     if "access_token" not in result:
         raise RuntimeError(f"Zoho OAuth failed: {result}")
     return result["access_token"]
 
 
-def _download_zoho_file(access_token: str, req: OcrExtractRequest, file_name: str) -> bytes:
+async def _download_zoho_file_async(
+    client: httpx.AsyncClient,
+    access_token: str,
+    req: OcrExtractRequest,
+    file_name: str,
+) -> bytes:
     """Download a single file attachment from Zoho Creator."""
     encoded_path = urllib.parse.quote(file_name, safe='')
     url = (f"https://www.zohoapis.com/creator/v2.1/data/{req.zoho_app_owner}/"
            f"{req.zoho_app_link_name}/report/{req.zoho_report_link_name}/"
            f"{req.zoho_record_id}/{req.file_field_link_name}/download?filepath={encoded_path}")
-    request = urllib.request.Request(
-        url, headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
-    )
-    with urllib.request.urlopen(request) as resp:
-        return resp.read()
+    headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+    resp = await client.get(url, headers=headers)
+    resp.raise_for_status()
+    return resp.content
 
 
-def _upload_to_supabase(bucket: str, path: str, data: bytes, content_type: str) -> None:
+async def _upload_to_supabase_async(
+    client: httpx.AsyncClient,
+    bucket: str,
+    path: str,
+    data: bytes,
+    content_type: str,
+) -> None:
     """Upload bytes to Supabase Storage, overwriting if exists."""
     url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{path}"
     headers = {
@@ -2615,24 +2647,27 @@ def _upload_to_supabase(bucket: str, path: str, data: bytes, content_type: str) 
         "x-upsert": "true",
         "Content-Type": content_type,
     }
-    request = urllib.request.Request(url, data=data, headers=headers, method='PUT')
-    with urllib.request.urlopen(request) as resp:
-        resp.read()
+    resp = await client.put(url, content=data, headers=headers)
+    resp.raise_for_status()
 
 
-def _update_zoho_creator(access_token: str, req: OcrExtractRequest, status: str = "updated") -> None:
+async def _update_zoho_creator_async(
+    client: httpx.AsyncClient,
+    access_token: str,
+    req: OcrExtractRequest,
+    status: str = "updated",
+) -> None:
     """Set OCR_Status on the Zoho Creator record."""
     url = (f"https://www.zohoapis.com/creator/v2.1/data/{req.zoho_app_owner}/"
            f"{req.zoho_app_link_name}/report/{req.zoho_report_link_name}/"
            f"{req.zoho_record_id}")
-    data = json.dumps({"data": {"OCR_Status": status}}).encode()
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json",
     }
-    request = urllib.request.Request(url, data=data, headers=headers, method='PATCH')
-    with urllib.request.urlopen(request) as resp:
-        resp.read()
+    payload = {"data": {"OCR_Status": status}}
+    resp = await client.patch(url, json=payload, headers=headers)
+    resp.raise_for_status()
 
 
 def _merge_to_pdf(file_paths: list[Path], output_path: Path) -> None:

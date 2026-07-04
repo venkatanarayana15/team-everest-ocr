@@ -1,0 +1,35 @@
+{
+  "status": "done",
+  "message": "Batch complete. Total Tokens -> Primary (openai): Prompt=11097, Completion=7891 | Secondary (openai): Prompt=11956, Completion=904 | Grand Total=31848",
+  "log": [
+    {
+      "t": "04:19:03",
+      "msg": "Processing PDF Batch: Varsha_2026_TE_House.pdf"
+    },
+    {
+      "t": "04:19:08",
+      "msg": "[Varsha_2026_TE_House.pdf] Queued in batch"
+    },
+    {
+      "t": "04:19:08",
+      "msg": "[Varsha_2026_TE_House.pdf] Rendering pages..."
+    },
+    {
+      "t": "04:19:22",
+      "msg": "[Varsha_2026_TE_House.pdf] Extracting fields with primary AI..."
+    },
+    {
+      "t": "04:20:50",
+      "msg": "[Varsha_2026_TE_House.pdf] Mapping fields to bounding boxes..."
+    },
+    {
+      "t": "04:20:50",
+      "msg": "[Varsha_2026_TE_House.pdf] Running secondary verification..."
+    },
+    {
+      "t": "04:21:05",
+      "msg": "[Varsha_2026_TE_House.pdf] Done"
+    }
+  ],
+  "pages": 0
+}
