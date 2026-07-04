@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 from typing import Any, Optional
 
 import asyncpg
@@ -17,123 +16,6 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 _pool: Optional[asyncpg.Pool] = None
-
-# ── Field label → database column mapping ──────────────────────────────────
-
-FIELD_TO_COLUMN: dict[str, str] = {
-    "Volunteer Name": "volunteer_name",
-    "Co-Volunteer Name": "co_volunteer_name",
-    "Date of Visit": "date_of_visit",
-    "1.1 Application ID": "application_id",
-    "1.2 Student Full Name": "student_full_name",
-    "1.3 Gender": "gender",
-    "2.1 Family Status": "family_status",
-    "2.2 Relationship Details — Year of Death / Separation": "relationship_death_year",
-    "2.2 Relationship Details — Reason for Death / Separation": "relationship_death_reason",
-    "2.3 Is Father/Mother photograph kept at home?": "photograph_kept_at_home",
-    "2.4 Government ID Verified": "government_id_verified",
-    "3.1 House Ownership": "house_ownership",
-    "3.1.1 If rented, what is the rent amount?": "rent_amount",
-    "3.2 Type of Home": "type_of_home",
-    "3.3 Type of Ceiling": "type_of_ceiling",
-    "3.4 Number of Bedrooms": "number_of_bedrooms",
-    "3.4.1 Type of Bedroom": "type_of_bedroom",
-    "3.5 Bathroom": "bathroom",
-    "3.6 Kitchen Type": "kitchen_type",
-    "4.1 Assets at Home": "assets_at_home",
-    "4.2 Amount of Last Electricity Bill": "last_electricity_bill_amount",
-    "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?": "owns_other_assets",
-    "4.3.1 If yes, list their properties": "other_assets_details",
-    "4.4 Apart from your job, is there any other source of income?": "has_other_income",
-    "4.4.1 If yes, list other sources of income": "other_income_sources",
-    "4.5 Income Type": "income_type",
-    "4.6 Do you have any loans?": "has_loans",
-    "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount": "loan_details",
-    "4.7 If you choose any college, how much is the college fee?": "college_fee",
-    "4.8 If the college fee is higher, how will you manage it?": "manage_higher_fee",
-    "4.9 If you do not receive this scholarship, how will you pay the fees?": "manage_without_scholarship",
-    "5.1 Does the student have any health issues?": "has_health_issues",
-    "5.2 If yes, list the health issues": "health_issues_description",
-    "6.1 Will you study college for three years without any obstacle?": "study_commitment",
-    "6.2 If we have a training program within 15 km from your home, can you come?": "training_program_availability",
-    "6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?": "ready_for_skill_classes",
-    "7.1 Has the student received or applied for any other scholarships for their UG degree?": "other_scholarships",
-    "8.1 What is your opinion about the student, their family members, and their living condition?": "volunteer_opinion",
-    "8.2 Will you recommend this student for this scholarship?": "recommend_student",
-    "8.3 Any other comments you want to share?": "volunteer_comments",
-}
-
-BOOLEAN_COLUMNS: set[str] = {
-    "photograph_kept_at_home",
-    "owns_other_assets",
-    "has_other_income",
-    "has_loans",
-    "has_health_issues",
-    "ready_for_skill_classes",
-}
-
-JSONB_ARRAY_COLUMNS: set[str] = {
-    "type_of_home",
-    "type_of_ceiling",
-    "kitchen_type",
-    "assets_at_home",
-}
-
-TABLE_PARENT_COLUMNS: dict[str, str] = {
-    "2.5 Family Members": "family_members",
-    "4.3.1 If yes, list their properties": "other_assets_details",
-    "4.4.1 If yes, list other sources of income": "other_income_sources",
-    "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount": "loan_details",
-}
-
-_ROW_RE = re.compile(r"^(.*?)\s*—\s*Row\s+\d+\s*—\s*(.*)$")
-
-
-def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
-    """Map the fields array from result_json into structured DB columns."""
-    out: dict[str, Any] = {}
-    label_map: dict[str, str] = {}
-    table_rows: dict[str, dict[int, dict[str, str]]] = {}
-
-    for f in fields:
-        label = f.get("label", "")
-        value = f.get("value", "")
-        label_map[label] = value
-
-        row_match = _ROW_RE.match(label)
-        if row_match:
-            parent_label = row_match.group(1).strip()
-            column_name = row_match.group(2).strip()
-            if parent_label in TABLE_PARENT_COLUMNS:
-                table_col = TABLE_PARENT_COLUMNS[parent_label]
-                table_rows.setdefault(table_col, {})
-                row_num_match = re.search(r"Row\s+(\d+)", label)
-                if row_num_match:
-                    row_num = int(row_num_match.group(1))
-                    table_rows[table_col].setdefault(row_num, {})
-                    table_rows[table_col][row_num][column_name] = value
-
-    for label, col in FIELD_TO_COLUMN.items():
-        val = label_map.get(label)
-        if val is None:
-            continue
-        if col in BOOLEAN_COLUMNS:
-            out[col] = val.strip().lower() in ("yes", "true", "1")
-        elif col in JSONB_ARRAY_COLUMNS:
-            items = [x.strip() for x in val.split(",") if x.strip()]
-            out[col] = json.dumps(items)
-        elif col not in TABLE_PARENT_COLUMNS.values():
-            out[col] = val
-
-    for col, rows in table_rows.items():
-        sorted_rows = [
-            {k: rows[row_num].get(k, "") for k in sorted(rows[row_num].keys())}
-            for row_num in sorted(rows.keys())
-        ]
-        out[col] = json.dumps(sorted_rows)
-
-    return out
-
 
 
 async def get_pool() -> asyncpg.Pool:
@@ -183,15 +65,25 @@ async def upsert_ocr_document(
     *,
     job_id: str,
     file_name: str,
+    file_size: Optional[int] = None,
+    file_path: Optional[str] = None,
     status: str = "done",
     processing_time: Optional[float] = None,
     confidence_score: Optional[float] = None,
-    num_pdfs: Optional[int] = None,
+    num_pages: Optional[int] = None,
+    raw_text: Optional[str] = None,
     result_json: Optional[dict] = None,
+    primary_model: Optional[str] = None,
+    secondary_model: Optional[str] = None,
+    token_usage: Optional[dict] = None,
+    error_message: Optional[str] = None,
 ) -> str:
     """
     Insert a row into ocr_documents.
-    Structured field columns are auto-populated from result_json.fields.
+
+    Only metadata columns (file_name, status, result_json, etc.) are written —
+    these are guaranteed to exist in the table regardless of schema version.
+    The full extraction result (all fields + values) lives inside result_json.
     Returns the new row uuid as str, or "" if the insert was skipped/failed.
     """
     logger.info(
@@ -201,34 +93,37 @@ async def upsert_ocr_document(
 
     pool = await get_pool()
 
+    # ── Build the column → value dict ─────────────────────────────────────────
     data: dict[str, Any] = {
         "file_name": file_name,
         "status": status,
     }
 
+    if file_size is not None:
+        data["file_size"] = file_size
+    if file_path is not None:
+        data["file_path"] = file_path
     if processing_time is not None:
         data["processing_time"] = processing_time
     if confidence_score is not None:
         data["confidence_score"] = confidence_score
-    if num_pdfs is not None:
-        data["num_pdfs"] = num_pdfs
+    if num_pages is not None:
+        data["num_pages"] = num_pages
+    if raw_text is not None:
+        data["raw_text"] = raw_text
     if result_json is not None:
         # Embed job_id so get_result_by_job_id can look up this row later
         rj = dict(result_json)
         rj["job_id"] = job_id
         data["result_json"] = json.dumps(rj)
-
-        # Populate structured columns from extracted fields
-        raw_fields = rj.get("fields", [])
-        if raw_fields:
-            structured = _extract_structured_fields(raw_fields)
-            for col, val in structured.items():
-                if val is not None:
-                    data[col] = val
-            logger.info(
-                "upsert_ocr_document: mapped %d structured columns from %d fields",
-                len(structured), len(raw_fields),
-            )
+    if primary_model is not None:
+        data["primary_model"] = primary_model
+    if secondary_model is not None:
+        data["secondary_model"] = secondary_model
+    if token_usage is not None:
+        data["token_usage"] = json.dumps(token_usage)
+    if error_message is not None:
+        data["error_message"] = error_message
 
     cols = list(data.keys())
     placeholders = [f"${i + 1}" for i in range(len(cols))]

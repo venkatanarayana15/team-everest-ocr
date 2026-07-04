@@ -258,7 +258,10 @@ def _save_to_db(
     job_id: str,
     file_name: str,
     result_dict: dict,
+    file_size: int | None = None,
+    file_path: str | None = None,
     status: str = "done",
+    error_message: str | None = None,
 ) -> None:
     """Run upsert_ocr_document from a sync worker thread.
 
@@ -282,11 +285,18 @@ def _save_to_db(
             doc_id = await upsert_ocr_document(
                 job_id=job_id,
                 file_name=file_name,
+                file_size=file_size,
+                file_path=file_path,
                 status=status,
                 processing_time=result_dict.get("processing_time"),
                 confidence_score=result_dict.get("overall_confidence"),
-                num_pdfs=result_dict.get("num_pdfs"),
+                num_pages=result_dict.get("num_pages"),
+                raw_text=result_dict.get("raw_text"),
                 result_json=result_dict,
+                primary_model=result_dict.get("primary_model"),
+                secondary_model=result_dict.get("secondary_model"),
+                token_usage=result_dict.get("token_usage"),
+                error_message=error_message,
             )
             if doc_id:
                 logger.info("_save_to_db: row saved — job=%s doc_id=%s", job_id, doc_id)
@@ -716,6 +726,7 @@ def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
             job_id=job_dir.name,
             file_name=pdf_name,
             result_dict=result_dict,
+            file_path=str(pdf_path),
         )
 
     except Exception as e:
@@ -727,6 +738,7 @@ def _run_pipeline(job_dir: Path, pdf_path: str) -> None:
             file_name=job_dir.name,
             result_dict={},
             status="failed",
+            error_message=f"{type(e).__name__}: {e}",
         )
     finally:
         _cleanup_intermediate(job_dir)
@@ -822,6 +834,7 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
             sub_dir = job_dir / f"pdf_{idx}"
             sub_dir.mkdir(exist_ok=True)
             
+            # Step 1: Preprocess
             pages = pipeline.preprocess(str(pdf_path), str(sub_dir))
             page_images = {
                 int(p.stem.split("_")[1]): str(p)
@@ -830,6 +843,7 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
             
             _set_batch_pdf_status(job_dir, filename, "primary_extraction", 30, "Extracting fields with primary AI...")
             
+            # Step 2: OCR + Primary
             word_boxes = pipeline.run_bbox(str(pdf_path))
             model_data, primary_token_usage = pipeline.run_primary_extraction(str(pdf_path), page_images)
             
@@ -839,12 +853,12 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
             _set_batch_pdf_status(job_dir, filename, "field_mapping", 60, "Mapping fields to bounding boxes...")
             
             fields = []
-            pdf_raw_text = ""
             if model_data:
-                pdf_raw_text = model_data.get("raw_text", "")
-                pdf_raw_text = _insert_page_markers(pdf_raw_text, model_data.get("fields", []))
+                raw_text = model_data.get("raw_text", "")
+                raw_text = _insert_page_markers(raw_text, model_data.get("fields", []))
                 fields = pipeline.merge_fields(model_data, word_boxes, prefix=primary_name)
             else:
+                raw_text = ""
                 fields = [
                     StructuredField(label=wb.text, value=wb.text, confidence=int(wb.confidence), page=wb.page_num, bbox=wb.bbox, extracted_by=primary_name)
                     for wb in word_boxes
@@ -852,6 +866,7 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 
             fields = ExtractionPipeline.fill_missing_template_fields(fields)
             
+            # Step 5: Verification
             overall_confidence = model_data.get("overall_confidence", 0) if model_data else 0
             secondary_token_usage = {}
             if overall_confidence < 95:
@@ -860,52 +875,62 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 total_secondary_prompt += secondary_token_usage.get("prompt_tokens", 0) or 0
                 total_secondary_completion += secondary_token_usage.get("completion_tokens", 0) or 0
                 
+            # Tag fields with file names
+            for f in fields:
+                f.file = filename
+                
+            all_fields.extend(fields)
+            
+            if raw_text:
+                all_raw_text.append(f"--- Page {total_pages + 1} ---\n--- File: {filename} ---\n{raw_text}")
+                
+            total_pages += len(pages)
+            confidences.append(overall_confidence)
+            
             pdf_times[filename] = round(time.time() - pdf_t0, 1)
             _set_batch_pdf_status(job_dir, filename, "done", 100, "Done")
 
-            # Save each PDF as its own DB row
-            pdf_result = {
-                "overall_confidence": overall_confidence,
-                "num_pages": len(pages),
-                "num_pdfs": 1,
-                "processing_time": pdf_times[filename],
-                "raw_text": pdf_raw_text,
-                "primary_model": primary_name,
-                "secondary_model": secondary_name,
-                "sections": [],
-                "pdf_names": [filename],
-                "fields": [
-                    {
-                        "label": f.label,
-                        "value": f.value,
-                        "confidence": f.confidence,
-                        "page": f.page,
-                        "section_number": f.section_number,
-                        "bbox": list(f.bbox) if f.bbox else None,
-                        "value_bbox": list(f.value_bbox) if f.value_bbox else None,
-                        "needs_clarification": f.needs_clarification,
-                        "reason": f.reason,
-                        "is_verified": f.is_verified,
-                        "extracted_by": f.extracted_by,
-                        "verified_by": f.verified_by,
-                        "original_value": f.original_value,
-                        "file": filename,
-                    }
-                    for f in fields
-                ],
-            }
-            _save_to_db(
-                job_id=f"{job_dir.name}_{filename}",
-                file_name=filename,
-                result_dict=pdf_result,
-            )
-
-        elapsed = time.time() - t0
         overall_conf = round(sum(confidences) / len(confidences)) if confidences else 0
+        elapsed = time.time() - t0
+        
+        result_dict = {
+            "overall_confidence": overall_conf,
+            "num_pages": total_pages,
+            "num_pdfs": len(pdfs_info),
+            "processing_time": round(elapsed, 2),
+            "pdf_times": pdf_times,
+            "raw_text": "\n\n".join(all_raw_text),
+            "primary_model": primary_name,
+            "secondary_model": secondary_name,
+            "sections": [],
+            "pdf_names": [item["filename"] for item in pdfs_info],
+            "fields": [
+                {
+                    "label": f.label,
+                    "value": f.value,
+                    "confidence": f.confidence,
+                    "page": f.page,
+                    "section_number": f.section_number,
+                    "bbox": list(f.bbox) if f.bbox else None,
+                    "value_bbox": list(f.value_bbox) if f.value_bbox else None,
+                    "needs_clarification": f.needs_clarification,
+                    "reason": f.reason,
+                    "is_verified": f.is_verified,
+                    "extracted_by": f.extracted_by,
+                    "verified_by": f.verified_by,
+                    "original_value": f.original_value,
+                    "file": getattr(f, "file", None) or filename,
+                }
+                for f in all_fields
+            ]
+        }
         
         results_dir = job_dir / "results"
         results_dir.mkdir(exist_ok=True)
-        
+        with open(results_dir / "result.json", "w") as f:
+            json.dump(result_dict, f, indent=2)
+            
+        # Write consolidated status as done
         path = job_dir / "status.json"
         existing = {}
         if path.exists():
@@ -921,9 +946,24 @@ def _run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         with open(path, "w") as f:
             json.dump(existing, f, indent=2)
 
+        # ── Persist batch result to Supabase ──────────────────────────
+        batch_name = ", ".join(item["filename"] for item in pdfs_info)
+        _save_to_db(
+            job_id=job_dir.name,
+            file_name=batch_name[:500],  # cap to avoid over-long text
+            result_dict=result_dict,
+        )
+
     except Exception as e:
         logger.exception("Batch pipeline failed")
         _set_status(job_dir, "error", f"Pipeline failed: {str(e)}")
+        _save_to_db(
+            job_id=job_dir.name,
+            file_name=job_dir.name,
+            result_dict={},
+            status="failed",
+            error_message=str(e),
+        )
 
 
 def _run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None:
@@ -1118,6 +1158,7 @@ def _run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None:
             file_name=job_dir.name,
             result_dict={},
             status="failed",
+            error_message=f"{type(e).__name__}: {e}",
         )
 
 
