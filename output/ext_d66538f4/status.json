@@ -1,0 +1,51 @@
+{
+  "status": "preprocessing",
+  "message": "Preprocessing PDF (TEMP-2026-9307)...",
+  "log": [
+    {
+      "t": "16:07:08",
+      "msg": "OCR extract queued for TEMP-2026-9307 (6 files)"
+    },
+    {
+      "t": "16:07:08",
+      "msg": "Downloading for TEMP-2026-9307"
+    },
+    {
+      "t": "16:07:08",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "16:07:08",
+      "msg": "Downloading 6 files..."
+    },
+    {
+      "t": "16:07:59",
+      "msg": "Downloaded 6 files"
+    },
+    {
+      "t": "16:07:59",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "16:07:59",
+      "msg": "PDF created (15792 KB)"
+    },
+    {
+      "t": "16:07:59",
+      "msg": "Uploading to Supabase Storage..."
+    },
+    {
+      "t": "16:08:10",
+      "msg": "PDF uploaded to Supabase"
+    },
+    {
+      "t": "16:08:10",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "16:08:10",
+      "msg": "Preprocessing PDF (TEMP-2026-9307)..."
+    }
+  ],
+  "pages": 0
+}
