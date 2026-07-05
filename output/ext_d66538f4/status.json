@@ -1,6 +1,6 @@
 {
-  "status": "preprocessing",
-  "message": "Preprocessing PDF (TEMP-2026-9307)...",
+  "status": "done",
+  "message": "OCR complete \u2014 Zoho record updated",
   "log": [
     {
       "t": "16:07:08",
@@ -45,7 +45,43 @@
     {
       "t": "16:08:10",
       "msg": "Preprocessing PDF (TEMP-2026-9307)..."
+    },
+    {
+      "t": "16:09:04",
+      "msg": "Preprocessing done."
+    },
+    {
+      "t": "16:09:04",
+      "msg": "Running Tesseract + primary extraction (OpenAICompatible)..."
+    },
+    {
+      "t": "16:09:47",
+      "msg": "Merged 53 fields."
+    },
+    {
+      "t": "16:09:47",
+      "msg": "Filling missing template fields..."
+    },
+    {
+      "t": "16:09:47",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "16:09:47",
+      "msg": "Extraction complete. Results ready for download."
+    },
+    {
+      "t": "16:09:49",
+      "msg": "Writing fields to Home_Visit_Questionnaire..."
+    },
+    {
+      "t": "16:09:51",
+      "msg": "Updating Zoho Creator record..."
+    },
+    {
+      "t": "16:09:54",
+      "msg": "OCR complete \u2014 Zoho record updated"
     }
   ],
-  "pages": 0
+  "pages": 6
 }
