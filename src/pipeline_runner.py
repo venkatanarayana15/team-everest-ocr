@@ -21,6 +21,70 @@ from src.status import (
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_job_segment(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-")
+    return cleaned[:40] or "document"
+
+
+def _batch_item_job_id(batch_job_id: str, index: int, pdf_name: str) -> str:
+    stem = _sanitize_job_segment(Path(pdf_name).stem)
+    return f"{batch_job_id}__{index:03d}__{stem}"
+
+
+def _build_db_upsert_payload(
+    *,
+    job_id: str,
+    file_name: str,
+    result_data: dict,
+    status: str = "done",
+    num_pdfs: int | None = None,
+) -> dict:
+    payload: dict = {
+        "job_id": job_id,
+        "file_name": file_name,
+        "status": status,
+        "processing_time": result_data.get("processing_time"),
+        "confidence_score": result_data.get("overall_confidence"),
+        "result_json": dict(result_data),
+    }
+    if num_pdfs is not None:
+        payload["num_pdfs"] = num_pdfs
+
+    payload["result_json"]["job_id"] = job_id
+    return payload
+
+
+def _save_db_payloads(payloads: list[dict]) -> None:
+    if not payloads:
+        return
+    try:
+        from src.database import upsert_ocr_document
+    except ImportError:
+        logger.info("DB module not available, skipping auto-save")
+        return
+
+    import asyncio
+
+    async def _persist() -> None:
+        for payload in payloads:
+            logger.info(
+                "DB save queued: job=%s file=%r status=%s fields=%d",
+                payload.get("job_id"),
+                payload.get("file_name"),
+                payload.get("status"),
+                len(payload.get("result_json", {}).get("fields", [])),
+            )
+            await upsert_ocr_document(**payload)
+
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_persist())
+    finally:
+        asyncio.set_event_loop(None)
+        loop.close()
+
+
 def _validate_pdf(path: str) -> tuple[bool, str]:
     p = Path(path)
     if not p.exists():
@@ -314,14 +378,6 @@ def _save_to_db(job_dir: Path) -> None:
     results_path = job_dir / "results" / "result.json"
     if not results_path.exists():
         return
-    try:
-        from src.database import upsert_ocr_document
-    except ImportError:
-        logger = logging.getLogger(__name__)
-        logger.info("DB module not available, skipping auto-save")
-        return
-
-    import asyncio
     logger = logging.getLogger(__name__)
     try:
         with open(results_path) as f:
@@ -335,20 +391,15 @@ def _save_to_db(job_dir: Path) -> None:
             result_data.get("overall_confidence", "N/A"),
             result_data.get("processing_time", 0),
         )
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(upsert_ocr_document(
+        _save_db_payloads([
+            _build_db_upsert_payload(
                 job_id=job_dir.name,
                 file_name=orig_name,
+                result_data=result_data,
                 status="done",
-                processing_time=result_data.get("processing_time"),
-                confidence_score=result_data.get("overall_confidence"),
                 num_pdfs=result_data.get("num_pdfs"),
-                result_json=result_data,
-            ))
-        finally:
-            loop.close()
+            )
+        ])
         logger.info("Auto-save to DB succeeded for job %s", job_dir.name)
     except Exception as e:
         logger.warning("Auto-save to DB failed for job %s: %s", job_dir.name, e)
@@ -494,7 +545,60 @@ def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         print(f"{'─'*80}")
         print(f"  SUCCESS: {success}/{len(pdfs_info)}  |  FAILED: {failed}  |  Time: {combined.get('processing_time', '?')}s")
         print(f"{'='*80}\n")
+        logger.info(
+            "structured_batch_report=%s",
+            json.dumps(
+                {
+                    "job_id": job_dir.name,
+                    "num_pdfs": len(pdfs_info),
+                    "success": success,
+                    "failed": failed,
+                    "processing_time": combined.get("processing_time"),
+                    "items": [
+                        {
+                            "pdf_name": r.get("pdf_name", r.get("name", "?")),
+                            "status": "error" if "error" in r else "done",
+                            "fields": len(r.get("fields", [])),
+                            "pages": len({f.get("page") for f in r.get("fields", []) if f.get("page") is not None}) if "error" not in r else 0,
+                            "confidence": r.get("overall_confidence"),
+                            "error": r.get("error"),
+                            "db_job_id": r.get("db_job_id"),
+                        }
+                        for r in all_results
+                    ],
+                },
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
         _set_status(job_dir, "done", f"Batch complete: {success}/{len(pdfs_info)} succeeded.")
+        batch_payloads = [
+            _build_db_upsert_payload(
+                job_id=job_dir.name,
+                file_name=job_dir.name,
+                result_data=combined,
+                status="done",
+                num_pdfs=len(pdfs_info),
+            )
+        ]
+        for idx, r in enumerate(all_results):
+            pdf_name = r.get("pdf_name", r.get("name", f"pdf_{idx + 1}"))
+            db_job_id = _batch_item_job_id(job_dir.name, idx, pdf_name)
+            r["db_job_id"] = db_job_id
+            r["batch_job_id"] = job_dir.name
+            r["batch_index"] = idx + 1
+            r["batch_total"] = len(all_results)
+            r["status"] = "error" if "error" in r else "done"
+            batch_payloads.append(
+                _build_db_upsert_payload(
+                    job_id=db_job_id,
+                    file_name=pdf_name,
+                    result_data=r,
+                    status=r["status"],
+                    num_pdfs=1,
+                )
+            )
+        _save_db_payloads(batch_payloads)
     except Exception as e:
         logger.exception("Batch pipeline failed")
         _set_status(job_dir, "error", f"Batch pipeline failed: {e}")
@@ -536,6 +640,7 @@ def run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None:
         _save_results(job_dir, res, job_dir.name)
         _print_field_report(job_dir, res)
         _set_status(job_dir, "done", "Extraction complete.")
+        _save_to_db(job_dir)
     except Exception as e:
         logger.exception("Image pipeline failed")
         _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
@@ -670,6 +775,40 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     pages: dict[int, list[dict]] = {}
     for f in fields:
         pages.setdefault(f["page"], []).append(f)
+
+    structured_report = {
+        "job_id": job_dir.name,
+        "file_name": display_name,
+        "status": status_str.lower(),
+        "confidence": conf,
+        "elapsed": elapsed,
+        "total_fields": len(fields),
+        "total_pages": len(pages),
+        "needs_review": sum(1 for f in fields if f.get("needs_clarification")),
+        "pages": [
+            {
+                "page": page_num,
+                "sections": sec_by_page.get(page_num, []),
+                "field_count": len(page_fields),
+                "needs_review": sum(1 for f in page_fields if f.get("needs_clarification")),
+                "fields": [
+                    {
+                        "label": f.get("label", "?"),
+                        "value": f.get("value", ""),
+                        "confidence": f.get("confidence", 0),
+                        "needs_clarification": bool(f.get("needs_clarification")),
+                        "is_verified": bool(f.get("is_verified")),
+                    }
+                    for f in page_fields
+                ],
+            }
+            for page_num, page_fields in sorted(pages.items())
+        ],
+    }
+    logger.info(
+        "structured_field_report=%s",
+        json.dumps(structured_report, ensure_ascii=False, default=str),
+    )
 
     print(f"\n{'='*80}")
     print(f"  FILE: {display_name}")

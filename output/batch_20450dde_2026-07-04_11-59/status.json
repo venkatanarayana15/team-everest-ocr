@@ -1,0 +1,15 @@
+{
+  "status": "error",
+  "message": "Batch pipeline failed: PRIMARY_API_KEY (or GEMINI_API_KEY) not set in .env",
+  "log": [
+    {
+      "t": "11:59:25",
+      "msg": "Processing PDF Batch: Varsha_2026_TE_House.pdf"
+    },
+    {
+      "t": "11:59:25",
+      "msg": "Batch pipeline failed: PRIMARY_API_KEY (or GEMINI_API_KEY) not set in .env"
+    }
+  ],
+  "pages": 0
+}

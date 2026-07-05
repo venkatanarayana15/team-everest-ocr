@@ -1,0 +1,39 @@
+{
+  "status": "done",
+  "message": "Batch complete: 0/1 succeeded.",
+  "log": [
+    {
+      "t": "12:48:14",
+      "msg": "Processing PDF Batch: TEMP-2026-8363.pdf"
+    },
+    {
+      "t": "12:48:15",
+      "msg": "Batch: processing 1 PDFs..."
+    },
+    {
+      "t": "12:48:15",
+      "msg": "[TEMP-2026-8363.pdf] Starting (1/1)"
+    },
+    {
+      "t": "12:48:22",
+      "msg": "[TEMP-2026-8363.pdf] Preprocessed (1/1)"
+    },
+    {
+      "t": "12:48:22",
+      "msg": "[TEMP-2026-8363.pdf] Running Chandra-2 OCR + primary extraction (OpenAICompatible)... (1/1)"
+    },
+    {
+      "t": "12:49:28",
+      "msg": "[TEMP-2026-8363.pdf] Error code: 404 - {'detail': 'Not Found'}"
+    },
+    {
+      "t": "12:49:28",
+      "msg": "Saving batch results..."
+    },
+    {
+      "t": "12:49:28",
+      "msg": "Batch complete: 0/1 succeeded."
+    }
+  ],
+  "pages": 0
+}

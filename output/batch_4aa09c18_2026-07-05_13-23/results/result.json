@@ -1,0 +1,15 @@
+{
+  "batch": true,
+  "num_pdfs": 1,
+  "pdf_names": [],
+  "pdf_times": {},
+  "pdfs": [
+    {
+      "name": "Scan_document20260610_163440.pdf",
+      "error": "cannot access local variable 'overall_confidence' where it is not associated with a value"
+    }
+  ],
+  "fields": [],
+  "sections": [],
+  "processing_time": 39.17
+}

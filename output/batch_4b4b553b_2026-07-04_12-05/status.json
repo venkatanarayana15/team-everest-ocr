@@ -1,0 +1,15 @@
+{
+  "status": "error",
+  "message": "Batch pipeline failed: PRIMARY_API_KEY (or GEMINI_API_KEY) not set in .env",
+  "log": [
+    {
+      "t": "12:05:07",
+      "msg": "Processing PDF Batch: DOC-20260620-WA0044..pdf"
+    },
+    {
+      "t": "12:04:50",
+      "msg": "Batch pipeline failed: PRIMARY_API_KEY (or GEMINI_API_KEY) not set in .env"
+    }
+  ],
+  "pages": 0
+}

@@ -1,0 +1,51 @@
+{
+  "status": "done",
+  "message": "Batch complete: 1/1 succeeded.",
+  "log": [
+    {
+      "t": "08:45:39",
+      "msg": "Processing PDF Batch: TEMP-2026-8075.pdf"
+    },
+    {
+      "t": "08:45:40",
+      "msg": "Batch: processing 1 PDFs..."
+    },
+    {
+      "t": "08:45:40",
+      "msg": "[TEMP-2026-8075.pdf] Starting (1/1)"
+    },
+    {
+      "t": "08:45:45",
+      "msg": "[TEMP-2026-8075.pdf] Preprocessed (1/1)"
+    },
+    {
+      "t": "08:45:45",
+      "msg": "[TEMP-2026-8075.pdf] Running Chandra-2 OCR + primary extraction (Datalab)... (1/1)"
+    },
+    {
+      "t": "08:46:16",
+      "msg": "[TEMP-2026-8075.pdf] Merged 84 fields. (1/1)"
+    },
+    {
+      "t": "08:46:16",
+      "msg": "[TEMP-2026-8075.pdf] Running secondary verification (Datalab)... (1/1)"
+    },
+    {
+      "t": "08:46:16",
+      "msg": "[TEMP-2026-8075.pdf] Filling missing template fields... (1/1)"
+    },
+    {
+      "t": "08:46:16",
+      "msg": "[TEMP-2026-8075.pdf] Done (1/1)"
+    },
+    {
+      "t": "08:46:16",
+      "msg": "Saving batch results..."
+    },
+    {
+      "t": "08:46:33",
+      "msg": "Batch complete: 1/1 succeeded."
+    }
+  ],
+  "pages": 0
+}

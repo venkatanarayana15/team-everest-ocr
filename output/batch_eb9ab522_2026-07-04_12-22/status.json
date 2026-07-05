@@ -1,0 +1,39 @@
+{
+  "status": "done",
+  "message": "Batch complete: 0/1 succeeded.",
+  "log": [
+    {
+      "t": "12:22:49",
+      "msg": "Processing PDF Batch: Scan_document20260610_163440.pdf"
+    },
+    {
+      "t": "12:22:49",
+      "msg": "Batch: processing 1 PDFs..."
+    },
+    {
+      "t": "12:22:49",
+      "msg": "[Scan_document20260610_163440.pdf] Starting (1/1)"
+    },
+    {
+      "t": "12:22:58",
+      "msg": "[Scan_document20260610_163440.pdf] Preprocessed (1/1)"
+    },
+    {
+      "t": "12:22:58",
+      "msg": "[Scan_document20260610_163440.pdf] Running Tesseract + primary extraction (Gemini)... (1/1)"
+    },
+    {
+      "t": "12:23:12",
+      "msg": "[Scan_document20260610_163440.pdf] 400 API key not valid. Please pass a valid API key. [reason: \"API_KEY_INVALID\"\ndomain: \"googleapis.com\"\nmetadata {\n  key: \"service\"\n  value: \"generativelanguage.googleapis.com\"\n}\n, locale: \"en-US\"\nmessage: \"API key not valid. Please pass a valid API key.\"\n]"
+    },
+    {
+      "t": "12:23:12",
+      "msg": "Saving batch results..."
+    },
+    {
+      "t": "12:23:12",
+      "msg": "Batch complete: 0/1 succeeded."
+    }
+  ],
+  "pages": 0
+}

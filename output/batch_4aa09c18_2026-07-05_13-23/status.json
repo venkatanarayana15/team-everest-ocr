@@ -1,0 +1,43 @@
+{
+  "status": "done",
+  "message": "Batch complete: 0/1 succeeded.",
+  "log": [
+    {
+      "t": "13:23:24",
+      "msg": "Processing PDF Batch: Scan_document20260610_163440.pdf"
+    },
+    {
+      "t": "13:23:24",
+      "msg": "Batch: processing 1 PDFs concurrently..."
+    },
+    {
+      "t": "13:23:24",
+      "msg": "[Scan_document20260610_163440.pdf] Starting (1/1)"
+    },
+    {
+      "t": "13:23:41",
+      "msg": "[Scan_document20260610_163440.pdf] Preprocessed (1/1)"
+    },
+    {
+      "t": "13:23:42",
+      "msg": "[Scan_document20260610_163440.pdf] Running Datalab extraction + Tesseract bbox (Datalab)... (1/1)"
+    },
+    {
+      "t": "13:24:03",
+      "msg": "[Scan_document20260610_163440.pdf] Primary extraction failed \u2014 using Tesseract words. (1/1)"
+    },
+    {
+      "t": "13:24:03",
+      "msg": "[Scan_document20260610_163440.pdf] cannot access local variable 'overall_confidence' where it is not associated with a value"
+    },
+    {
+      "t": "13:24:03",
+      "msg": "Saving batch results..."
+    },
+    {
+      "t": "13:24:03",
+      "msg": "Batch complete: 0/1 succeeded."
+    }
+  ],
+  "pages": 0
+}

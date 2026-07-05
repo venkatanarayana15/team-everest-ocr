@@ -1,0 +1,39 @@
+{
+  "status": "error",
+  "message": "Batch pipeline failed: 'charmap' codec can't encode character '\\u2717' in position 2: character maps to <undefined>",
+  "log": [
+    {
+      "t": "22:28:33",
+      "msg": "Processing PDF Batch: 11.pdf"
+    },
+    {
+      "t": "22:28:33",
+      "msg": "Batch: processing 1 PDFs..."
+    },
+    {
+      "t": "22:28:33",
+      "msg": "[11.pdf] Starting (1/1)"
+    },
+    {
+      "t": "22:28:38",
+      "msg": "[11.pdf] Preprocessed (1/1)"
+    },
+    {
+      "t": "22:28:38",
+      "msg": "[11.pdf] Running Tesseract + primary extraction (Datalab)... (1/1)"
+    },
+    {
+      "t": "22:28:38",
+      "msg": "[11.pdf] C:\\Users\\priya\\team-everest-ocr\\bin\\tesseract is not installed or it's not in your PATH. See README file for more information."
+    },
+    {
+      "t": "22:28:38",
+      "msg": "Saving batch results..."
+    },
+    {
+      "t": "22:28:38",
+      "msg": "Batch pipeline failed: 'charmap' codec can't encode character '\\u2717' in position 2: character maps to <undefined>"
+    }
+  ],
+  "pages": 0
+}

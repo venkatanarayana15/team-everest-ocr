@@ -1,0 +1,51 @@
+{
+  "status": "done",
+  "message": "Batch complete: 1/1 succeeded.",
+  "log": [
+    {
+      "t": "17:16:14",
+      "msg": "Processing PDF Batch: 11.pdf"
+    },
+    {
+      "t": "17:16:14",
+      "msg": "Batch: processing 1 PDFs..."
+    },
+    {
+      "t": "17:16:14",
+      "msg": "[11.pdf] Starting (1/1)"
+    },
+    {
+      "t": "17:16:20",
+      "msg": "[11.pdf] Preprocessed (1/1)"
+    },
+    {
+      "t": "17:16:20",
+      "msg": "[11.pdf] Running Tesseract + primary extraction (Datalab)... (1/1)"
+    },
+    {
+      "t": "17:16:48",
+      "msg": "[11.pdf] Merged 84 fields. (1/1)"
+    },
+    {
+      "t": "17:16:48",
+      "msg": "[11.pdf] Running secondary verification (Datalab)... (1/1)"
+    },
+    {
+      "t": "17:16:49",
+      "msg": "[11.pdf] Filling missing template fields... (1/1)"
+    },
+    {
+      "t": "17:16:49",
+      "msg": "[11.pdf] Done (1/1)"
+    },
+    {
+      "t": "17:16:49",
+      "msg": "Saving batch results..."
+    },
+    {
+      "t": "17:16:49",
+      "msg": "Batch complete: 1/1 succeeded."
+    }
+  ],
+  "pages": 0
+}

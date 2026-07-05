@@ -1,0 +1,39 @@
+{
+  "status": "done",
+  "message": "Batch complete: 0/1 succeeded.",
+  "log": [
+    {
+      "t": "12:39:49",
+      "msg": "Processing PDF Batch: Scan_document20260610_163440.pdf"
+    },
+    {
+      "t": "12:39:52",
+      "msg": "Batch: processing 1 PDFs..."
+    },
+    {
+      "t": "12:39:52",
+      "msg": "[Scan_document20260610_163440.pdf] Starting (1/1)"
+    },
+    {
+      "t": "12:40:05",
+      "msg": "[Scan_document20260610_163440.pdf] Preprocessed (1/1)"
+    },
+    {
+      "t": "12:40:06",
+      "msg": "[Scan_document20260610_163440.pdf] Running Chandra-2 OCR + primary extraction (OpenAICompatible)... (1/1)"
+    },
+    {
+      "t": "12:40:29",
+      "msg": "[Scan_document20260610_163440.pdf] CHANDRA_API_KEY is not configured in .env"
+    },
+    {
+      "t": "12:40:29",
+      "msg": "Saving batch results..."
+    },
+    {
+      "t": "12:40:29",
+      "msg": "Batch complete: 0/1 succeeded."
+    }
+  ],
+  "pages": 0
+}

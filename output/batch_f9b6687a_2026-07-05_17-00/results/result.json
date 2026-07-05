@@ -1,0 +1,2116 @@
+{
+  "batch": true,
+  "num_pdfs": 1,
+  "pdfs": [
+    {
+      "overall_confidence": 85,
+      "num_pages": 6,
+      "raw_text": "\n\n# I AM THE CHANGE\n\n## Scholarship Program \u2014 Home Visit Questionnaire\n\nTeam Everest | Confidential\n\n|                 |                    |                |\n|-----------------|--------------------|----------------|\n| Volunteer Name: | Co-Volunteer Name: | Date of Visit: |\n| Rohit Vijay     | Sejitha            | 10/06/2026     |\n\n## Section 1 \u2014 Student Profile\n\n### 1.1. Application ID\n\nEnter Application ID\n\n12345678\n\n### 1.2. Student Full Name\n\nEnter full name\n\nRohit Vijay\n\n### 1.3. Gender\n\n\u2612 Male \u2610 Female \u2610 Others\n\n## Section 2 \u2014 Family Background\n\n### 2.1. Family Status\n\n\u2610 Single Parent \u2610 Parentless \u2612 Having both parents\n\n### 2.2. Relationship Details (if applicable)\n\n| Year of Death / Separation | Reason for Death / Separation |\n|----------------------------|-------------------------------|\n| NIL                        | NIL                           |\n|                            |                               |\n\n### 2.3. Is Father/ Mother photograph kept at home?\n\n\u2612 Yes \u00a0\u00a0\u00a0\u00a0 \u2610 No\n\n### 2.4. Government ID Verified (Ration Card / Aadhaar / Driving Licence / Voter ID)\n\n\u2612 Aadhaar Card \u00a0\u00a0\u00a0\u00a0 \u2610 Ration Card \u00a0\u00a0\u00a0\u00a0 \u2610 Driving Licence \u00a0\u00a0\u00a0\u00a0 \u2610 Voter ID\n\n\u2610 Other: \\_\\_\\_\\_\\_\n\n### 2.5. Family Members\n\n| Name  | Age | Education | Occupation | Annual Income |\n|-------|-----|-----------|------------|---------------|\n| DORA  | 15  | B.SC      | Developer  | 400000        |\n| Bujji | 27  | M.SC      | Architect  | 1000000       |\n| Bheem | 18  | MBA       | IT DesL    | 150000        |\n|       |     |           |            |               |\n\n## Section 3 \u2014 Housing Condition\n\n### 3.1. House Ownership\n\n\u2610 Own \u00a0\u00a0\u00a0\u00a0 \u2612 Rented\n\n#### \n\n--- Page 2 ---\n\n3.1.1 If rented, what is the rent amount?\n\nRent amount\n\n5000\n\n### 3.2. Type of Home\n\n\u2612 Individual \u00a0\u00a0\u00a0\u00a0 \u2610 Private Apartment \u00a0\u00a0\u00a0\u00a0 \u2610 Housing Board \u00a0\u00a0\u00a0\u00a0 \u2610 Line House \u00a0\u00a0\u00a0\u00a0 \u2610\n\nOthers: \\_\\_\\_\\_\\_\n\n### **3.3. Type of Ceiling**\n\n\u2610 Roof (Kurai) \u00a0\u00a0 \u2610 Tiled \u00a0\u00a0 \u2610 Asbestos / Sheet \u00a0\u00a0 \u2612 Concrete\n\n### **3.4. Number of Bedrooms**\n\nEnter number\n\n5\n\n#### **\n\n--- Page 3 ---\n\n3.4.1 Type of Bedroom**\n\n\u2612 Separate Bedroom \u00a0\u00a0 \u2610 No Separate Bedroom\n\n### **3.5. Bathroom**\n\n\u2612 Separate \u00a0\u00a0 \u2610 Common for Apartment\n\n### **3.6. Kitchen Type**\n\n\u2612 Separate Kitchen \u00a0\u00a0 \u2610 Hall with Kitchen\n\n## **Section 4 \u2014 Financial Background**\n\n### **4.1. Assets at Home (tick all that apply)**\n\n\u2612 Washing Machine \u00a0\u00a0 \u2612 Fridge \u00a0\u00a0 \u2612 AC \u00a0\u00a0 \u2612 LED TV \u00a0\u00a0 \u2612 Two-Wheeler \u00a0\u00a0 \u2610  \nCar \u00a0\u00a0 \u2612 Smartphone \u00a0\u00a0 \u2612 Separate Wi-Fi \u00a0\u00a0 \u2610 Others: \\_\\_\\_\\_\\_\n\n### **4.2. Amount of Last Electricity Bill**\n\nAmount in \u20b9\n\n5000\n\n### **4.3. Do you own any other assets/properties in the name of grandparents, parents, or student?**\n\n\u2610 Yes \u00a0\u00a0 \u2612 No\n\n#### **4.3.1 If yes, list their properties:**\n\n| Property Description | Owner Name | Approximate Value |\n|----------------------|------------|-------------------|\n|----------------------|------------|-------------------|\n\n|  |  |  |\n|--|--|--|\n|  |  |  |\n|  |  |  |\n\n### 4.4. Apart from your job, is there any other source of income?\n\n\u2610 Yes \u00a0\u00a0 \u2612 No\n\n4.4.1 If yes, list other sources of income:\n\n| Source of Income | Amount |\n|------------------|--------|\n|                  |        |\n|                  |        |\n\n### 4.5. Income Type\n\n\u2612 Monthly \u00a0\u00a0 \u2610 Daily \u00a0\u00a0 \u2610 Weekly \u00a0\u00a0 \u2610 Ad-Hoc\n\n### 4.6. Do you have any loans?\n\n\u2612 Yes \u00a0\u00a0 \u2610 No\n\n4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount:\n\n| Sr. No.      | Loan Purpose | Loan Amount Taken | Pending Loan Amount |\n|--------------|--------------|-------------------|---------------------|\n| Housing loan | House        | 100000000         | 10000000            |\n| CAR loan     | CAR          | 5000000           | 2000000             |\n|              |              |                   |                     |\n\n### 4.7. If you choose any college, how much is the college fee?\n\nNIL\n\nAmount in \u20b9\n\n4.8. If the college fee is higher, how will you manage it?\n\nI cannot manage\n\n4.9. If you do not receive this scholarship, how will you pay the fees?\n\nI will not go to college\n\n## Section 5 \u2014 Health Information\n\n5.1. Does the student have any health issues?\n\n\u2610 Yes \u2612 No\n\n5.2. If yes, list the health issues:\n\nDescribe health issues\n\n## Section 6 \u2014 Student Commitment\n\n6.1. Will you study college for three years without any obstacle?\n\nYes\n\n6.2. If we have a training program within 15 km from your home, can you come?\n\n\u2612 Yes \u2610 No \u2610 Maybe\n\n6.3. Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?\n\n\u2612 Yes \u2610 No\n\n## Section 7 \u2014 Scholarship Information\n\n7.1. Has the student received or applied for any other scholarships for their UG degree?\n\nYes\n\n## Section 8 \u2014 Volunteer Observation\n\n8.1. What is your opinion about the student, their family members, and their living condition?\n\nThe Student is living a very good life with parents  \nDon't Give Scholarship.\n\n8.2. Will you recommend this student for this scholarship?\n\n\u2612 Yes \u00a0\u00a0 \u2610 No \u00a0\u00a0 \u2610 Not Sure\n\n8.3. Any other comments you want to share?\n\nRh\n\nVolunteer Signature\n\nCo-Volunteer Signature",
+      "primary_model": "Datalab",
+      "secondary_model": "Datalab",
+      "token_usage": {
+        "primary": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        },
+        "secondary": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        },
+        "total": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        }
+      },
+      "sections": [
+        {
+          "number": 1,
+          "name": "Student Profile",
+          "page": 1
+        },
+        {
+          "number": 2,
+          "name": "Family Background",
+          "page": 1
+        },
+        {
+          "number": 3,
+          "name": "Housing Condition",
+          "page": 2
+        },
+        {
+          "number": 4,
+          "name": "Financial Background**",
+          "page": 3
+        },
+        {
+          "number": 5,
+          "name": "Health Information",
+          "page": 5
+        },
+        {
+          "number": 6,
+          "name": "Student Commitment",
+          "page": 5
+        },
+        {
+          "number": 7,
+          "name": "Scholarship Information",
+          "page": 6
+        },
+        {
+          "number": 8,
+          "name": "Volunteer Observation",
+          "page": 6
+        }
+      ],
+      "fields": [
+        {
+          "label": "Volunteer Name",
+          "value": "Rohit Vijay",
+          "confidence": 85,
+          "page": 1,
+          "section_number": null,
+          "bbox": [
+            166,
+            287,
+            826,
+            303
+          ],
+          "value_bbox": [
+            448,
+            287,
+            826,
+            303
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "Co-Volunteer Name",
+          "value": "Sejitha",
+          "confidence": 85,
+          "page": 1,
+          "section_number": null,
+          "bbox": [
+            166,
+            287,
+            826,
+            303
+          ],
+          "value_bbox": [
+            448,
+            287,
+            826,
+            303
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "Date of Visit",
+          "value": "10/06/2026",
+          "confidence": 85,
+          "page": 1,
+          "section_number": null,
+          "bbox": [
+            166,
+            287,
+            826,
+            303
+          ],
+          "value_bbox": [
+            448,
+            287,
+            826,
+            303
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "1.1 Application ID",
+          "value": "12345678",
+          "confidence": 85,
+          "page": 1,
+          "section_number": 1,
+          "bbox": [
+            169,
+            550,
+            339,
+            569
+          ],
+          "value_bbox": [
+            320,
+            551,
+            339,
+            565
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "1.2 Student Full Name",
+          "value": "Rohit Vijay",
+          "confidence": 85,
+          "page": 1,
+          "section_number": 1,
+          "bbox": [
+            169,
+            693,
+            382,
+            708
+          ],
+          "value_bbox": [
+            287,
+            693,
+            382,
+            708
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "1.3 Gender",
+          "value": "Male",
+          "confidence": 85,
+          "page": 1,
+          "section_number": 1,
+          "bbox": [
+            169,
+            836,
+            276,
+            851
+          ],
+          "value_bbox": [
+            169,
+            836,
+            276,
+            851
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.1 Family Status",
+          "value": "Having both parents",
+          "confidence": 85,
+          "page": 1,
+          "section_number": 2,
+          "bbox": [
+            170,
+            1049,
+            626,
+            1100
+          ],
+          "value_bbox": [
+            554,
+            1049,
+            626,
+            1100
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.2 Relationship Details \u2014 Year of Death / Separation",
+          "value": "NIL",
+          "confidence": 85,
+          "page": 1,
+          "section_number": 2,
+          "bbox": [
+            170,
+            1168,
+            533,
+            1190
+          ],
+          "value_bbox": [
+            181,
+            1206,
+            846,
+            1232
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.2 Relationship Details \u2014 Reason for Death / Separation",
+          "value": "NIL",
+          "confidence": 85,
+          "page": 1,
+          "section_number": 2,
+          "bbox": [
+            170,
+            1168,
+            533,
+            1190
+          ],
+          "value_bbox": [
+            181,
+            1206,
+            846,
+            1232
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.3 Is Father/Mother photograph kept at home?",
+          "value": "Yes",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            175,
+            190,
+            621,
+            214
+          ],
+          "value_bbox": [
+            490,
+            195,
+            621,
+            214
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.4 Government ID Verified",
+          "value": "Aadhaar Card",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            174,
+            306,
+            902,
+            332
+          ],
+          "value_bbox": [
+            556,
+            311,
+            902,
+            332
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 1 \u2014 Name",
+          "value": "DORA",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            276,
+            489,
+            361,
+            505
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 1 \u2014 Age",
+          "value": "15",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            276,
+            489,
+            361,
+            505
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 1 \u2014 Education",
+          "value": "B.SC",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            181,
+            529,
+            228,
+            543
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 1 \u2014 Occupation",
+          "value": "Developer",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            181,
+            529,
+            950,
+            563
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 1 \u2014 Annual Income",
+          "value": "400000",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            181,
+            529,
+            950,
+            563
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 2 \u2014 Name",
+          "value": "Bujji",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            276,
+            489,
+            361,
+            505
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 2 \u2014 Age",
+          "value": "27",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            276,
+            489,
+            361,
+            505
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 2 \u2014 Education",
+          "value": "M.SC",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            181,
+            529,
+            228,
+            543
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 2 \u2014 Occupation",
+          "value": "Architect",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            181,
+            529,
+            950,
+            563
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 2 \u2014 Annual Income",
+          "value": "1000000",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            181,
+            529,
+            950,
+            563
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 3 \u2014 Name",
+          "value": "Bheem",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            276,
+            489,
+            361,
+            505
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 3 \u2014 Age",
+          "value": "18",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            276,
+            489,
+            361,
+            505
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 3 \u2014 Education",
+          "value": "MBA",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            181,
+            529,
+            950,
+            563
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 3 \u2014 Occupation",
+          "value": "IT DesL",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            181,
+            529,
+            228,
+            543
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 3 \u2014 Annual Income",
+          "value": "150000",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            181,
+            529,
+            950,
+            563
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 4 \u2014 Name",
+          "value": "",
+          "confidence": 20,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 4 \u2014 Age",
+          "value": "",
+          "confidence": 20,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 4 \u2014 Education",
+          "value": "",
+          "confidence": 20,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            181,
+            529,
+            950,
+            563
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 4 \u2014 Occupation",
+          "value": "",
+          "confidence": 20,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            181,
+            529,
+            950,
+            563
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "2.5 Family Members \u2014 Row 4 \u2014 Annual Income",
+          "value": "",
+          "confidence": 20,
+          "page": 2,
+          "section_number": 2,
+          "bbox": [
+            171,
+            488,
+            361,
+            507
+          ],
+          "value_bbox": [
+            181,
+            529,
+            950,
+            563
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.1 House Ownership",
+          "value": "Rented",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 3,
+          "bbox": [
+            165,
+            998,
+            367,
+            1017
+          ],
+          "value_bbox": [
+            267,
+            998,
+            367,
+            1017
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.1.1 If rented, what is the rent amount?",
+          "value": "5000",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 3,
+          "bbox": [
+            164,
+            1098,
+            483,
+            1113
+          ],
+          "value_bbox": [
+            329,
+            1099,
+            483,
+            1113
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.2 Type of Home \u2014 Individual",
+          "value": "Individual",
+          "confidence": 85,
+          "page": 2,
+          "section_number": 3,
+          "bbox": [
+            163,
+            1241,
+            976,
+            1298
+          ],
+          "value_bbox": [
+            595,
+            1279,
+            976,
+            1298
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.2 Type of Home \u2014 Private Apartment",
+          "value": "",
+          "confidence": 20,
+          "page": 2,
+          "section_number": 3,
+          "bbox": [
+            163,
+            1241,
+            976,
+            1298
+          ],
+          "value_bbox": [
+            163,
+            1241,
+            976,
+            1298
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.2 Type of Home \u2014 Housing Board",
+          "value": "",
+          "confidence": 20,
+          "page": 2,
+          "section_number": 3,
+          "bbox": [
+            163,
+            1241,
+            976,
+            1298
+          ],
+          "value_bbox": [
+            163,
+            1241,
+            976,
+            1298
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.2 Type of Home \u2014 Line House",
+          "value": "",
+          "confidence": 20,
+          "page": 2,
+          "section_number": 3,
+          "bbox": [
+            163,
+            1241,
+            976,
+            1298
+          ],
+          "value_bbox": [
+            163,
+            1241,
+            976,
+            1298
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.2 Type of Home \u2014 Others",
+          "value": "",
+          "confidence": 20,
+          "page": 2,
+          "section_number": 3,
+          "bbox": [
+            163,
+            1241,
+            976,
+            1298
+          ],
+          "value_bbox": [
+            162,
+            1302,
+            223,
+            1317
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.3 Type of Ceiling \u2014 Roof",
+          "value": "",
+          "confidence": 20,
+          "page": 3,
+          "section_number": 3,
+          "bbox": [
+            165,
+            167,
+            815,
+            224
+          ],
+          "value_bbox": [
+            165,
+            167,
+            815,
+            224
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.3 Type of Ceiling \u2014 Tiled",
+          "value": "",
+          "confidence": 20,
+          "page": 3,
+          "section_number": 3,
+          "bbox": [
+            165,
+            167,
+            815,
+            224
+          ],
+          "value_bbox": [
+            165,
+            167,
+            815,
+            224
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.3 Type of Ceiling \u2014 Asbestos",
+          "value": "",
+          "confidence": 20,
+          "page": 3,
+          "section_number": 3,
+          "bbox": [
+            165,
+            167,
+            815,
+            224
+          ],
+          "value_bbox": [
+            165,
+            167,
+            815,
+            224
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.3 Type of Ceiling \u2014 Concrete",
+          "value": "Concrete",
+          "confidence": 85,
+          "page": 3,
+          "section_number": 3,
+          "bbox": [
+            165,
+            167,
+            815,
+            224
+          ],
+          "value_bbox": [
+            504,
+            186,
+            815,
+            224
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.4 Number of Bedrooms",
+          "value": "5",
+          "confidence": 85,
+          "page": 3,
+          "section_number": 3,
+          "bbox": [
+            166,
+            281,
+            400,
+            297
+          ],
+          "value_bbox": [
+            305,
+            281,
+            400,
+            297
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.4.1 Type of Bedroom",
+          "value": "Separate Bedroom",
+          "confidence": 85,
+          "page": 3,
+          "section_number": 3,
+          "bbox": [
+            166,
+            406,
+            347,
+            423
+          ],
+          "value_bbox": [
+            257,
+            406,
+            347,
+            419
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.5 Bathroom",
+          "value": "Separate",
+          "confidence": 85,
+          "page": 3,
+          "section_number": 3,
+          "bbox": [
+            166,
+            519,
+            293,
+            534
+          ],
+          "value_bbox": [
+            166,
+            519,
+            293,
+            534
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.6 Kitchen Type \u2014 Separate Kitchen",
+          "value": "Separate Kitchen",
+          "confidence": 85,
+          "page": 3,
+          "section_number": 3,
+          "bbox": [
+            167,
+            630,
+            323,
+            657
+          ],
+          "value_bbox": [
+            168,
+            661,
+            271,
+            686
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "3.6 Kitchen Type \u2014 Hall with Kitchen",
+          "value": "",
+          "confidence": 20,
+          "page": 3,
+          "section_number": 3,
+          "bbox": [
+            167,
+            630,
+            323,
+            657
+          ],
+          "value_bbox": [
+            168,
+            661,
+            567,
+            691
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.1 Assets at Home",
+          "value": "Washing Machine, Fridge, AC, LED TV, Two-Wheeler, Smartphone, Separate Wi-Fi",
+          "confidence": 85,
+          "page": 3,
+          "section_number": 4,
+          "bbox": [
+            166,
+            406,
+            347,
+            423
+          ],
+          "value_bbox": [
+            257,
+            406,
+            347,
+            419
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.2 Amount of Last Electricity Bill",
+          "value": "5000",
+          "confidence": 85,
+          "page": 3,
+          "section_number": 4,
+          "bbox": [
+            164,
+            991,
+            478,
+            1010
+          ],
+          "value_bbox": [
+            350,
+            991,
+            478,
+            1010
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?",
+          "value": "No",
+          "confidence": 85,
+          "page": 3,
+          "section_number": 4,
+          "bbox": [
+            164,
+            1133,
+            957,
+            1211
+          ],
+          "value_bbox": [
+            579,
+            1135,
+            957,
+            1156
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.3.1 If yes, list their properties \u2014 Row 1 \u2014 Property Description",
+          "value": "",
+          "confidence": 20,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.3.1 If yes, list their properties \u2014 Row 1 \u2014 Owner Name",
+          "value": "",
+          "confidence": 20,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.3.1 If yes, list their properties \u2014 Row 1 \u2014 Approximate Value",
+          "value": "",
+          "confidence": 20,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.3.1 If yes, list their properties \u2014 Row 2 \u2014 Property Description",
+          "value": "",
+          "confidence": 20,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.3.1 If yes, list their properties \u2014 Row 2 \u2014 Owner Name",
+          "value": "",
+          "confidence": 20,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.3.1 If yes, list their properties \u2014 Row 2 \u2014 Approximate Value",
+          "value": "",
+          "confidence": 20,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.4 Apart from your job, is there any other source of income?",
+          "value": "No",
+          "confidence": 85,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.4.1 If yes, list other sources of income \u2014 Row 1 \u2014 Source of Income",
+          "value": "",
+          "confidence": 20,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.4.1 If yes, list other sources of income \u2014 Row 1 \u2014 Amount",
+          "value": "",
+          "confidence": 20,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.4.1 If yes, list other sources of income \u2014 Row 2 \u2014 Source of Income",
+          "value": "",
+          "confidence": 20,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.4.1 If yes, list other sources of income \u2014 Row 2 \u2014 Amount",
+          "value": "",
+          "confidence": 20,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.5 Income Type",
+          "value": "Monthly",
+          "confidence": 85,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.6 Do you have any loans?",
+          "value": "Yes",
+          "confidence": 85,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount \u2014 Row 1 \u2014 Loan Purpose",
+          "value": "Housing loan",
+          "confidence": 85,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount \u2014 Row 1 \u2014 Loan Amount Taken",
+          "value": "100000000",
+          "confidence": 85,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount \u2014 Row 1 \u2014 Pending Loan Amount",
+          "value": "10000000",
+          "confidence": 85,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount \u2014 Row 2 \u2014 Loan Purpose",
+          "value": "CAR loan",
+          "confidence": 85,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount \u2014 Row 2 \u2014 Loan Amount Taken",
+          "value": "5000000",
+          "confidence": 85,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount \u2014 Row 2 \u2014 Pending Loan Amount",
+          "value": "2000000",
+          "confidence": 85,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount \u2014 Row 3 \u2014 Loan Purpose",
+          "value": "",
+          "confidence": 20,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount \u2014 Row 3 \u2014 Loan Amount Taken",
+          "value": "",
+          "confidence": 20,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount \u2014 Row 3 \u2014 Pending Loan Amount",
+          "value": "",
+          "confidence": 20,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": null,
+          "verification_note": null,
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.7 If you choose any college, how much is the college fee?",
+          "value": "NIL",
+          "confidence": 85,
+          "page": 4,
+          "section_number": 4,
+          "bbox": null,
+          "value_bbox": null,
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.8 If the college fee is higher, how will you manage it?",
+          "value": "I cannot manage",
+          "confidence": 85,
+          "page": 5,
+          "section_number": 4,
+          "bbox": [
+            164,
+            249,
+            675,
+            269
+          ],
+          "value_bbox": [
+            452,
+            249,
+            675,
+            269
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "4.9 If you do not receive this scholarship, how will you pay the fees?",
+          "value": "I will not go to college",
+          "confidence": 85,
+          "page": 5,
+          "section_number": 4,
+          "bbox": [
+            165,
+            392,
+            804,
+            414
+          ],
+          "value_bbox": [
+            558,
+            392,
+            804,
+            413
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "5.1 Does the student have any health issues?",
+          "value": "No",
+          "confidence": 85,
+          "page": 5,
+          "section_number": 5,
+          "bbox": [
+            165,
+            640,
+            588,
+            692
+          ],
+          "value_bbox": [
+            415,
+            640,
+            588,
+            659
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "5.2 If yes, list the health issues",
+          "value": "",
+          "confidence": 20,
+          "page": 5,
+          "section_number": 5,
+          "bbox": [
+            164,
+            756,
+            458,
+            775
+          ],
+          "value_bbox": [
+            164,
+            756,
+            458,
+            775
+          ],
+          "needs_clarification": true,
+          "reason": "Not extracted by Datalab API",
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "6.1 Will you study college for three years without any obstacle?",
+          "value": "Yes",
+          "confidence": 85,
+          "page": 5,
+          "section_number": 6,
+          "bbox": [
+            162,
+            1000,
+            757,
+            1019
+          ],
+          "value_bbox": [
+            495,
+            1000,
+            757,
+            1019
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "6.2 If we have a training program within 15 km from your home, can you come?",
+          "value": "Yes",
+          "confidence": 85,
+          "page": 5,
+          "section_number": 6,
+          "bbox": [
+            161,
+            1143,
+            904,
+            1171
+          ],
+          "value_bbox": [
+            540,
+            1147,
+            904,
+            1166
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?",
+          "value": "Yes",
+          "confidence": 85,
+          "page": 5,
+          "section_number": 6,
+          "bbox": [
+            161,
+            1264,
+            953,
+            1284
+          ],
+          "value_bbox": [
+            588,
+            1264,
+            953,
+            1283
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "7.1 Has the student received or applied for any other scholarships for their UG degree?",
+          "value": "Yes",
+          "confidence": 85,
+          "page": 6,
+          "section_number": 7,
+          "bbox": [
+            172,
+            259,
+            985,
+            281
+          ],
+          "value_bbox": [
+            617,
+            261,
+            985,
+            281
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "8.1 What is your opinion about the student, their family members, and their living condition?",
+          "value": "The Student is living a very good life with parents Don't Give Scholarship.",
+          "confidence": 85,
+          "page": 6,
+          "section_number": 8,
+          "bbox": [
+            169,
+            506,
+            1029,
+            525
+          ],
+          "value_bbox": [
+            628,
+            506,
+            1029,
+            525
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "8.2 Will you recommend this student for this scholarship?",
+          "value": "Yes",
+          "confidence": 85,
+          "page": 6,
+          "section_number": 8,
+          "bbox": [
+            165,
+            749,
+            707,
+            808
+          ],
+          "value_bbox": [
+            442,
+            749,
+            707,
+            777
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        },
+        {
+          "label": "8.3 Any other comments you want to share?",
+          "value": "Rh",
+          "confidence": 85,
+          "page": 6,
+          "section_number": 8,
+          "bbox": [
+            163,
+            871,
+            579,
+            891
+          ],
+          "value_bbox": [
+            402,
+            871,
+            579,
+            890
+          ],
+          "needs_clarification": false,
+          "reason": null,
+          "is_verified": true,
+          "verifier_confidence": 85,
+          "verification_note": "Verified by Chandra-2 (Datalab)",
+          "extracted_by": "Datalab",
+          "verified_by": "Datalab",
+          "original_value": null
+        }
+      ],
+      "pdf_name": "11.pdf",
+      "input_type": "batch_pdf",
+      "processing_time": 40.78
+    }
+  ],
+  "processing_time": 40.83
+}

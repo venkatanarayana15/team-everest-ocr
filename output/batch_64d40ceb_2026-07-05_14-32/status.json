@@ -1,0 +1,39 @@
+{
+  "status": "done",
+  "message": "Batch complete: 0/1 succeeded.",
+  "log": [
+    {
+      "t": "14:32:47",
+      "msg": "Processing PDF Batch: 11.pdf"
+    },
+    {
+      "t": "14:33:03",
+      "msg": "Batch: processing 1 PDFs..."
+    },
+    {
+      "t": "14:33:03",
+      "msg": "[11.pdf] Starting (1/1)"
+    },
+    {
+      "t": "14:32:52",
+      "msg": "[11.pdf] Preprocessed (1/1)"
+    },
+    {
+      "t": "14:32:52",
+      "msg": "[11.pdf] Running Tesseract + primary extraction (OpenAICompatible)... (1/1)"
+    },
+    {
+      "t": "14:33:00",
+      "msg": "[11.pdf] Error code: 401 - {'error': {'message': 'Incorrect API key provided: hJ7MV-th*******************************SJYg. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_api_key'}}"
+    },
+    {
+      "t": "14:33:00",
+      "msg": "Saving batch results..."
+    },
+    {
+      "t": "14:33:00",
+      "msg": "Batch complete: 0/1 succeeded."
+    }
+  ],
+  "pages": 0
+}

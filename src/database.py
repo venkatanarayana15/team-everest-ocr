@@ -135,6 +135,10 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
     return out
 
 
+def _log_structured(event: str, payload: dict[str, Any]) -> None:
+    logger.info("%s %s", event, json.dumps(payload, sort_keys=True, default=str))
+
+
 
 async def get_pool() -> asyncpg.Pool:
     global _pool
@@ -146,11 +150,7 @@ async def get_pool() -> asyncpg.Pool:
             running = asyncio.get_running_loop()
             pool_loop = getattr(_pool, "_loop", None)
             if pool_loop is not None and pool_loop is not running:
-                logger.debug("get_pool: stale pool (different event loop) — recreating")
-                try:
-                    await _pool.close()
-                except Exception:
-                    pass
+                logger.debug("get_pool: stale pool (different event loop) — recreating without closing to avoid event loop crash")
                 _pool = None
         except RuntimeError:
             pass  # no running loop — unusual, ignore
@@ -188,20 +188,30 @@ async def upsert_ocr_document(
     confidence_score: Optional[float] = None,
     num_pdfs: Optional[int] = None,
     result_json: Optional[dict] = None,
+    map_structured_fields: bool = True,
 ) -> str:
     """
     Insert a row into ocr_documents.
     Structured field columns are auto-populated from result_json.fields.
     Returns the new row uuid as str, or "" if the insert was skipped/failed.
     """
-    logger.info(
-        "upsert_ocr_document: START — job=%s file=%r status=%s",
-        job_id, file_name, status,
-    )
+    summary = {
+        "job_id": job_id,
+        "file_name": file_name,
+        "status": status,
+        "processing_time": processing_time,
+        "confidence_score": confidence_score,
+        "num_pdfs": num_pdfs,
+    }
+    if result_json is not None:
+        summary["field_count"] = len(result_json.get("fields", []))
+        summary["has_error"] = "error" in result_json
+    _log_structured("upsert_ocr_document:start", summary)
 
     pool = await get_pool()
 
     data: dict[str, Any] = {
+        "job_id": job_id,
         "file_name": file_name,
         "status": status,
     }
@@ -218,36 +228,42 @@ async def upsert_ocr_document(
         rj["job_id"] = job_id
         data["result_json"] = json.dumps(rj)
 
-        # Populate structured columns from extracted fields
-        raw_fields = rj.get("fields", [])
+        # Populate structured columns from extracted fields for single-doc rows.
+        # Batch aggregate rows can opt out to avoid mixing multiple PDFs into one
+        # set of structured columns.
+        raw_fields = rj.get("fields", []) if map_structured_fields else []
         if raw_fields:
             structured = _extract_structured_fields(raw_fields)
             for col, val in structured.items():
                 if val is not None:
                     data[col] = val
-            logger.info(
-                "upsert_ocr_document: mapped %d structured columns from %d fields",
-                len(structured), len(raw_fields),
+            _log_structured(
+                "upsert_ocr_document:mapped",
+                {
+                    "job_id": job_id,
+                    "structured_columns": len(structured),
+                    "raw_fields": len(raw_fields),
+                },
             )
 
-    logger.info(
-        "Upsert payload: %s",
-        json.dumps(data, indent=2, default=str),
-    )
+    logger.debug("upsert_ocr_document:data %s", json.dumps(data, indent=2, default=str))
 
     cols = list(data.keys())
     placeholders = [f"${i + 1}" for i in range(len(cols))]
     values = list(data.values())
 
+    set_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "job_id")
+
     sql = (
         f"INSERT INTO ocr_documents ({', '.join(cols)}) "
         f"VALUES ({', '.join(placeholders)}) "
+        f"ON CONFLICT (job_id) DO UPDATE SET {set_clause} "
         f"RETURNING id"
     )
 
-    logger.info(
-        "upsert_ocr_document: inserting %d columns: %s",
-        len(cols), cols,
+    _log_structured(
+        "upsert_ocr_document:sql",
+        {"job_id": job_id, "column_count": len(cols), "columns": cols},
     )
     logger.debug("upsert_ocr_document: SQL = %s", sql)
 
@@ -264,10 +280,7 @@ async def upsert_ocr_document(
 
     doc_id = str(row["id"]) if row else ""
     if doc_id:
-        logger.info(
-            "upsert_ocr_document: SUCCESS — job=%s → row id=%s",
-            job_id, doc_id,
-        )
+        _log_structured("upsert_ocr_document:success", {"job_id": job_id, "doc_id": doc_id})
     else:
         logger.warning(
             "upsert_ocr_document: INSERT returned no row for job=%s "

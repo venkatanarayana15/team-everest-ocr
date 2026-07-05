@@ -1,0 +1,47 @@
+{
+  "status": "done",
+  "message": "Batch complete: 1/1 succeeded.",
+  "log": [
+    {
+      "t": "14:10:20",
+      "msg": "Processing PDF Batch: Scan_document20260610_163440.pdf"
+    },
+    {
+      "t": "14:10:20",
+      "msg": "Batch: processing 1 PDFs concurrently..."
+    },
+    {
+      "t": "14:10:20",
+      "msg": "[Scan_document20260610_163440.pdf] Starting (1/1)"
+    },
+    {
+      "t": "14:10:27",
+      "msg": "[Scan_document20260610_163440.pdf] Preprocessed (1/1)"
+    },
+    {
+      "t": "14:10:27",
+      "msg": "[Scan_document20260610_163440.pdf] Running Chandra-2 OCR + primary extraction (Datalab)... (1/1)"
+    },
+    {
+      "t": "14:11:41",
+      "msg": "[Scan_document20260610_163440.pdf] Merged 84 fields. (1/1)"
+    },
+    {
+      "t": "14:11:25",
+      "msg": "[Scan_document20260610_163440.pdf] Filling missing template fields... (1/1)"
+    },
+    {
+      "t": "14:11:25",
+      "msg": "[Scan_document20260610_163440.pdf] Done (1/1)"
+    },
+    {
+      "t": "14:11:25",
+      "msg": "Saving batch results..."
+    },
+    {
+      "t": "14:11:26",
+      "msg": "Batch complete: 1/1 succeeded."
+    }
+  ],
+  "pages": 0
+}

@@ -1,0 +1,47 @@
+{
+  "status": "done",
+  "message": "Batch complete: 1/1 succeeded.",
+  "log": [
+    {
+      "t": "13:30:22",
+      "msg": "Processing PDF Batch: Scan_document20260610_163440.pdf"
+    },
+    {
+      "t": "13:30:06",
+      "msg": "Batch: processing 1 PDFs concurrently..."
+    },
+    {
+      "t": "13:30:07",
+      "msg": "[Scan_document20260610_163440.pdf] Starting (1/1)"
+    },
+    {
+      "t": "13:30:21",
+      "msg": "[Scan_document20260610_163440.pdf] Preprocessed (1/1)"
+    },
+    {
+      "t": "13:30:21",
+      "msg": "[Scan_document20260610_163440.pdf] Running Datalab extraction + Tesseract bbox (Datalab)... (1/1)"
+    },
+    {
+      "t": "13:31:13",
+      "msg": "[Scan_document20260610_163440.pdf] Merged 84 fields. (1/1)"
+    },
+    {
+      "t": "13:31:13",
+      "msg": "[Scan_document20260610_163440.pdf] Filling missing template fields... (1/1)"
+    },
+    {
+      "t": "13:31:13",
+      "msg": "[Scan_document20260610_163440.pdf] Done (1/1)"
+    },
+    {
+      "t": "13:31:13",
+      "msg": "Saving batch results..."
+    },
+    {
+      "t": "13:31:14",
+      "msg": "Batch complete: 1/1 succeeded."
+    }
+  ],
+  "pages": 0
+}

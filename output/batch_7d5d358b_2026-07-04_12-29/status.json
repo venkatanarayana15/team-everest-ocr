@@ -1,0 +1,39 @@
+{
+  "status": "done",
+  "message": "Batch complete: 0/1 succeeded.",
+  "log": [
+    {
+      "t": "12:29:44",
+      "msg": "Processing PDF Batch: Scan_document20260610_163440.pdf"
+    },
+    {
+      "t": "12:29:28",
+      "msg": "Batch: processing 1 PDFs..."
+    },
+    {
+      "t": "12:29:28",
+      "msg": "[Scan_document20260610_163440.pdf] Starting (1/1)"
+    },
+    {
+      "t": "12:29:35",
+      "msg": "[Scan_document20260610_163440.pdf] Preprocessed (1/1)"
+    },
+    {
+      "t": "12:29:35",
+      "msg": "[Scan_document20260610_163440.pdf] Running Chandra-2 OCR + primary extraction (OpenAICompatible)... (1/1)"
+    },
+    {
+      "t": "12:35:49",
+      "msg": "[Scan_document20260610_163440.pdf] Error code: 404 - {'detail': 'Not Found'}"
+    },
+    {
+      "t": "12:35:49",
+      "msg": "Saving batch results..."
+    },
+    {
+      "t": "12:35:49",
+      "msg": "Batch complete: 0/1 succeeded."
+    }
+  ],
+  "pages": 0
+}
