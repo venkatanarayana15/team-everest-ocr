@@ -1,17 +1,15 @@
+import asyncio
 import hashlib
 import json
 import logging
 import os
-import queue
 import sys
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-
-import asyncio
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,8 +22,9 @@ from src.page_classifier import PageClassifier
 from src.renderers import _render_markdown, _render_text, _format_job_datetime
 from src.status import (
     _set_status, _get_status, update_progress, get_job_progress,
-    _push_sse, _status_queues, _status_queues_lock, _cleanup_intermediate,
-    STAGE_PROGRESS, _progress_store, _progress_lock,
+    _push_sse, _push_new_job, _new_job_queues,
+    _status_queues, _cleanup_intermediate,
+    STAGE_PROGRESS, _progress_store,
 )
 from src.pipeline_runner import (
     run_pipeline, run_batch_pdfs_pipeline, run_image_pipeline_from_zip,
@@ -36,10 +35,12 @@ from src.zoho_integration import (
     SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
     OcrExtractRequest,
     _run_ocr_extract_pipeline, _get_zoho_access_token, _update_zoho_creator,
+    process_pending_on_startup,
 )
 
 try:
     from src.database import (
+        init_pool,
         get_pool,
         close_pool,
         upsert_ocr_document,
@@ -57,7 +58,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="OCR Extraction Pipeline")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global DB_AVAILABLE
+    if DB_AVAILABLE and os.environ.get("DATABASE_URL"):
+        try:
+            await init_pool()
+            logger.info("Database pool initialized")
+        except Exception as e:
+            logger.warning("Failed to init DB pool: %s — disabling DB features", e)
+            DB_AVAILABLE = False
+    _start_cleanup_thread()
+    logger.info("Auto-cleanup thread started (every %ds, max age %ds)", CLEANUP_INTERVAL_SEC, JOB_MAX_AGE_SEC)
+    asyncio.create_task(process_pending_on_startup(BASE_DIR))
+    yield
+    _stop_cleanup_thread()
+    if DB_AVAILABLE:
+        await close_pool()
+
+
+app = FastAPI(title="OCR Extraction Pipeline", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -76,8 +96,8 @@ BASE_DIR = _script_dir / "output"
 BASE_DIR.mkdir(exist_ok=True)
 logger.info("Output dir: %s", BASE_DIR)
 
-MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "3"))
-_executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS, thread_name_prefix="ocr")
+MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "15"))
+_job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
 
 # ── Auto-cleanup old jobs ─────────────────────────────────────────
@@ -125,27 +145,6 @@ def _stop_cleanup_thread() -> None:
     _cleanup_stop.set()
 
 
-@app.on_event("startup")
-async def startup():
-    global DB_AVAILABLE
-    if DB_AVAILABLE and os.environ.get("DATABASE_URL"):
-        try:
-            await get_pool()
-            logger.info("Database pool initialized")
-        except Exception as e:
-            logger.warning("Failed to init DB pool: %s — disabling DB features", e)
-            DB_AVAILABLE = False
-    _start_cleanup_thread()
-    logger.info("Auto-cleanup thread started (every %ds, max age %ds)", CLEANUP_INTERVAL_SEC, JOB_MAX_AGE_SEC)
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    _stop_cleanup_thread()
-    if DB_AVAILABLE:
-        await close_pool()
-
-
 # ── Endpoints ─────────────────────────────────────────────────────
 
 @app.get("/ping")
@@ -160,17 +159,15 @@ async def stream_status(job_id: str):
         raise HTTPException(404, "Job not found")
 
     async def event_gen():
-        q: queue.Queue = queue.Queue(maxsize=50)
-        with _status_queues_lock:
-            _status_queues[job_id] = q
-        loop = asyncio.get_running_loop()
+        q: asyncio.Queue = asyncio.Queue(maxsize=50)
+        _status_queues[job_id] = q
         last_payload: str | None = None
         last_heartbeat = time.time()
         try:
             while True:
                 try:
-                    data = await loop.run_in_executor(None, lambda: q.get(timeout=1))
-                except queue.Empty:
+                    data = await asyncio.wait_for(q.get(), timeout=1)
+                except asyncio.TimeoutError:
                     now = time.time()
                     if now - last_heartbeat >= 10:
                         last_heartbeat = now
@@ -197,8 +194,7 @@ async def stream_status(job_id: str):
             except Exception:
                 pass
         finally:
-            with _status_queues_lock:
-                _status_queues.pop(job_id, None)
+            _status_queues.pop(job_id, None)
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
 
@@ -215,28 +211,27 @@ async def stream_batch(job_ids: str):
             raise HTTPException(404, f"Job not found: {jid}")
 
     async def event_gen():
-        qs: dict[str, queue.Queue] = {}
-        with _status_queues_lock:
-            for jid in ids:
-                q = queue.Queue(maxsize=50)
-                _status_queues[jid] = q
-                qs[jid] = q
+        qs: dict[str, asyncio.Queue] = {}
+        for jid in ids:
+            q = asyncio.Queue(maxsize=50)
+            _status_queues[jid] = q
+            qs[jid] = q
 
         last: dict[str, str] = {}
         try:
             while True:
                 all_terminal = True
                 updates: list[str] = []
-                for jid, jdir in job_dirs.items():
+                for jid in ids:
                     q = qs[jid]
                     data = None
                     while not q.empty():
                         try:
                             data = q.get_nowait()
-                        except queue.Empty:
+                        except asyncio.QueueEmpty:
                             break
                     if data is None:
-                        status = _get_status(jdir)
+                        status = _get_status(job_dirs[jid])
                         progress = get_job_progress(jid)
                         data = {"job_id": jid, **status, "progress": progress}
                     dumped = json.dumps(data)
@@ -265,22 +260,68 @@ async def stream_batch(job_ids: str):
             except Exception:
                 pass
         finally:
-            with _status_queues_lock:
-                for jid in ids:
-                    _status_queues.pop(jid, None)
+            for jid in ids:
+                _status_queues.pop(jid, None)
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
 
 
-def _create_job_dir(original_name: str, status_msg: str, initial_stage: str = "queued", prefix: str = "") -> tuple[str, Path]:
+@app.get("/stream-new-jobs")
+async def stream_new_jobs():
+    async def event_gen():
+        # Send snapshot of existing jobs first
+        yield f"data: {json.dumps({'snapshot': _list_jobs()})}\n\n"
+
+        q: asyncio.Queue = asyncio.Queue(maxsize=100)
+        _new_job_queues.append(q)
+        try:
+            while True:
+                try:
+                    payload = await asyncio.wait_for(q.get(), timeout=30)
+                    yield f"data: {payload}\n\n"
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'heartbeat': True})}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            try:
+                _new_job_queues.remove(q)
+            except ValueError:
+                pass
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+
+async def _create_job_dir(original_name: str, status_msg: str, initial_stage: str = "queued", prefix: str = "") -> tuple[str, Path]:
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
     job_id = f"{prefix}_{ts}" if prefix else f"{str(uuid.uuid4())[:8]}_{ts}"
     job_dir = BASE_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     with open(job_dir / "original_name.txt", "w") as f:
         f.write(original_name)
-    _set_status(job_dir, initial_stage, status_msg)
+    await _set_status(job_dir, initial_stage, status_msg)
+    _push_new_job(job_id)
     return job_id, job_dir
+
+
+async def _run_pipeline_task(job_dir: Path, pdf_path: str) -> None:
+    async with _job_semaphore:
+        await run_pipeline(job_dir, pdf_path)
+
+
+async def _run_batch_task(job_dir: Path, pdfs_info: list[dict]) -> None:
+    async with _job_semaphore:
+        await run_batch_pdfs_pipeline(job_dir, pdfs_info)
+
+
+async def _run_image_task(job_dir: Path, image_paths) -> None:
+    async with _job_semaphore:
+        await run_image_pipeline_from_zip(job_dir, image_paths)
+
+
+async def _run_ocr_extract_task(job_dir: Path, req: OcrExtractRequest) -> None:
+    async with _job_semaphore:
+        await _run_ocr_extract_pipeline(job_dir, req)
 
 
 @app.post("/upload")
@@ -298,7 +339,7 @@ async def upload(file: UploadFile = File(...)):
         file_hash = hashlib.sha256(content).hexdigest()
         file_size = len(content)
 
-        job_id, job_dir = _create_job_dir(file.filename, "PDF uploaded, starting pipeline...")
+        job_id, job_dir = await _create_job_dir(file.filename, "PDF uploaded, starting pipeline...")
 
         pdf_path = job_dir / "input.pdf"
         with open(pdf_path, "wb") as f:
@@ -315,12 +356,12 @@ async def upload(file: UploadFile = File(...)):
         with open(job_dir / "file_hash.txt", "w") as f:
             f.write(file_hash)
 
-        _executor.submit(run_pipeline, job_dir, str(pdf_path))
+        asyncio.create_task(_run_pipeline_task(job_dir, str(pdf_path)))
         return {"job_id": job_id, "status": "queued", "input_type": "pdf"}
 
     if ext in IMAGE_EXTENSIONS:
         content = await file.read()
-        job_id, job_dir = _create_job_dir(file.filename, "Image uploaded (waiting for full set)...")
+        job_id, job_dir = await _create_job_dir(file.filename, "Image uploaded (waiting for full set)...")
 
         img_dir = job_dir / "input_images"
         img_dir.mkdir(exist_ok=True)
@@ -337,7 +378,7 @@ async def upload(file: UploadFile = File(...)):
 
     if ext == ".zip":
         content = await file.read()
-        job_id, job_dir = _create_job_dir(file.filename, "Extracting ZIP file...")
+        job_id, job_dir = await _create_job_dir(file.filename, "Extracting ZIP file...")
 
         zip_path = job_dir / "input.zip"
         with open(zip_path, "wb") as f:
@@ -350,8 +391,8 @@ async def upload(file: UploadFile = File(...)):
         if not image_paths:
             raise HTTPException(400, "No supported images found in ZIP")
 
-        _set_status(job_dir, "queued", f"ZIP extracted: {len(image_paths)} images. Classifying pages...")
-        _executor.submit(run_image_pipeline_from_zip, job_dir, image_paths)
+        await _set_status(job_dir, "queued", f"ZIP extracted: {len(image_paths)} images. Classifying pages...")
+        asyncio.create_task(_run_image_task(job_dir, image_paths))
         return {
             "job_id": job_id,
             "status": "queued",
@@ -375,7 +416,7 @@ async def upload_images(files: list[UploadFile] = File(...)):
     if len(image_files) > 3:
         names += f" (+{len(image_files)-3} more)"
 
-    job_id, job_dir = _create_job_dir(names, f"{len(image_files)} images uploaded. Classifying pages...")
+    job_id, job_dir = await _create_job_dir(names, f"{len(image_files)} images uploaded. Classifying pages...")
 
     img_dir = job_dir / "input_images"
     img_dir.mkdir(exist_ok=True)
@@ -388,7 +429,7 @@ async def upload_images(files: list[UploadFile] = File(...)):
             fout.write(content)
         saved_paths.append(str(path.resolve()))
 
-    _executor.submit(run_image_pipeline_from_zip, job_dir, saved_paths)
+    asyncio.create_task(_run_image_task(job_dir, saved_paths))
 
     return {
         "job_id": job_id,
@@ -415,7 +456,7 @@ async def upload_batch(files: list[UploadFile] = File(...)):
             names += f" (+{len(pdf_files)-3} more)"
 
         prefix_id = f"batch_{str(uuid.uuid4())[:8]}"
-        job_id, job_dir = _create_job_dir(f"Batch: {names}", f"Processing PDF Batch: {names}", prefix=prefix_id)
+        job_id, job_dir = await _create_job_dir(f"Batch: {names}", f"Processing PDF Batch: {names}", prefix=prefix_id)
 
         pdf_dir = job_dir / "pdfs"
         pdf_dir.mkdir(exist_ok=True)
@@ -428,7 +469,7 @@ async def upload_batch(files: list[UploadFile] = File(...)):
                 fout.write(content)
             pdfs_info.append({"filename": f.filename, "path": str(pdf_path.resolve())})
 
-        _executor.submit(run_batch_pdfs_pipeline, job_dir, pdfs_info)
+        asyncio.create_task(_run_batch_task(job_dir, pdfs_info))
         pdf_names = [f.filename for f in pdf_files]
         results.append({"job_id": job_id, "filename": f"Batch: {names}", "type": "pdf", "status": "queued", "pdf_names": pdf_names})
 
@@ -437,8 +478,8 @@ async def upload_batch(files: list[UploadFile] = File(...)):
         if len(image_files) > 3:
             names += f" (+{len(image_files)-3} more)"
 
-        job_id, job_dir = _create_job_dir(names, f"{len(image_files)} images batch. Classifying pages...")
-        
+        job_id, job_dir = await _create_job_dir(names, f"{len(image_files)} images batch. Classifying pages...")
+
         img_dir = job_dir / "input_images"
         img_dir.mkdir(exist_ok=True)
         saved_paths: list[str] = []
@@ -449,12 +490,12 @@ async def upload_batch(files: list[UploadFile] = File(...)):
                 fout.write(content)
             saved_paths.append(str(path.resolve()))
 
-        _executor.submit(run_image_pipeline_from_zip, job_dir, saved_paths)
+        asyncio.create_task(_run_image_task(job_dir, saved_paths))
         results.append({"job_id": job_id, "filename": f"images_{len(image_files)}", "type": "image_set", "status": "queued"})
 
     for f in zip_files:
         content = await f.read()
-        job_id, job_dir = _create_job_dir(f.filename, f"ZIP batch: {f.filename}")
+        job_id, job_dir = await _create_job_dir(f.filename, f"ZIP batch: {f.filename}")
 
         zip_path = job_dir / "input.zip"
         with open(zip_path, "wb") as fout:
@@ -464,9 +505,9 @@ async def upload_batch(files: list[UploadFile] = File(...)):
         extract_dir.mkdir(exist_ok=True)
         image_paths = extract_zip(str(zip_path), str(extract_dir))
 
-        _set_status(job_dir, "queued", f"ZIP batch: {f.filename} ({len(image_paths)} images)")
-        _executor.submit(run_image_pipeline_from_zip, job_dir, image_paths)
-        results.append({"job_id": job_id, "filename": f"f.filename", "type": "zip", "status": "queued"})
+        await _set_status(job_dir, "queued", f"ZIP batch: {f.filename} ({len(image_paths)} images)")
+        asyncio.create_task(_run_image_task(job_dir, image_paths))
+        results.append({"job_id": job_id, "filename": f.filename, "type": "zip", "status": "queued"})
 
     return {
         "status": "batch_submitted",
@@ -507,8 +548,8 @@ async def process_folder(data: dict):
             if item["type"] == "pdf":
                 content = open(item["path"], "rb").read()
                 file_hash = hashlib.sha256(content).hexdigest()
-                
-                job_id, job_dir = _create_job_dir(item["name"], f"Folder batch: {item['name']}")
+
+                job_id, job_dir = await _create_job_dir(item["name"], f"Folder batch: {item['name']}")
 
                 pdf_path = job_dir / "input.pdf"
                 with open(pdf_path, "wb") as f:
@@ -516,20 +557,20 @@ async def process_folder(data: dict):
                 with open(job_dir / "file_hash.txt", "w") as f:
                     f.write(file_hash)
 
-                _executor.submit(run_pipeline, job_dir, str(pdf_path))
+                asyncio.create_task(_run_pipeline_task(job_dir, str(pdf_path)))
                 results.append({"job_id": job_id, "name": item["name"], "type": "pdf", "status": "queued"})
 
             elif item["type"] == "image_set":
                 valid, err = _validate_images(item["images"])
                 if not valid:
-                    job_id, job_dir = _create_job_dir(item["name"], err, initial_stage="error")
+                    job_id, job_dir = await _create_job_dir(item["name"], err, initial_stage="error")
                     logger.error("[%s] %s", job_id, err)
                     results.append({"job_id": job_id, "name": item["name"], "type": "image_set", "status": "error", "error": err})
                     continue
 
-                job_id, job_dir = _create_job_dir(item["name"], f"Image set: {item['name']} ({len(item['images'])} images)")
+                job_id, job_dir = await _create_job_dir(item["name"], f"Image set: {item['name']} ({len(item['images'])} images)")
 
-                _executor.submit(run_image_pipeline_from_zip, job_dir, item["images"])
+                asyncio.create_task(_run_image_task(job_dir, item["images"]))
                 results.append({"job_id": job_id, "name": item["name"], "type": "image_set", "status": "queued"})
 
         except Exception as e:
@@ -552,13 +593,13 @@ async def retry_job(job_id: str):
     pdf_path = job_dir / "input.pdf"
     img_dir = job_dir / "input_images"
 
-    _set_status(job_dir, "queued", "Retrying pipeline from last checkpoint...")
+    await _set_status(job_dir, "queued", "Retrying pipeline from last checkpoint...")
 
     if pdf_path.exists():
         valid, err = _validate_pdf(str(pdf_path))
         if not valid:
             raise HTTPException(400, f"Cannot retry: {err}")
-        _executor.submit(run_pipeline, job_dir, str(pdf_path))
+        asyncio.create_task(_run_pipeline_task(job_dir, str(pdf_path)))
         return {"job_id": job_id, "status": "restarted", "input_type": "pdf"}
 
     if img_dir.exists():
@@ -567,7 +608,7 @@ async def retry_job(job_id: str):
             if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
         ])
         if image_paths:
-            _executor.submit(run_image_pipeline_from_zip, job_dir, image_paths)
+            asyncio.create_task(_run_image_task(job_dir, image_paths))
             return {"job_id": job_id, "status": "restarted", "input_type": "image_set"}
 
     raise HTTPException(400, "No input files found for this job")
@@ -808,8 +849,7 @@ def _extract_epoch_from_job_id(job_id: str) -> float:
     return 0.0
 
 
-@app.get("/jobs")
-async def list_jobs():
+def _list_jobs():
     jobs = []
     for d in BASE_DIR.iterdir():
         if d.is_dir():
@@ -843,6 +883,11 @@ async def list_jobs():
             })
     jobs.sort(key=lambda j: (j["created_at"], j["job_id"]), reverse=True)
     return jobs
+
+
+@app.get("/jobs")
+async def list_jobs():
+    return _list_jobs()
 
 
 @app.delete("/jobs/{job_id}")
@@ -899,9 +944,6 @@ async def list_uploaded_pdfs():
     return pdfs
 
 
-
-
-
 DOWNLOAD_FORMATS = {
     "json": ("result.json", "application/json"),
     "md": ("result.md", "text/markdown; charset=utf-8"),
@@ -912,7 +954,6 @@ DOWNLOAD_FORMATS = {
 
 @app.post("/save-to-db/{job_id}")
 async def save_result_to_db(job_id: str):
-    """Save extraction results to PostgreSQL."""
     if not DB_AVAILABLE:
         raise HTTPException(503, "Database not available")
 
@@ -1012,9 +1053,9 @@ async def ocr_extract(req: OcrExtractRequest):
     with open(job_dir / "original_name.txt", "w") as f:
         f.write(req.record_id)
 
-    _set_status(job_dir, "oauth",
+    await _set_status(job_dir, "oauth",
         f"OCR extract queued for {req.record_id} ({len(req.file_names)} files)")
-    _executor.submit(_run_ocr_extract_pipeline, job_dir, req)
+    asyncio.create_task(_run_ocr_extract_task(job_dir, req))
 
     return {"success": True, "status": "queued", "job_id": job_id}
 
