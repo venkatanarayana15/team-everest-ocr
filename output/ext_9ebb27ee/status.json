@@ -1,0 +1,91 @@
+{
+  "status": "done",
+  "message": "OCR complete \u2014 Zoho record updated",
+  "log": [
+    {
+      "t": "12:13:05",
+      "msg": "OCR extract queued for TEMP-2026-8503 (1 files)"
+    },
+    {
+      "t": "12:13:05",
+      "msg": "Starting OCR extract for TEMP-2026-8503"
+    },
+    {
+      "t": "12:13:05",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "12:13:05",
+      "msg": "Zoho authentication successful"
+    },
+    {
+      "t": "12:13:05",
+      "msg": "Downloading 1/1: 1782814574162199_Rithika_K_K_TEMP-2026-8503.pdf"
+    },
+    {
+      "t": "12:13:09",
+      "msg": "Downloaded 1 files"
+    },
+    {
+      "t": "12:13:09",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "12:13:09",
+      "msg": "PDF created (1112 KB)"
+    },
+    {
+      "t": "12:13:09",
+      "msg": "Uploading to Supabase Storage..."
+    },
+    {
+      "t": "12:13:10",
+      "msg": "PDF uploaded to Supabase"
+    },
+    {
+      "t": "12:13:10",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "12:13:10",
+      "msg": "Preprocessing PDF (TEMP-2026-8503)..."
+    },
+    {
+      "t": "12:13:15",
+      "msg": "Preprocessing done."
+    },
+    {
+      "t": "12:13:15",
+      "msg": "Running Tesseract + primary extraction (OpenAICompatible)..."
+    },
+    {
+      "t": "12:15:33",
+      "msg": "Merged 77 fields."
+    },
+    {
+      "t": "12:15:33",
+      "msg": "Running secondary verification (OpenAICompatible)..."
+    },
+    {
+      "t": "12:17:03",
+      "msg": "Filling missing template fields..."
+    },
+    {
+      "t": "12:17:03",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "12:17:03",
+      "msg": "Extraction complete. Results ready for download."
+    },
+    {
+      "t": "12:17:04",
+      "msg": "Updating Zoho Creator record..."
+    },
+    {
+      "t": "12:17:05",
+      "msg": "OCR complete \u2014 Zoho record updated"
+    }
+  ],
+  "pages": 6
+}

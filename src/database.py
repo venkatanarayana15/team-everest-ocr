@@ -1,6 +1,5 @@
 """PostgreSQL/Supabase database module — writes to ocr_documents table."""
 
-import asyncio
 import json
 import logging
 import os
@@ -8,13 +7,13 @@ import re
 from typing import Any, Optional
 
 import asyncpg
-from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
-
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+POOL_MIN_SIZE = int(os.getenv("DATABASE_POOL_MIN_SIZE", "2"))
+POOL_MAX_SIZE = int(os.getenv("DATABASE_POOL_MAX_SIZE", "10"))
+POOL_CONNECT_TIMEOUT = float(os.getenv("DATABASE_CONNECT_TIMEOUT", "10"))
 
 _pool: Optional[asyncpg.Pool] = None
 
@@ -115,13 +114,28 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
 
     for label, col in FIELD_TO_COLUMN.items():
         val = label_map.get(label)
+
+        if col in JSONB_ARRAY_COLUMNS:
+            prefix = label + " \u2014 "
+            checked = []
+            for flabel, fval in label_map.items():
+                if flabel.startswith(prefix):
+                    option = flabel[len(prefix):]
+                    if option and fval.strip().lower() in ("\u2713", "1", "yes", "true", "y"):
+                        checked.append(option)
+            if checked:
+                out[col] = json.dumps(sorted(checked))
+            elif val is not None:
+                items = [x.strip() for x in val.split(",") if x.strip()]
+                out[col] = json.dumps(items)
+            else:
+                out[col] = json.dumps([])
+            continue
+
         if val is None:
             continue
         if col in BOOLEAN_COLUMNS:
             out[col] = val.strip().lower() in ("yes", "true", "1")
-        elif col in JSONB_ARRAY_COLUMNS:
-            items = [x.strip() for x in val.split(",") if x.strip()]
-            out[col] = json.dumps(items)
         elif col not in TABLE_PARENT_COLUMNS.values():
             out[col] = val
 
@@ -135,48 +149,57 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
     return out
 
 
-
-async def get_pool() -> asyncpg.Pool:
+async def init_pool() -> None:
+    """Create the connection pool. Call once at server startup."""
     global _pool
     if _pool is not None:
-        # asyncpg pools are tied to the event loop they were created on.
-        # If we are running in a different loop (e.g. a worker-thread loop
-        # created by _save_to_db), the cached pool is unusable — recreate it.
-        try:
-            running = asyncio.get_running_loop()
-            pool_loop = getattr(_pool, "_loop", None)
-            if pool_loop is not None and pool_loop is not running:
-                logger.debug("get_pool: stale pool (different event loop) — recreating")
-                try:
-                    await _pool.close()
-                except Exception:
-                    pass
-                _pool = None
-        except RuntimeError:
-            pass  # no running loop — unusual, ignore
-    if _pool is None:
-        if not DATABASE_URL:
-            raise RuntimeError(
-                "DATABASE_URL is not set. Add it to .env — get it from "
-                "Supabase Dashboard → Project Settings → Database → "
-                "Connection string (Transaction pooler, port 6543)."
-            )
-        logger.info("get_pool: creating new asyncpg pool (dsn length=%d)", len(DATABASE_URL))
-        _pool = await asyncpg.create_pool(
-            dsn=DATABASE_URL,
-            min_size=1,
-            max_size=5,
-            statement_cache_size=0,  # required for Supabase transaction pooler
+        return
+
+    if not DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL is not set. Add it to .env — get it from "
+            "Supabase Dashboard → Project Settings → Database → "
+            "Connection string (Transaction pooler, port 6543)."
         )
-        logger.info("get_pool: pool created OK")
-    return _pool
+
+    logger.info(
+        "Creating asyncpg pool (min=%d, max=%d, timeout=%gs)",
+        POOL_MIN_SIZE, POOL_MAX_SIZE, POOL_CONNECT_TIMEOUT,
+    )
+    _pool = await asyncpg.create_pool(
+        dsn=DATABASE_URL,
+        min_size=POOL_MIN_SIZE,
+        max_size=POOL_MAX_SIZE,
+        timeout=POOL_CONNECT_TIMEOUT,
+        statement_cache_size=0,
+    )
+    logger.info("Database pool created OK")
+
+    async with _pool.acquire() as conn:
+        await conn.fetchval("SELECT 1")
+    logger.info("Database pool health check passed")
 
 
 async def close_pool() -> None:
+    """Close the connection pool. Call once at server shutdown."""
     global _pool
-    if _pool:
+    if _pool is None:
+        return
+    try:
         await _pool.close()
-        _pool = None
+    except Exception:
+        logger.exception("Error closing database pool")
+    _pool = None
+    logger.info("Database pool closed")
+
+
+def get_pool() -> asyncpg.Pool:
+    """Return the connection pool. Raises RuntimeError if not initialized."""
+    if _pool is None:
+        raise RuntimeError(
+            "Database pool not initialized. Call init_pool() on startup."
+        )
+    return _pool
 
 
 async def upsert_ocr_document(
@@ -190,18 +213,19 @@ async def upsert_ocr_document(
     result_json: Optional[dict] = None,
 ) -> str:
     """
-    Insert a row into ocr_documents.
+    Upsert a row into ocr_documents keyed on job_id.
     Structured field columns are auto-populated from result_json.fields.
-    Returns the new row uuid as str, or "" if the insert was skipped/failed.
+    Returns the row uuid as str, or "" on failure.
     """
     logger.info(
-        "upsert_ocr_document: START — job=%s file=%r status=%s",
+        "upsert_ocr_document: job=%s file=%r status=%s",
         job_id, file_name, status,
     )
 
-    pool = await get_pool()
+    pool = get_pool()
 
     data: dict[str, Any] = {
+        "job_id": job_id,
         "file_name": file_name,
         "status": status,
     }
@@ -213,12 +237,10 @@ async def upsert_ocr_document(
     if num_pdfs is not None:
         data["num_pdfs"] = num_pdfs
     if result_json is not None:
-        # Embed job_id so get_result_by_job_id can look up this row later
         rj = dict(result_json)
         rj["job_id"] = job_id
         data["result_json"] = json.dumps(rj)
 
-        # Populate structured columns from extracted fields
         raw_fields = rj.get("fields", [])
         if raw_fields:
             structured = _extract_structured_fields(raw_fields)
@@ -230,23 +252,26 @@ async def upsert_ocr_document(
                 len(structured), len(raw_fields),
             )
 
-    logger.info(
-        "Upsert payload: %s",
-        json.dumps(data, indent=2, default=str),
+    logger.debug(
+        "Upsert payload columns: %s (values omitted for PII safety)",
+        list(data.keys()),
     )
 
     cols = list(data.keys())
     placeholders = [f"${i + 1}" for i in range(len(cols))]
     values = list(data.values())
 
+    update_set = ", ".join(f"{col} = EXCLUDED.{col}" for col in cols if col != "job_id")
+
     sql = (
         f"INSERT INTO ocr_documents ({', '.join(cols)}) "
         f"VALUES ({', '.join(placeholders)}) "
+        f"ON CONFLICT (job_id) DO UPDATE SET {update_set} "
         f"RETURNING id"
     )
 
     logger.info(
-        "upsert_ocr_document: inserting %d columns: %s",
+        "upsert_ocr_document: upserting %d columns: %s",
         len(cols), cols,
     )
     logger.debug("upsert_ocr_document: SQL = %s", sql)
@@ -256,7 +281,7 @@ async def upsert_ocr_document(
             row = await conn.fetchrow(sql, *values)
     except Exception as exc:
         logger.error(
-            "upsert_ocr_document: INSERT FAILED for job=%s — %s",
+            "upsert_ocr_document: FAILED for job=%s — %s",
             job_id, exc,
             exc_info=True,
         )
@@ -277,71 +302,21 @@ async def upsert_ocr_document(
     return doc_id
 
 
-# ── Legacy shims (keep existing imports in server.py working) ────────────────
-
-async def insert_pdf(
-    filename: str, file_size: int, file_path: str
-) -> str:
-    logger.info("insert_pdf: file=%r size=%d", filename, file_size)
-    pool = await get_pool()
-    try:
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """INSERT INTO ocr_documents
-                   (file_name, file_size, file_path, status)
-                   VALUES ($1, $2, $3, 'pending')
-                   RETURNING id""",
-                filename, file_size, file_path,
-            )
-            doc_id = str(row["id"]) if row else ""
-            logger.info("insert_pdf: created pending row id=%s", doc_id)
-            return doc_id
-    except Exception as exc:
-        logger.error("insert_pdf: FAILED — %s", exc, exc_info=True)
-        return ""
-
-
-async def list_pdfs(limit: int = 50) -> list[dict]:
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """SELECT id, file_name, file_size, status,
-                      confidence_score, created_at, processed_at
-               FROM ocr_documents
-               ORDER BY created_at DESC LIMIT $1""",
-            limit,
-        )
-        return [dict(r) for r in rows]
-
-
-async def insert_extraction_result(*args, **kwargs) -> None:
-    logger.debug("insert_extraction_result deprecated; use upsert_ocr_document")
-
-
-async def insert_extracted_fields(*args, **kwargs) -> None:
-    logger.debug("insert_extracted_fields deprecated; use upsert_ocr_document")
-
-
-async def update_extraction_result(job_id: str, status: str = "done", **kwargs) -> None:
-    logger.debug("update_extraction_result: job_id=%s status=%s (no-op shim)", job_id, status)
-
-
 async def get_result_by_job_id(job_id: str) -> Optional[dict]:
-    pool = await get_pool()
+    pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT * FROM ocr_documents WHERE result_json->>'job_id' = $1",
+            "SELECT * FROM ocr_documents WHERE job_id = $1",
             job_id,
         )
         return dict(row) if row else None
 
 
 async def get_last_job_id_by_pdf_id(pdf_id: str) -> Optional[str]:
-    pool = await get_pool()
+    pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT result_json->>'job_id' AS job_id "
-            "FROM ocr_documents WHERE id = $1::uuid",
+            "SELECT job_id FROM ocr_documents WHERE id = $1::uuid",
             pdf_id,
         )
         return row["job_id"] if row else None

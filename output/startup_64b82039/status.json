@@ -1,0 +1,31 @@
+{
+  "status": "error",
+  "message": "Download failed for /api/v2.1/teameverest/iatc-selection-one-app/report/Volunteer_Home_Visited_Form_Report/406160000136694168/Upload_Home_Visit_Form/download?filepath=1782638883062923_Scan_document2026-06-28_14-56-54.pdf: [Errno 2] No such file or directory: '/home/venkatanarayana/team-everest/new-ocr/output/startup_64b82039/downloads/0_/api/v2.1/teameverest/iatc-selection-one-app/report/Volunteer_Home_Visited_Form_Report/406160000136694168/Upload_Home_Visit_Form/download?filepath=1782638883062923_Scan_document2026-06-28_14-56-54.pdf'",
+  "log": [
+    {
+      "t": "11:26:20",
+      "msg": "Auto: 406160000136694168 (1 files)"
+    },
+    {
+      "t": "11:26:25",
+      "msg": "Starting OCR extract for 406160000136694168"
+    },
+    {
+      "t": "11:26:25",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "11:26:30",
+      "msg": "Zoho authentication successful"
+    },
+    {
+      "t": "11:26:30",
+      "msg": "Downloading 1 files..."
+    },
+    {
+      "t": "11:26:31",
+      "msg": "Download failed for /api/v2.1/teameverest/iatc-selection-one-app/report/Volunteer_Home_Visited_Form_Report/406160000136694168/Upload_Home_Visit_Form/download?filepath=1782638883062923_Scan_document2026-06-28_14-56-54.pdf: [Errno 2] No such file or directory: '/home/venkatanarayana/team-everest/new-ocr/output/startup_64b82039/downloads/0_/api/v2.1/teameverest/iatc-selection-one-app/report/Volunteer_Home_Visited_Form_Report/406160000136694168/Upload_Home_Visit_Form/download?filepath=1782638883062923_Scan_document2026-06-28_14-56-54.pdf'"
+    }
+  ],
+  "pages": 0
+}

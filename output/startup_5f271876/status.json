@@ -1,0 +1,47 @@
+{
+  "status": "done",
+  "message": "OCR extract complete (16.8s)",
+  "log": [
+    {
+      "t": "11:38:23",
+      "msg": "Auto: 406160000136695170 (1 files)"
+    },
+    {
+      "t": "11:39:21",
+      "msg": "Starting OCR extract for 406160000136695170"
+    },
+    {
+      "t": "11:39:21",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "11:39:21",
+      "msg": "Zoho authentication successful"
+    },
+    {
+      "t": "11:39:21",
+      "msg": "Downloading 1 files..."
+    },
+    {
+      "t": "11:39:37",
+      "msg": "Downloaded 1 files"
+    },
+    {
+      "t": "11:39:37",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "11:39:37",
+      "msg": "PDF created (2115 KB)"
+    },
+    {
+      "t": "11:39:37",
+      "msg": "Uploading to Supabase Storage..."
+    },
+    {
+      "t": "11:39:38",
+      "msg": "OCR extract complete (16.8s)"
+    }
+  ],
+  "pages": 0
+}

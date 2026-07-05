@@ -1,0 +1,91 @@
+{
+  "status": "done",
+  "message": "OCR complete \u2014 Zoho record updated",
+  "log": [
+    {
+      "t": "11:58:18",
+      "msg": "OCR extract queued for TEMP-2026-8363 (1 files)"
+    },
+    {
+      "t": "11:58:18",
+      "msg": "Starting OCR extract for TEMP-2026-8363"
+    },
+    {
+      "t": "11:58:18",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "11:58:19",
+      "msg": "Zoho authentication successful"
+    },
+    {
+      "t": "11:58:19",
+      "msg": "Downloading 1/1: 1782626739177574_DocScanner_28_Jun_2026_11-24_am.pdf"
+    },
+    {
+      "t": "11:58:23",
+      "msg": "Downloaded 1 files"
+    },
+    {
+      "t": "11:58:23",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "11:58:23",
+      "msg": "PDF created (1324 KB)"
+    },
+    {
+      "t": "11:58:23",
+      "msg": "Uploading to Supabase Storage..."
+    },
+    {
+      "t": "11:58:24",
+      "msg": "PDF uploaded to Supabase"
+    },
+    {
+      "t": "11:58:24",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "11:58:24",
+      "msg": "Preprocessing PDF (TEMP-2026-8363)..."
+    },
+    {
+      "t": "11:58:28",
+      "msg": "Preprocessing done."
+    },
+    {
+      "t": "11:58:28",
+      "msg": "Running Tesseract + primary extraction (OpenAICompatible)..."
+    },
+    {
+      "t": "12:00:31",
+      "msg": "Merged 68 fields."
+    },
+    {
+      "t": "12:00:31",
+      "msg": "Running secondary verification (OpenAICompatible)..."
+    },
+    {
+      "t": "12:02:08",
+      "msg": "Filling missing template fields..."
+    },
+    {
+      "t": "12:02:08",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "12:02:08",
+      "msg": "Extraction complete. Results ready for download."
+    },
+    {
+      "t": "12:02:09",
+      "msg": "Updating Zoho Creator record..."
+    },
+    {
+      "t": "12:02:10",
+      "msg": "OCR complete \u2014 Zoho record updated"
+    }
+  ],
+  "pages": 6
+}

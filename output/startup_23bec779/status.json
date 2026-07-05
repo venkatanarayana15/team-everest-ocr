@@ -1,0 +1,91 @@
+{
+  "status": "done",
+  "message": "OCR complete \u2014 Zoho record updated",
+  "log": [
+    {
+      "t": "12:09:31",
+      "msg": "Auto: 406160000136689042 (1 files)"
+    },
+    {
+      "t": "12:09:31",
+      "msg": "Starting OCR extract for 406160000136689042"
+    },
+    {
+      "t": "12:09:31",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "12:09:31",
+      "msg": "Zoho authentication successful"
+    },
+    {
+      "t": "12:09:31",
+      "msg": "Downloading 1 files..."
+    },
+    {
+      "t": "12:12:05",
+      "msg": "Downloaded 1 files"
+    },
+    {
+      "t": "12:12:05",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "12:12:05",
+      "msg": "PDF created (13600 KB)"
+    },
+    {
+      "t": "12:12:05",
+      "msg": "Uploading to Supabase Storage..."
+    },
+    {
+      "t": "12:12:09",
+      "msg": "PDF uploaded to Supabase"
+    },
+    {
+      "t": "12:12:09",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "12:12:10",
+      "msg": "Preprocessing PDF (406160000136689042)..."
+    },
+    {
+      "t": "12:12:17",
+      "msg": "Preprocessing done."
+    },
+    {
+      "t": "12:12:17",
+      "msg": "Running Tesseract + primary extraction (OpenAICompatible)..."
+    },
+    {
+      "t": "12:12:59",
+      "msg": "Merged 51 fields."
+    },
+    {
+      "t": "12:12:59",
+      "msg": "Filling missing template fields..."
+    },
+    {
+      "t": "12:12:59",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "12:13:00",
+      "msg": "Extraction complete. Results ready for download."
+    },
+    {
+      "t": "12:13:00",
+      "msg": "Writing fields to Home_Visit_Questionnaire..."
+    },
+    {
+      "t": "12:13:01",
+      "msg": "Updating Zoho Creator record..."
+    },
+    {
+      "t": "12:13:02",
+      "msg": "OCR complete \u2014 Zoho record updated"
+    }
+  ],
+  "pages": 6
+}

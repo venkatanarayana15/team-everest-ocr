@@ -82,9 +82,15 @@ CREATE TABLE IF NOT EXISTS ocr_documents (
     processed_at TIMESTAMPTZ
 );
 
--- Index for job_id lookups (stored inside result_json)
-CREATE INDEX IF NOT EXISTS idx_ocr_documents_result_json_job_id
-    ON ocr_documents ((result_json->>'job_id'));
+-- Backfill job_id for rows created before the column was populated
+UPDATE ocr_documents SET job_id = result_json->>'job_id'
+    WHERE job_id IS NULL AND result_json IS NOT NULL;
+
+-- Unique constraint for idempotent upsert
+-- NOTE: Must be a real UNIQUE constraint (not a partial index) so that
+-- ON CONFLICT (job_id) works in asyncpg/PostgreSQL.
+ALTER TABLE ocr_documents
+    ADD CONSTRAINT uq_ocr_documents_job_id UNIQUE (job_id);
 
 -- Trigger to auto-update updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()

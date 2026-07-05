@@ -1,0 +1,23 @@
+{
+  "status": "done",
+  "message": "OCR extract complete (2.6s)",
+  "log": [
+    {
+      "t": "11:26:20",
+      "msg": "Auto: 406160000136689042 (1 files)"
+    },
+    {
+      "t": "11:26:31",
+      "msg": "Starting OCR extract for 406160000136689042"
+    },
+    {
+      "t": "11:26:31",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "11:26:34",
+      "msg": "OCR extract complete (2.6s)"
+    }
+  ],
+  "pages": 0
+}

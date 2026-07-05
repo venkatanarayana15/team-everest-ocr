@@ -41,14 +41,6 @@ export interface StatusResponse {
   pages?: number;
 }
 
-export async function uploadPDF(file: File): Promise<{ job_id: string }> {
-  const form = new FormData();
-  form.append('file', file);
-  const res = await fetch(`${API}/upload`, { method: 'POST', body: form });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
-
 export async function getStatus(jobId: string): Promise<StatusResponse> {
   const res = await fetch(`${API}/status/${jobId}`);
   if (!res.ok) throw new Error('Failed to get status');
@@ -99,50 +91,29 @@ export async function getTesseractData(jobId: string): Promise<any> {
   return res.json();
 }
 
-export async function uploadPDFWithDedup(file: File): Promise<any> {
-  const form = new FormData();
-  form.append('file', file);
-  const res = await fetch(`${API}/upload`, { method: 'POST', body: form });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
-
-/* ── New: Multi-input uploads ───────────────────────────────────── */
-
-export async function uploadImages(files: File[]): Promise<any> {
-  const form = new FormData();
-  for (const f of files) {
-    form.append('files', f);
-  }
-  const res = await fetch(`${API}/upload-images`, { method: 'POST', body: form });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
-
-export async function uploadBatch(files: File[]): Promise<any> {
-  const form = new FormData();
-  for (const f of files) {
-    form.append('files', f);
-  }
-  const res = await fetch(`${API}/upload-batch`, { method: 'POST', body: form });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
-
 export async function getValidation(jobId: string): Promise<any> {
   const res = await fetch(`${API}/validate/${jobId}`);
   if (!res.ok) throw new Error('Failed to get validation');
   return res.json();
 }
 
-export async function processFolder(folderPath: string): Promise<any> {
-  const res = await fetch(`${API}/process-folder`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folder_path: folderPath }),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+export function subscribeNewJobs(
+  onSnapshot: (jobs: any[]) => void,
+  onNewJob: (jobId: string) => void,
+): () => void {
+  const es = new EventSource(`${API}/stream-new-jobs`);
+  es.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.heartbeat) return;
+      if (data.snapshot) { onSnapshot(data.snapshot); return; }
+      if (data.job_id) onNewJob(data.job_id);
+    } catch { /* ignore */ }
+  };
+  es.onerror = () => {
+    // EventSource auto-reconnects
+  };
+  return () => es.close();
 }
 
 export async function deleteJob(jobId: string): Promise<any> {
