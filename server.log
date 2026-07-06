@@ -1,0 +1,32 @@
+[90m07:06:59[0m [94m[INFO   ][0m [36mserver          [0m [90m│[0m Output dir: /home/venkatanarayana/team-everest/new-ocr/output
+INFO:     Started server process [77534]
+INFO:     Waiting for application startup.
+[90m07:06:59[0m [94m[INFO   ][0m [36mdatabase        [0m [90m│[0m Creating asyncpg pool (min=2, max=10, timeout=10s)
+[90m07:07:00[0m [94m[INFO   ][0m [36mdatabase        [0m [90m│[0m Database pool created OK
+[90m07:07:01[0m [94m[INFO   ][0m [36mdatabase        [0m [90m│[0m Database pool health check passed
+[90m07:07:01[0m [94m[INFO   ][0m [36mserver          [0m [90m│[0m Database pool initialized
+[90m07:07:01[0m [94m[INFO   ][0m [36mserver          [0m [90m│[0m Auto-cleanup thread started (every 600s, max age 604800s)
+
+======================================================================
+  STARTUP AUTO-PROCESSOR
+──────────────────────────────────────────────────────────────────────
+  Target:    teameverest/iatc-selection-one-app
+  Report:    Volunteer_Home_Visited_Form_Report
+  File field:Upload_Home_Visit_Form
+  Criteria:  (OCR_Status=="null" || OCR_Status=="no") && OCR_Status!="updated"
+  Max conc:  1
+======================================================================
+
+[90m07:07:01[0m [94m[INFO   ][0m [36mzoho_integration[0m [90m│[0m STARTUP: scanning for pending Creator records (criteria=(OCR_Status=="null" || OCR_Status=="no") && OCR_Status!="updated")
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+  ✓ Zoho OAuth: token acquired
+
+  ✓ Report scan: 109 total record(s) in 'Volunteer_Home_Visited_Form_Report'
+[90m07:07:15[0m [94m[INFO   ][0m [36mzoho_integration[0m [90m│[0m No records found matching criteria: (OCR_Status=="null" || OCR_Status=="no") && OCR_Status!="updated"
+  ✓ Pending query: 0 record(s) with (OCR_Status=="null" || OCR_Status=="no") && OCR_Status!="updated"
+──────────────────────────────────────────────────────────────────────
+
+  No pending records to process.
+
+[90m07:07:15[0m [94m[INFO   ][0m [36mzoho_integration[0m [90m│[0m STARTUP: no pending records found

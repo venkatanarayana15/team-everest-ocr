@@ -369,7 +369,14 @@ async def _save_to_db(job_dir: Path) -> bool:
         logger.info("Auto-save to DB succeeded for job %s", job_dir.name)
         return True
     except Exception as e:
-        logger.warning("Auto-save to DB failed for job %s: %s", job_dir.name, e)
+        _hint = "check DATABASE_URL in .env and verify Supabase DB is accessible"
+        if "connection" in str(e).lower() or "timeout" in str(e).lower():
+            _hint = "database connection timeout — check DATABASE_URL / Supabase pooler status"
+        elif "42P01" in str(e).split() or "relation" in str(e).lower():
+            _hint = "table 'ocr_documents' missing — run schema migration"
+        elif "23505" in str(e).split():
+            _hint = "duplicate key violation — check upsert logic"
+        logger.warning("Auto-save to DB failed for job %s: %s | hint=%s", job_dir.name, e, _hint)
         return False
 
 
@@ -423,16 +430,19 @@ async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
         if not _db_ok:
             await _set_status(job_dir, "done", "Extraction complete but DB save failed")
             logger.error("Pipeline extraction OK but DB save failed | job=%s", job_dir.name)
-        print(f"{'='*80}")
-        _ok_label = "1 succeeded" if _db_ok else "1 extracted (DB save failed)"
-        print(f"  SUMMARY: 1 file processed — {_ok_label}, 0 failed")
-        print(f"{'='*80}\n")
+        print(f"\033[92m\033[1m┌{'─'*78}┐\033[0m")
+        _ok_label = "\033[92m1 succeeded\033[0m" if _db_ok else "\033[93m1 extracted (DB save failed)\033[0m"
+        print(f"\033[92m\033[1m│\033[0m  \033[1mSUMMARY:\033[0m 1 file processed  •  {_ok_label}  •  \033[92m0 failed\033[0m")
+        print(f"\033[92m\033[1m└{'─'*78}┘\033[0m\n")
     except Exception as e:
-        logger.exception("Pipeline failed")
+        # Include last known stage from status store for root-cause clarity
+        _stage_info = _progress_store.get(job_dir.name, {}).get("status", "unknown")
+        logger.exception("Pipeline failed at stage=%s | job=%s", _stage_info, job_dir.name)
         await _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
-        print(f"{'='*80}")
-        print(f"  SUMMARY: 1 file processed — 0 succeeded, 1 failed")
-        print(f"{'='*80}\n")
+        print(f"\033[91m\033[1m┌{'─'*78}┐\033[0m")
+        print(f"\033[91m\033[1m│\033[0m  \033[1mSUMMARY:\033[0m 1 file processed  •  \033[91m0 succeeded, 1 failed\033[0m")
+        print(f"\033[91m\033[1m│\033[0m  \033[1mFAILED AT:\033[0m stage={_stage_info}  exception={type(e).__name__}: {e}")
+        print(f"\033[91m\033[1m└{'─'*78}┘\033[0m\n")
     finally:
         _cleanup_intermediate(job_dir)
 
@@ -486,9 +496,10 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 all_results.append(res)
                 await _set_batch_pdf_status(job_dir, pdf_name, "done", 100, f"Done ({idx+1}/{len(pdfs_info)})")
             except Exception as e:
-                logger.exception("Batch item failed: %s", pdf_name)
+                _stage = _progress_store.get(job_dir.name, {}).get("status", "unknown")
+                logger.exception("Batch item failed at stage=%s | pdf=%s", _stage, pdf_name)
                 await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, str(e))
-                all_results.append({"name": pdf_name, "error": str(e)})
+                all_results.append({"name": pdf_name, "error": f"[stage={_stage}] {e}"})
 
         await _set_status(job_dir, "saving_results", "Saving batch results...")
         combined = {
@@ -698,26 +709,23 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     name_path = job_dir / "original_name.txt"
     display_name = pdf_name or (name_path.read_text().strip() if name_path.exists() else job_dir.name)
     fields = res.get("fields", [])
-    status_str = "\033[92m\033[1mDONE\033[0m" if "error" not in res else "\033[91m\033[1mFAILED\033[0m"
-    
-    # Format confidence score color
+    status_bad = "error" in res
+    status_str = "\033[91m\033[1mFAILED\033[0m" if status_bad else "\033[92m\033[1mDONE\033[0m"
+
     raw_conf = res.get("overall_confidence", "?")
     try:
         conf_val = float(raw_conf)
-        if conf_val >= 85:
-            conf_str = f"\033[92m{raw_conf}%\033[0m"
-        elif conf_val >= 70:
-            conf_str = f"\033[93m{raw_conf}%\033[0m"
-        else:
-            conf_str = f"\033[91m{raw_conf}%\033[0m"
+        conf_str = (
+            f"\033[92m{raw_conf}%\033[0m" if conf_val >= 85 else
+            f"\033[93m{raw_conf}%\033[0m" if conf_val >= 70 else
+            f"\033[91m{raw_conf}%\033[0m"
+        )
     except (ValueError, TypeError):
         conf_str = f"\033[93m{raw_conf}%\033[0m"
 
     elapsed = res.get("processing_time", "?")
-    sections = res.get("sections", [])
-
     sec_names: dict[int, str] = {}
-    for s in sections:
+    for s in res.get("sections", []):
         sec_names[s["number"]] = s["name"]
 
     known_labels: set[str] = {t["label"] for t in KNOWN_TEMPLATE_FIELDS}
@@ -727,13 +735,13 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
         pages.setdefault(f["page"], []).append(f)
 
     total_review = sum(1 for f in fields if f.get("needs_clarification"))
-    review_summary = f"\033[91m\033[1m{total_review} need review\033[0m" if total_review > 0 else "\033[92m0 need review\033[0m"
+    review_str = f"\033[91m\033[1m{total_review} need review\033[0m" if total_review > 0 else "\033[92m0 need review\033[0m"
 
-    print(f"\n\033[1m{'='*80}\033[0m")
-    print(f"  \033[1mFILE:\033[0m {display_name}")
-    print(f"  \033[1mSTATUS:\033[0m {status_str}  |  \033[1mConfidence:\033[0m {conf_str}  |  \033[1mTime:\033[0m {elapsed}s")
-    print(f"  \033[1mFIELDS:\033[0m {len(fields)} total  |  {review_summary}  |  \033[1mPages:\033[0m {len(pages)}")
-    print(f"\033[90m{'─'*80}\033[0m")
+    W = 80
+    print(f"\n\033[1m{'='*W}\033[0m")
+    print(f"  \033[1m📄 {display_name}\033[0m")
+    print(f"  {status_str}  ·  Confidence: {conf_str}  ·  {elapsed}s  ·  {len(fields)} fields  ·  {review_str}")
+    print(f"\033[90m{'─'*W}\033[0m")
 
     re_row = __import__('re').compile(r'^(.+?) — Row (\d+) — (.+)$')
     re_check = __import__('re').compile(r'^(.+?) — (.+)$')
@@ -742,7 +750,6 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
         page_fields = pages[page_num]
         needs_review = sum(1 for f in page_fields if f.get("needs_clarification"))
 
-        # Group fields by section
         by_sec: dict[int | None | str, list[dict]] = {}
         for f in page_fields:
             sec = f.get("section_number")
@@ -754,20 +761,23 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
         )
         ordered = (["header"] if "header" in by_sec else []) + sec_keys
 
-        review_suffix = f"  \033[91m\033[1m⚠ {needs_review} flag(s)\033[0m" if needs_review else "  \033[92m✓ Clear\033[0m"
-        print(f"\n  ── \033[1mPage {page_num}\033[0m {review_suffix} ──────────────────────────────────────────────────────────")
+        # Dynamic-width page header — fill remaining space with ─
+        if needs_review:
+            suffix_colored = f"  \033[91m\033[1m⚠ {needs_review}\033[0m"
+            suffix_clean = f"  ⚠ {needs_review}"
+        else:
+            suffix_colored = "  \033[92m✓\033[0m"
+            suffix_clean = "  ✓"
+        prefix = f"  \033[1mPage {page_num}\033[0m"
+        prefix_clean = f"  Page {page_num}"
+        pad = W - 1 - len(prefix_clean) - len(suffix_clean)
+        print(f"\n  {'─' * 2} {prefix}{suffix_colored} {'─' * pad}")
 
         for sec_key in ordered:
             sec_fields = by_sec[sec_key]
-
-            if sec_key == "header":
-                sec_title = "Header"
-            else:
-                sec_name = sec_names.get(sec_key, "")
-                sec_title = f"Section {sec_key}" + (f" — {sec_name}" if sec_name else "")
-            
-            print(f"\n    \033[1m\033[36m{sec_title}\033[0m")
-            print(f"    \033[90m{'─' * 50}\033[0m")
+            sec_title = "Header" if sec_key == "header" else f"Section {sec_key}" + (f" — {sec_names.get(sec_key, '').rstrip('*').strip()}" if sec_names.get(sec_key) else "")
+            sep_len = min(W - 4 - len(sec_title), 60)
+            print(f"\n    \033[1m\033[36m{'─' * 2} {sec_title} {'─' * sep_len}\033[0m")
 
             tables: dict[str, dict[int, dict[str, str]]] = {}
             checklists: dict[str, list[tuple[str, str]]] = {}
@@ -775,7 +785,8 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
 
             for f in sec_fields:
                 label = f.get("label", "?")
-                value = f.get("value") or "—"
+                value_raw = f.get("value") or ""
+                value = value_raw or "—"
 
                 m = re_row.match(label)
                 if m:
@@ -794,29 +805,45 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
 
                 simple.append(f)
 
+            # Identify aggregate parents that have checklist items
+            agg_labels = {g for g in checklists if any("[✓]" in _checkbox_bracket(v) for _, v in checklists[g])}
+
             for f in simple:
                 label = f.get("label", "?")
                 val = f.get("value") or "—"
-                
-                # Highlight fields needing review
-                if f.get("needs_clarification"):
+
+                # Show aggregate parent label with checked count instead of "—"
+                if val == "—" and label in agg_labels:
+                    checked = sum(1 for _, v in checklists[label] if "[✓]" in _checkbox_bracket(v))
+                    val_display = f"\033[92m({checked} selected)\033[0m"
+                elif val == "—":
+                    val_display = f"\033[90m—\033[0m"
+                elif f.get("needs_clarification"):
                     val_display = f"\033[93m{val} (needs review)\033[0m"
                 else:
                     val_display = val
-                
-                print(f"      {label:<54} {val_display}")
+
+                print(f"      {label:<50} {val_display}")
 
             for group_name, options in checklists.items():
-                if options:
-                    max_opt = max(len(opt) for opt, _ in options)
-                    print(f"      {group_name}")
+                if not options:
+                    continue
+                max_opt = max(len(opt) for opt, _ in options)
+                checked_count = sum(1 for _, v in options if "[✓]" in _checkbox_bracket(v))
+
+                # Compact single-line display if option names are short
+                if sum(len(opt) for opt, _ in options) < 36:
+                    parts = []
                     for option, value in options:
                         bracket = _checkbox_bracket(value)
-                        # Highlight active checkbox options
-                        if "[✓]" in bracket:
-                            bracket_display = f"\033[92m{bracket}\033[0m"
-                        else:
-                            bracket_display = bracket
+                        sym = f"\033[92m✓\033[0m" if "[✓]" in bracket else f"\033[90m✗\033[0m"
+                        parts.append(f"{option} {sym}")
+                    print(f"      {group_name}  \033[90m({checked_count} checked)\033[0m  {'  '.join(parts)}")
+                else:
+                    print(f"      {group_name}  \033[90m({checked_count} checked)\033[0m")
+                    for option, value in options:
+                        bracket = _checkbox_bracket(value)
+                        bracket_display = f"\033[92m{bracket}\033[0m" if "[✓]" in bracket else bracket
                         print(f"        {option:{max_opt}}  {bracket_display}")
 
             for table_name, rows in tables.items():
@@ -829,25 +856,29 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
                 for c in col_order:
                     max_val = max(len(rows[rn].get(c, "")) for rn in rows)
                     col_widths.append(max(len(c), max_val, 8))
-                
-                header = "  |  ".join(f"\033[1m{c.ljust(col_widths[i])}\033[0m" for i, c in enumerate(col_order))
-                sep = "—+—".join("—" * w for w in col_widths)
-                print(f"\n      \033[4m{table_name}\033[0m")
+
+                header = "  │  ".join(f"\033[1m{c.ljust(col_widths[i])}\033[0m" for i, c in enumerate(col_order))
+                sep = "—┼—".join("—" * w for w in col_widths)
+                print(f"\n      \033[4m{table_name}\033[0m  \033[90m({len(rows)} rows)\033[0m")
                 print(f"        {header}")
                 print(f"        \033[90m{sep}\033[0m")
                 for rn in sorted(rows):
                     vals = [rows[rn].get(c, "—").ljust(col_widths[i]) for i, c in enumerate(col_order)]
-                    print(f"        {'  |  '.join(vals)}")
+                    print(f"        {'  │  '.join(vals)}")
 
         print()
         high_conf = sum(1 for f in page_fields if f.get("confidence", 0) >= 90)
         low_conf = sum(1 for f in page_fields if f.get("confidence", 0) < 70)
-        
-        # Color coding stats footer
-        high_str = f"\033[92m{high_conf}\033[0m"
-        low_str = f"\033[91m{low_conf}\033[0m" if low_conf > 0 else "0"
-        
-        print(f"  Page {page_num}: {len(page_fields)} fields  |  High Confidence: {high_str}  |  Low Confidence: {low_str}")
-        print(f"  \033[90m{'─' * 76}\033[0m")
 
-    print(f"\033[1m{'='*80}\033[0m\n")
+        page_details = f"Page {page_num} · {len(page_fields)} fields"
+        if high_conf:
+            page_details += f" · \033[92m{high_conf} high\033[0m"
+        if low_conf:
+            page_details += f" · \033[91m{low_conf} low\033[0m"
+        else:
+            page_details += f" · 0 low"
+
+        remaining = max(W - 1 - len(f"  {page_details} "), 4)
+        print(f"  {page_details}  \033[90m{'─' * remaining}\033[0m")
+
+    print(f"\033[1m{'='*W}\033[0m\n")
