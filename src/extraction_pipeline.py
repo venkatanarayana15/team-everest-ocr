@@ -298,13 +298,16 @@ class ExtractionPipeline:
         merged_sections: list[dict] = []
         page_raws: dict[int, str] = {}
         confidences: list[int] = []
+        page_errors: list[dict] = []
 
         for r in results:
             if isinstance(r, Exception):
                 logger.error("Page extraction failed: %s", r)
+                page_errors.append({"error": str(r)})
                 continue
             pn, data, usage = r
             if not data:
+                page_errors.append({"page": pn, "error": "No data returned from LLM"})
                 continue
             for k in merged_usage:
                 merged_usage[k] += usage.get(k, 0) or 0
@@ -326,6 +329,7 @@ class ExtractionPipeline:
             "sections": merged_sections,
             "overall_confidence": int(sum(confidences) / len(confidences)) if confidences else 0,
             "raw_text": "\n\n".join(page_raws[p] for p in sorted(page_raws)),
+            "page_errors": page_errors,
         }
         merged["fields"].sort(key=lambda f: f.get("page", 1))
         merged_usage["calls"] = len(page_images)

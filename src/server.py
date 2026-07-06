@@ -70,11 +70,18 @@ async def lifespan(app: FastAPI):
             DB_AVAILABLE = False
     _start_cleanup_thread()
     logger.info("Auto-cleanup thread started (every %ds, max age %ds)", CLEANUP_INTERVAL_SEC, JOB_MAX_AGE_SEC)
-    asyncio.create_task(process_pending_on_startup(BASE_DIR))
+    asyncio.create_task(_safe_startup_poller())
     yield
     _stop_cleanup_thread()
     if DB_AVAILABLE:
         await close_pool()
+
+
+async def _safe_startup_poller() -> None:
+    try:
+        await process_pending_on_startup(BASE_DIR)
+    except Exception as e:
+        logger.exception("Startup poller crashed: %s — will not retry", e)
 
 
 app = FastAPI(title="OCR Extraction Pipeline", lifespan=lifespan)

@@ -1,8 +1,11 @@
 import asyncio
+import hashlib
+import http.client
 import json
 import logging
 import os
 import re
+import threading
 import time
 from typing import Any
 import urllib.parse
@@ -34,6 +37,31 @@ SUPABASE_URL = get_required_env("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = get_required_env("SUPABASE_SERVICE_ROLE_KEY")
 
 _TOKEN_CACHE: dict = {"token": None, "expires_at": 0.0}
+_ACTIVE_ZOHO_RECORDS: set[str] = set()
+_TOKEN_LOCK = threading.Lock()
+
+# ── Retry helper for transient Zoho API failures ────────────────
+
+
+def _urlopen_with_retry(request: urllib.request.Request, max_retries: int = 3, timeout: int | None = None) -> http.client.HTTPResponse:
+    last_exc: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            return urllib.request.urlopen(request, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 502, 503, 504) and attempt < max_retries - 1:
+                wait = 2 ** attempt
+                logger.warning("HTTP %d on attempt %d/%d, retrying in %ds", e.code, attempt + 1, max_retries, wait)
+                time.sleep(wait)
+                continue
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                logger.warning("%s on attempt %d/%d, retrying in %ds", type(e).__name__, attempt + 1, max_retries, wait)
+                time.sleep(wait)
+                continue
+            raise
 
 
 class OcrExtractRequest(BaseModel):
@@ -52,39 +80,59 @@ class OcrExtractRequest(BaseModel):
 
 def _get_zoho_access_token() -> str:
     now = time.time()
-    if _TOKEN_CACHE["token"] and now < _TOKEN_CACHE["expires_at"] - 60:
-        return _TOKEN_CACHE["token"]
+    with _TOKEN_LOCK:
+        if _TOKEN_CACHE["token"] and now < _TOKEN_CACHE["expires_at"] - 60:
+            return _TOKEN_CACHE["token"]
 
-    data = urllib.parse.urlencode({
-        "refresh_token": ZOHO_REFRESH_TOKEN,
-        "client_id": ZOHO_CLIENT_ID,
-        "client_secret": ZOHO_CLIENT_SECRET,
-        "grant_type": "refresh_token",
-    }).encode()
-    req = urllib.request.Request(
-        "https://accounts.zoho.com/oauth/v2/token", data=data,
-    )
-    with urllib.request.urlopen(req) as resp:
-        result = json.loads(resp.read())
-    if "access_token" not in result:
-        raise RuntimeError(f"Zoho OAuth failed: {result}")
+        data = urllib.parse.urlencode({
+            "refresh_token": ZOHO_REFRESH_TOKEN,
+            "client_id": ZOHO_CLIENT_ID,
+            "client_secret": ZOHO_CLIENT_SECRET,
+            "grant_type": "refresh_token",
+        }).encode()
+        req = urllib.request.Request(
+            "https://accounts.zoho.com/oauth/v2/token", data=data,
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+        if "access_token" not in result:
+            raise RuntimeError(f"Zoho OAuth failed: {result}")
 
-    expires_in = result.get("expires_in", 3600)
-    _TOKEN_CACHE["token"] = result["access_token"]
-    _TOKEN_CACHE["expires_at"] = now + expires_in
-    return result["access_token"]
+        expires_in = result.get("expires_in", 3600)
+        _TOKEN_CACHE["token"] = result["access_token"]
+        _TOKEN_CACHE["expires_at"] = now + expires_in
+        return result["access_token"]
 
 
 def _download_zoho_file(access_token: str, req: OcrExtractRequest, file_name: str) -> bytes:
     encoded_path = urllib.parse.quote(file_name, safe='')
-    url = (f"https://www.zohoapis.com/creator/v2.1/data/{req.zoho_app_owner}/"
-           f"{req.zoho_app_link_name}/report/{req.zoho_report_link_name}/"
-           f"{req.zoho_record_id}/{req.file_field_link_name}/download?filepath={encoded_path}")
+    owner = req.zoho_app_owner
+    app = req.zoho_app_link_name
+    report = req.zoho_report_link_name
+    record_id = req.zoho_record_id
+    field = req.file_field_link_name
+    url = (f"https://www.zohoapis.com/creator/v2.1/data/{owner}/"
+           f"{app}/report/{report}/"
+           f"{record_id}/{field}/download?filepath={encoded_path}")
+    logger.info("Download URL: owner=%s app=%s report=%s record=%s field=%s file=%s",
+                owner, app, report, record_id, field, file_name)
     request = urllib.request.Request(
         url, headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
     )
-    with urllib.request.urlopen(request) as resp:
-        return resp.read()
+    try:
+        with _urlopen_with_retry(request, timeout=60) as resp:
+            return resp.read()
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            logger.info("Got HTTP 401 downloading file; invalidating token cache and retrying...")
+            with _TOKEN_LOCK:
+                _TOKEN_CACHE["token"] = None
+            fresh_token = _get_zoho_access_token()
+            request.remove_header("Authorization")
+            request.add_header("Authorization", f"Zoho-oauthtoken {fresh_token}")
+            with _urlopen_with_retry(request, timeout=60) as resp:
+                return resp.read()
+        raise
 
 
 def _upload_to_supabase(bucket: str, path: str, data: bytes, content_type: str) -> None:
@@ -96,7 +144,7 @@ def _upload_to_supabase(bucket: str, path: str, data: bytes, content_type: str) 
         "Content-Type": content_type,
     }
     request = urllib.request.Request(url, data=data, headers=headers, method='PUT')
-    with urllib.request.urlopen(request) as resp:
+    with _urlopen_with_retry(request, timeout=30) as resp:
         resp.read()
 
 
@@ -110,7 +158,7 @@ def _update_zoho_creator(access_token: str, req: OcrExtractRequest, status: str 
         "Content-Type": "application/json",
     }
     request = urllib.request.Request(url, data=data, headers=headers, method='PATCH')
-    with urllib.request.urlopen(request) as resp:
+    with _urlopen_with_retry(request, timeout=30) as resp:
         resp.read()
 
 
@@ -122,6 +170,7 @@ FIELD_TO_ZOHO: dict[str, str] = {
     "Co-Volunteer Name": "Co_Volunteer_Name",
     "Date of Visit": "Date_of_Visit",
     # Section 1 — Student Profile
+    "1.1 Application ID": "Application_ID",
     "1.2 Student Full Name": "Student_Full_Name",
     "1.3 Gender": "Gender",
     # Section 2 — Family Background
@@ -259,6 +308,20 @@ ZOHO_STRINGLIST_FIELDS: set[str] = {
     "Government_ID_Verified_Ration_Card_Aadhaar_Driving_Licence_Voter_ID",
 }
 
+# Fields that expect Yes/No values — reject any non-boolean value to avoid Creator validation errors
+ZOHO_BOOLEAN_FIELDS: set[str] = {
+    "Is_Father_Mother_photograph_kept_at_home",
+    "Apart_from_your_job_is_there_any_other_source_of_income",
+    "Do_you_have_any_loans",
+    "Does_the_student_have_any_health_issues",
+    "Will_you_study_college_for_three_years_without_any_obstacle",
+    "If_we_have_a_training_program_within_15_km_from_your_home_can_you_come1",
+    "Are_you_ready_to_send_your_son_daughter_to_weekly_skill_development_classes_on_Sundays1",
+    "Has_the_student_received_or_Applied_for_any_other_scholarships_for_their_UG_degree",
+    "Will_you_recommend_this_student_for_this_scholarship",
+    "Do_you_own_any_other_assets_or_properties_in_the_name_of_grandparents_parent_or_student",
+}
+
 # Subform rows lacking these columns are dropped (Creator rejects them)
 SUBFORM_REQUIRED_COLUMNS: dict[str, set[str]] = {
     "Family_Members_Table": {"Name", "Age"},
@@ -299,6 +362,14 @@ def _sanitize_value(value: str, zoho_field: str) -> Any:
     if cleaned.lower() == "no":
         return "No"
     return cleaned
+
+
+def _normalize_label(label: str) -> str:
+    """Strip section number prefix and normalize whitespace for fuzzy matching."""
+    text = re.sub(r'^\d+(\.\d+)*\s+', '', label)
+    text = re.sub(r'\s+/\s*', '/', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 
 def _build_creator_payload(result: dict) -> dict:
@@ -384,11 +455,25 @@ def _build_creator_payload(result: dict) -> dict:
 
         # 4) Direct mapping
         zoho_field = FIELD_TO_ZOHO.get(label)
+        if not zoho_field:
+            normalized_label = _normalize_label(label)
+            for fk, fv in FIELD_TO_ZOHO.items():
+                if normalized_label == _normalize_label(fk):
+                    zoho_field = fv
+                    break
         if zoho_field:
             if zoho_field in ZOHO_STRINGLIST_FIELDS:
                 payload[zoho_field] = [_sanitize_value(value, zoho_field)]
+            elif zoho_field in ZOHO_BOOLEAN_FIELDS:
+                sanitized = _sanitize_value(value, zoho_field)
+                if sanitized not in ("Yes", "No"):
+                    logger.warning("Skipping boolean field %s: unexpected value %r", zoho_field, value)
+                    continue
+                payload[zoho_field] = sanitized
             else:
                 payload[zoho_field] = _sanitize_value(value, zoho_field)
+        else:
+            logger.warning("Zoho mapping: no match for label %r (value=%r)", label, value)
 
     # Flush aggregates
     for prefix, info in AGGREGATE_MAP.items():
@@ -439,8 +524,14 @@ def _update_zoho_creator_fields(
 ) -> None:
     """POST extracted field values as a new row in Home_Visit_Questionnaire."""
     payload = _build_creator_payload(result)
+    # Application_ID is a lookup field — OCR extracts the display name which Zoho rejects.
+    # Only set it from the request's numeric lookup ID; strip any OCR-derived value otherwise.
+    payload.pop("Application_ID", None)
     if req.application_id:
         payload["Application_ID"] = req.application_id
+        logger.info("application_id=%s injected into Creator payload | record=%s", req.application_id, req.record_id)
+    else:
+        logger.warning("No application_id on request — Application_ID omitted (lookup field) | record=%s", req.record_id)
     if not payload:
         print(f"\n{'='*80}")
         print(f"  ZOHO CREATOR UPDATE: No fields to write | record={req.record_id}")
@@ -451,38 +542,27 @@ def _update_zoho_creator_fields(
     simple_count = sum(1 for v in payload.values() if not isinstance(v, list))
     subform_count = sum(1 for v in payload.values() if isinstance(v, list))
 
+    simple_keys = [k for k, v in payload.items() if not isinstance(v, list)]
+    table_items = [(k, len(v)) for k, v in payload.items() if isinstance(v, list) and v and isinstance(v[0], dict)]
+    multi_items = [(k, v) for k, v in payload.items() if isinstance(v, list) and (not v or not isinstance(v[0], dict))]
+
     print(f"\n{'='*80}")
     print(f"  ZOHO CREATOR UPDATE | record={req.record_id}")
-    print(f"  Target: {req.questionnaire_report_link_name}")
-    print(f"  Fields: {len(payload)} total  |  Simple: {simple_count}  |  Subforms/tables: {subform_count}")
+    print(f"  Target: {req.questionnaire_report_link_name}  |  {len(payload)} fields  |  {simple_count} simple + {subform_count} subform")
     print(f"{'─'*80}")
-    for key, val in payload.items():
-        if isinstance(val, list):
-            if val and isinstance(val[0], dict):
-                print(f"  ✓ {key}  ({len(val)} rows)")
-                for row in val:
-                    for k, v in row.items():
-                        print(f"      {k}: {v}")
-            else:
-                display = ", ".join(str(x) for x in val) if val else "(empty)"
-                print(f"  ✓ {key}: [{display}]")
-        else:
-            display = str(val)[:60] + "..." if len(str(val)) > 60 else str(val)
-            print(f"  ✓ {key}: {display}")
+    if simple_keys:
+        print(f"  Simple: {', '.join(simple_keys)}")
+    for name, count in table_items:
+        print(f"  Table:  {name} ({count} rows)")
+    for name, vals in multi_items:
+        display = ", ".join(str(x) for x in vals) if vals else "(empty)"
+        print(f"  List:   {name}: [{display}]")
     print(f"{'─'*80}")
 
     logger.info(
         "Writing %d fields to Home_Visit_Questionnaire | record=%s",
         len(payload), req.record_id,
     )
-
-    # DEBUG: dump exact POST body
-    print(f"\n  {'─'*60}")
-    print(f"  POST body ({len(payload)} fields):")
-    body_preview = json.dumps({"data": payload}, indent=2, ensure_ascii=False)
-    for line in body_preview.splitlines():
-        print(f"  {line}")
-    print(f"  {'─'*60}\n")
 
     # Zoho Creator v2.1: POST to /form/{form_link_name} to add a record.
     # Using /report/ returns HTTP 405 — reports are read-only views.
@@ -495,8 +575,30 @@ def _update_zoho_creator_fields(
     }
     request = urllib.request.Request(url, data=data, headers=headers, method='POST')
     try:
-        with urllib.request.urlopen(request) as resp:
-            body = resp.read().decode()
+        try:
+            with _urlopen_with_retry(request, timeout=30) as resp:
+                body = resp.read().decode()
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                logger.info("Got HTTP 401 on Creator POST; invalidating token cache and retrying...")
+                with _TOKEN_LOCK:
+                    _TOKEN_CACHE["token"] = None
+                fresh_token = _get_zoho_access_token()
+                request.remove_header("Authorization")
+                request.add_header("Authorization", f"Zoho-oauthtoken {fresh_token}")
+                with _urlopen_with_retry(request, timeout=30) as resp:
+                    body = resp.read().decode()
+            else:
+                raise
+        result = json.loads(body)
+        code = result.get("code", 3000)
+        if code not in (2000, 3000):
+            err_msg = result.get("error", str(result))
+            err_full = result.get("message", "")
+            raise RuntimeError(
+                f"Zoho Creator POST failed (code={code}): {err_msg} | message={err_full} | "
+                f"full_body={body[:1000]}"
+            )
         logger.info("Creator POST response | record=%s | status=200 | body=%s", req.record_id, body[:500])
         print(f"  ✓ POST 200 — Creator response: {body[:200]}")
     except urllib.error.HTTPError as e:
@@ -588,15 +690,12 @@ async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest) -> str | 
         await _set_status(job_dir, "converting", "Converting to single PDF...")
         await loop.run_in_executor(None, _merge_to_pdf, downloaded, combined_pdf)
         pdf_size = combined_pdf.stat().st_size
-        logger.info("Merged PDF created (%.0f KB from %d files)", pdf_size / 1024, len(downloaded))
-        await _set_status(job_dir, "converting", f"PDF created ({pdf_size/1024:.0f} KB)")
-
-        supabase_path = f"{req.record_id}/{req.record_id}.pdf"
-        await _set_status(job_dir, "supabase_upload", "Uploading to Supabase Storage...")
-        logger.info("Uploading to Supabase: %s/%s (%.0f KB)", req.bucket, supabase_path, pdf_size / 1024)
-        await loop.run_in_executor(None, _upload_to_supabase, req.bucket, supabase_path, combined_pdf.read_bytes(), "application/pdf")
-        logger.info("Supabase upload complete")
-        await _set_status(job_dir, "supabase_upload", "PDF uploaded to Supabase")
+        import fitz as _fitz
+        _page_count = _fitz.open(str(combined_pdf)).page_count
+        if _page_count == 0:
+            raise RuntimeError(f"Merged PDF has 0 pages — all input files may be unsupported or corrupt")
+        logger.info("Merged PDF created (%d pages, %.0f KB from %d files)", _page_count, pdf_size / 1024, len(downloaded))
+        await _set_status(job_dir, "converting", f"PDF created ({_page_count} pages, {pdf_size/1024:.0f} KB)")
 
         input_pdf = job_dir / "input.pdf"
         combined_pdf.rename(input_pdf)
@@ -616,10 +715,18 @@ async def _run_ocr_extract_pipeline(job_dir: Path, req: OcrExtractRequest) -> bo
     Calls download-prepare then pipeline-only sequentially.
     The startup poller uses the split functions directly for overlap.
     """
-    token = await _download_and_prepare(job_dir, req)
-    if token:
-        return await _run_pipeline_only(job_dir, req, token)
-    return False
+    rid = req.zoho_record_id
+    if rid in _ACTIVE_ZOHO_RECORDS:
+        logger.info("Record %s is already processing (duplicate request ignored)", rid)
+        return False
+    _ACTIVE_ZOHO_RECORDS.add(rid)
+    try:
+        token = await _download_and_prepare(job_dir, req)
+        if token:
+            return await _run_pipeline_only(job_dir, req, token)
+        return False
+    finally:
+        _ACTIVE_ZOHO_RECORDS.discard(rid)
 
 
 async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token: str) -> bool:
@@ -651,16 +758,22 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
         if result_path.exists():
             with open(result_path) as _f:
                 ocr_result = json.load(_f)
-                _print_field_report(job_dir, ocr_result)
+            ocr_result["application_id"] = req.application_id
+            ocr_result["record_id"] = req.record_id
+            with open(result_path, "w") as _f:
+                json.dump(ocr_result, _f, indent=2)
 
         pipeline_ok = ocr_result is not None
 
         if ocr_result:
+            # ── Step 1: POST fields to Creator questionnaire ──
+            creator_fields_ok = False
             await _set_status(job_dir, "zoho_fields", "Writing fields to Home_Visit_Questionnaire...")
             try:
                 await loop.run_in_executor(
                     None, _update_zoho_creator_fields, access_token, req, ocr_result,
                 )
+                creator_fields_ok = True
                 logger.info("Home_Visit_Questionnaire fields updated | record=%s%s", rid, aid)
                 print(f"  ✓ Creator form updated for {rid}{aid}")
             except Exception as e:
@@ -668,17 +781,48 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
                     rid, e, aid)
                 print(f"  ⚠ Creator form update failed for {rid}{aid}: {e}")
 
-            await _set_status(job_dir, "zoho_update", "Updating Zoho Creator record...")
+            # ── Step 2: Upload PDF to Supabase (independent of Step 1) ──
+            supabase_ok = False
+            await _set_status(job_dir, "supabase_upload", "Uploading PDF to Supabase Storage...")
             try:
-                await loop.run_in_executor(None, _update_zoho_creator, access_token, req, "updated")
-                logger.info("Zoho Creator OCR_Status=updated | record=%s%s", rid, aid)
-                print(f"  ✓ OCR_Status set to 'updated' for {rid}{aid}")
-                await _set_status(job_dir, "done", "OCR complete — Zoho record updated")
+                input_pdf_bytes = input_pdf.read_bytes()
+                supabase_path = f"{req.record_id}/{req.record_id}.pdf"
+                await loop.run_in_executor(
+                    None, _upload_to_supabase, req.bucket, supabase_path,
+                    input_pdf_bytes, "application/pdf",
+                )
+                supabase_ok = True
+                logger.info("Supabase upload complete | record=%s%s", rid, aid)
+            except Exception as sb_err:
+                logger.error("Supabase upload failed | record=%s | error=%s%s",
+                    rid, sb_err, aid)
+
+            # ── Step 3: Update OCR_Status based on combined outcome ──
+            status_to_set = "updated"
+            status_msg = "OCR complete — Zoho record updated"
+            if not creator_fields_ok and not supabase_ok:
+                status_to_set = "failed"
+                status_msg = "OCR complete but both Creator and Supabase writes failed"
+            elif not creator_fields_ok:
+                status_msg = "OCR complete — PDF on Supabase, Creator fields POST failed"
+            elif not supabase_ok:
+                status_msg = "OCR complete — Creator fields written, Supabase upload failed"
+
+            await _set_status(job_dir, "zoho_update", f"Setting OCR_Status={status_to_set}...")
+            try:
+                await loop.run_in_executor(
+                    None, _update_zoho_creator, access_token, req, status_to_set,
+                )
+                logger.info("Zoho Creator OCR_Status=%s | record=%s%s",
+                    status_to_set, rid, aid)
+                print(f"  ✓ OCR_Status set to '{status_to_set}' for {rid}{aid}")
+                await _set_status(job_dir, "done", status_msg)
             except Exception as zoho_err:
-                logger.error("Zoho Creator update failed | record=%s | error=%s%s",
+                logger.error("Zoho Creator OCR_Status update failed | record=%s | error=%s%s",
                     rid, zoho_err, aid)
                 print(f"  ⚠ OCR_Status update failed for {rid}{aid}: {zoho_err}")
-                await _set_status(job_dir, "done", f"Pipeline done but Zoho update failed: {zoho_err}")
+                await _set_status(job_dir, "done",
+                    f"Pipeline done but OCR_Status update failed: {zoho_err}")
         else:
             await _set_status(job_dir, "zoho_update", "Marking record as failed...")
             try:
@@ -686,7 +830,7 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
                 logger.info("Zoho Creator OCR_Status=failed | record=%s%s", rid, aid)
                 print(f"  ✗ OCR_Status set to 'failed' for {rid}{aid}")
             except Exception as zoho_err:
-                logger.error("Zoho Creator status= failed update error | record=%s | error=%s%s",
+                logger.error("Zoho Creator status=failed update error | record=%s | error=%s%s",
                     rid, zoho_err, aid)
             await _set_status(job_dir, "error", "OCR pipeline failed — status set to failed")
 
@@ -737,9 +881,6 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
     finally:
         elapsed = round(time.time() - t0, 1)
         logger.info("Pipeline-only finished | record=%s | elapsed=%ds%s", rid, elapsed, aid)
-        cur = _get_status(job_dir).get("status", "unknown")
-        if cur not in ("done", "error"):
-            await _set_status(job_dir, "done", f"OCR extract complete ({elapsed}s)")
 
 
 # ── Startup poller ────────────────────────────────────────────────
@@ -969,31 +1110,42 @@ async def process_pending_on_startup(base_dir: Path) -> None:
             _seq: int,
         ) -> None:
             _rec_id = _req.record_id
+            _zoho_id = _req.zoho_record_id
             _app_id = _req.application_id or ""
             _aid_str = f" [app={_app_id}]" if _app_id else ""
-            print(f"\n{'─'*60}")
-            print(f"  [#{_seq}] START  {_rec_id}  ({len(_req.file_names)} files){_aid_str}")
-            print(f"{'─'*60}")
-            logger.info("STARTUP: processing %s (%d files)%s",
-                        _rec_id, len(_req.file_names), _aid_str)
 
-            # Phase 1 — download, merge, upload to Supabase (I/O bound)
-            async with _dl_sem:
-                _token = await _download_and_prepare(_job_dir, _req)
+            if _zoho_id in _ACTIVE_ZOHO_RECORDS:
+                logger.info("Startup poller: skipping %s — already processing", _rec_id)
+                print(f"  [#{_seq}] ⚠ SKIP  {_rec_id}{_aid_str} (already processing)")
+                return
 
-            # Phase 2 — extraction pipeline, Creator fields write (CPU/LLM)
-            if _token:
-                async with _pipe_sem:
-                    _ok = await _run_pipeline_only(_job_dir, _req, _token)
-                if _ok:
-                    print(f"  [#{_seq}] ✓ DONE  {_rec_id}{_aid_str}")
-                    logger.info("STARTUP: success — %s%s", _rec_id, _aid_str)
+            _ACTIVE_ZOHO_RECORDS.add(_zoho_id)
+            try:
+                print(f"\n{'─'*60}")
+                print(f"  [#{_seq}] START  {_rec_id}  ({len(_req.file_names)} files){_aid_str}")
+                print(f"{'─'*60}")
+                logger.info("STARTUP: processing %s (%d files)%s",
+                            _rec_id, len(_req.file_names), _aid_str)
+
+                # Phase 1 — download, merge, upload to Supabase (I/O bound)
+                async with _dl_sem:
+                    _token = await _download_and_prepare(_job_dir, _req)
+
+                # Phase 2 — extraction pipeline, Creator fields write (CPU/LLM)
+                if _token:
+                    async with _pipe_sem:
+                        _ok = await _run_pipeline_only(_job_dir, _req, _token)
+                    if _ok:
+                        print(f"  [#{_seq}] ✓ DONE  {_rec_id}{_aid_str}")
+                        logger.info("STARTUP: success — %s%s", _rec_id, _aid_str)
+                    else:
+                        print(f"  [#{_seq}] ✗ FAIL  {_rec_id}{_aid_str}")
+                        logger.warning("STARTUP: failed — %s%s", _rec_id, _aid_str)
                 else:
-                    print(f"  [#{_seq}] ✗ FAIL  {_rec_id}{_aid_str}")
-                    logger.warning("STARTUP: failed — %s%s", _rec_id, _aid_str)
-            else:
-                print(f"  [#{_seq}] ✗ FAIL  {_rec_id}{_aid_str}  (download failed)")
-                logger.warning("STARTUP: download failed — %s%s", _rec_id, _aid_str)
+                    print(f"  [#{_seq}] ✗ FAIL  {_rec_id}{_aid_str}  (download failed)")
+                    logger.warning("STARTUP: download failed — %s%s", _rec_id, _aid_str)
+            finally:
+                _ACTIVE_ZOHO_RECORDS.discard(_zoho_id)
 
         tasks.append(asyncio.create_task(_run_one(job_dir, req, dl_sem, pipe_sem, seq)))
 

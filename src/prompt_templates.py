@@ -1,17 +1,10 @@
-PRIMARY_EXTRACTION_PROMPT = r'''You are a precise structured form extraction system.
+PRIMARY_EXTRACTION_PROMPT = r'''You are a precise structured form extraction system for a 6-page questionnaire.
 
-Your task is to analyze a multi-page scanned questionnaire and extract ALL fields exhaustively from the document.
-
-Return ONLY one valid JSON object.
-Do not return markdown fences.
-Do not add explanations.
-Do not omit any listed field.
+Output ONLY a valid JSON object. No markdown fences. No explanations.
 
 -------------------------------------------------------------------------------
-1. OUTPUT FORMAT (STRICT)
+1. OUTPUT FORMAT
 -------------------------------------------------------------------------------
-
-Return exactly this top-level structure:
 
 {
   "sections": [
@@ -43,183 +36,88 @@ Return exactly this top-level structure:
   "markdown_output": string
 }
 
-Rules:
-- Sort all fields by page ascending.
-- Use exact labels from the template below.
-- Include every listed field, even if blank, unclear, not applicable, cropped, or conditionally hidden.
-- Use null only where explicitly allowed.
+Sort fields by page ascending, then section, then label.
+Use null only where explicitly allowed.
 
 -------------------------------------------------------------------------------
-2. UNIVERSAL FIELD RULES
+2. PER-FIELD RULES — APPLY TO EVERY FIELD
 -------------------------------------------------------------------------------
 
-For every field:
-- "label": exact printed label text from the template.
-- "value": extracted content using the field-specific rules below.
-- "confidence": 0-100.
-- "confidence_reason": brief reason for confidence score.
-- "page": page number where the field appears.
-- "section": integer section number from the leading number before the first dot; header fields use null.
-- "needs_clarification": true if blank, illegible, ambiguous, cropped, or confidence < 70.
-- "reason": null if confidence >= 70 and no clarification needed; otherwise explain what is uncertain.
-- "position_hint": one of:
-  - "same_line_colon"
-  - "right_of_label"
-  - "below_label"
-  - "above_label"
+Confidence scale:
+  90-100 = clearly visible and unambiguous
+  70-89  = mostly readable with slight uncertainty
+  50-69  = ambiguous, blurry, or partially unclear
+  10-49  = mostly unclear, blank, cropped, or guessed
 
-Confidence guidance:
-- 90-100 = clearly visible and unambiguous.
-- 70-89 = mostly readable with slight uncertainty.
-- 50-69 = ambiguous, blurry, or partially unclear.
-- 10-49 = mostly unclear, blank, cropped, or guessed.
+Field schema:
+  label          exact label text from the FIELD TEMPLATE below
+  value          extracted content (see type-specific rules)
+  confidence     0-100 per scale above
+  confidence_reason  brief explanation (e.g. "clearly visible", "field appears empty")
+  page           page where the label appears
+  section        integer from the number before the first dot; header fields use null
+  needs_clarification  true if blank, illegible, cropped, or confidence < 70
+  reason         null if confidence >= 70 and no issue; otherwise explain
+  position_hint  "same_line_colon" | "right_of_label" | "below_label" | "above_label"
 
-If field is blank:
-- value = ""
-- confidence = 10-20
-- confidence_reason = "field appears empty"
-- needs_clarification = true
+Blank field:     value="", confidence=10-20, confidence_reason="field appears empty", needs_clarification=true
+Cropped field:   value="", confidence=5-15, confidence_reason="field cropped or not visible", needs_clarification=true
+Condition unmet (parent radio is "No"):  value="N/A", confidence_reason="condition not met; field not applicable", needs_clarification=false
 
-If field is cropped/not visible:
-- value = ""
-- confidence = 5-15
-- confidence_reason = "field cropped or not visible"
-- needs_clarification = true
+Page grounding:  extract the value from the page where the label is printed. If OCR order conflicts with visual layout, trust the visual layout, printed labels, table boundaries, and question numbering over raw OCR order. Never borrow values from other pages.
 
-If condition is not met for an "If yes" field:
-- value = "N/A"
-- confidence_reason = "condition not met; field not applicable"
-- needs_clarification = false unless visibility is unclear
+Header fields (page 1, section=null, position_hint="same_line_colon"):
+  "Volunteer Name"
+  "Co-Volunteer Name"
+  "Date of Visit"
 
--------------------------------------------------------------------------------
-3. PAGE GROUNDING RULE
--------------------------------------------------------------------------------
+Radio groups:  ONE field per group. value = exact selected option text. If no selection, value="" and needs_clarification=true.
+  Example: "1.3 Gender" -> "Female", "4.5 Income Type" -> "Daily"
 
-For each field:
-1. First identify the page where the field label appears.
-2. Extract the value from that page's layout.
-3. If OCR order conflicts with visual structure, trust the visual layout, printed label, and table boundaries over OCR order.
-4. Do not borrow values from neighboring sections.
+Checkbox groups:  ONE field per option. Label format = "{Parent Label} — {Option}".
+  value: "✓" = checked, "✗" = clearly unchecked, "" = unclear or not visible
+  Never merge options into one field. Never skip unchecked options. If the label is visible but the checkbox area is unclear, still include with value="" and low confidence.
+  Example: "3.2 Type of Home — Individual", "4.1 Assets at Home — Car"
+
+Process the document page by page, top to bottom, left to right across each page.
+For every field, reason internally: "Label [X] on page [Y] → value is [Z] with confidence [C] because [reason]."
 
 -------------------------------------------------------------------------------
-4. HEADER FIELDS
+3. TABLE PROTOCOL — CRITICAL
 -------------------------------------------------------------------------------
 
-Extract these 3 header fields from page 1:
-- "Volunteer Name"
-- "Co-Volunteer Name"
-- "Date of Visit"
+Before extracting any table, you MUST:
+1. Count the number of visible pre-printed data rows.
+2. State to yourself: "This table has N visible pre-printed data rows."
+3. Extract precisely N rows sequentially, starting from Row 1.
 
-Rules:
-- section = null
-- position_hint = "same_line_colon"
-- Always include all three.
+Label format: "{Section.Label} — Row {n} — {ColumnName}"
+Example: "2.5 Family Members — Row 1 — Name"
 
--------------------------------------------------------------------------------
-5. RADIO BUTTON RULE
--------------------------------------------------------------------------------
+Include a row even if every cell is blank (value=""). A pre-printed row
+with no handwritten content is still a valid row with empty cells.
 
-For radio groups:
-- Each group is ONE field.
-- value = selected option text only.
-- If no option selected, value = "".
-- Use the exact option text.
-
-Example:
-"1.3 Gender" -> "Female"
-"4.5 Income Type" -> "Daily"
-"8.2 Will you recommend this student for this scholarship?" -> "Yes"
-
--------------------------------------------------------------------------------
-6. CHECKBOX GROUP RULE (UNIVERSAL)
--------------------------------------------------------------------------------
-
-Every checkbox option must be extracted as a separate field using this exact label format:
-
-"{Parent Label} — {Option}"
-
-Value rules:
-- "✓" = checked
-- "✗" = visible and unchecked
-- "" = option not visible/cropped/unclear
-
-Apply this same layout consistently to ALL checkbox groups in the form, including:
-- 3.2 Type of Home
-- 3.3 Type of Ceiling
-- 3.6 Kitchen Type
-- 4.1 Assets at Home
-
-Examples:
-- "3.2 Type of Home — Individual"
-- "3.3 Type of Ceiling — Concrete"
-- "4.1 Assets at Home — Car"
-
-IMPORTANT:
-- Never merge checkbox options into one field.
-- Never skip unchecked options.
-- If an option label exists but the check area is unclear, still output the field with low confidence.
-
--------------------------------------------------------------------------------
-7. TABLE RULE (UNIVERSAL)
--------------------------------------------------------------------------------
-
-For every table:
-- Extract every visible row in top-to-bottom order.
-- Extract every column in each row as a separate field.
-- Keep row numbering consistent from the first visible data row.
-- Do NOT skip blank rows if the form visibly provides them.
-- Do NOT invent rows that are not present.
-
-Label format:
-"{Section.Label} — Row {n} — {ColumnName}"
+Row numbering: first visible data row = Row 1, second = Row 2, ...
+Do NOT skip blank rows. Do NOT invent rows beyond what is pre-printed.
 
 Cell value rules:
-- visible text -> exact text
-- visible blank cell -> ""
-- condition unmet -> "N/A"
-- unreadable/cropped -> best guess or "" with low confidence
+  visible handwritten text  -> exact text
+  visible but blank cell    -> ""
+  parent condition unmet    -> "N/A" for every cell in every row
+  cropped or unreadable     -> "" with low confidence and needs_clarification=true
 
-CRITICAL:
-- BLANK means the printed cell exists and is empty.
-- N/A means the field is not applicable because the parent condition is not met.
+Tables in this form:
+  - 2.2 Relationship Details:       columns = Year of Death / Separation, Reason for Death / Separation
+  - 2.5 Family Members:             columns = Name, Age, Education, Occupation, Annual Income
+  - 4.3.1 Properties:               columns = Property Description, Owner Name, Approximate Value
+  - 4.4.1 Other Sources of Income:  columns = Source of Income, Amount
+  - 4.6.1 Loan Details:             columns = Loan Purpose, Loan Amount Taken, Pending Loan Amount
 
--------------------------------------------------------------------------------
-8. RAW MARKDOWN TRANSCRIPTION RULES
--------------------------------------------------------------------------------
-
-Create BOTH:
-- "raw_text": a full Markdown transcription
-- "markdown_output": a cleaner human-friendly Markdown version
-
-For BOTH fields:
-- Separate pages using: "\n\n--- Page {n} ---\n\n"
-- Use Markdown headings for sections.
-- Every question label MUST be in bold.
-- Preserve layout as much as possible.
-- Use Markdown tables where the original uses tables.
-- Show radio options with:
-  - [●] selected
-  - [○] unselected
-- Show checkboxes with:
-  - [✓] checked
-  - [✗] unchecked
-  - [—] unknown/not visible
-
-Question formatting rule:
-- Every question or field label must be bold, for example:
-  - **1.1 Application ID:** TEMP - 2026 - 9597
-  - **4.8 If the college fee is higher, how will you manage it?:** lending money (Extra work)
-
-markdown_output formatting improvements:
-- Add a title at the top.
-- Keep section headings clean.
-- Use proper tables with headers.
-- Group repeated checkbox fields under a bold parent question.
-- Preserve answers clearly for human review.
-- Every question remains bold.
+Conditional tables (4.3.1, 4.4.1, 4.6.1): if parent radio is "No", output ALL
+pre-printed rows with every cell = "N/A".
 
 -------------------------------------------------------------------------------
-9. FIELD TEMPLATE (EXTRACT ALL OF THESE)
+4. FIELD TEMPLATE — EXTRACT EVERY FIELD LISTED BELOW
 -------------------------------------------------------------------------------
 
 === HEADER (Page 1) ===
@@ -298,32 +196,56 @@ markdown_output formatting improvements:
 - "8.3 Any other comments you want to share?" [text]
 
 -------------------------------------------------------------------------------
-10. TABLE ROW EXPECTATIONS FOR THIS FORM
+5. RAW TEXT AND MARKDOWN OUTPUT
 -------------------------------------------------------------------------------
 
-Use the visible pre-printed rows in the form layout.
-For this questionnaire structure, extract all visible rows in these tables:
-- 2.2 Relationship Details table
-- 2.5 Family Members table
-- 4.3.1 Properties table
-- 4.4.1 Other Sources of Income table
-- 4.6.1 Loan Details table
+Create BOTH fields:
 
-If a row is visibly present but empty, output all cells for that row with value = "".
-If the table is conditional and the answer is "No", output all visible rows and cells with value = "N/A".
+"raw_text" — full Markdown transcription:
+  Separate pages with "\n\n--- Page {n} ---\n\n"
+  Markdown headings for sections
+  **bold** for every question or field label
+  Markdown tables where the form uses tables
+  Radio: [●] selected, [○] unselected
+  Checkbox: [✓] checked, [✗] unchecked, [—] unknown
+
+"markdown_output" — improved version for human review:
+  Add a clear title at the top
+  Clean hierarchical headings
+  Proper Markdown tables with header rows
+  Group repeated checkbox options under a bold parent question
+  Every question remains bold and scannable
 
 -------------------------------------------------------------------------------
-11. FINAL QUALITY RULES
+6. FINAL CHECKLIST AND EXAMPLES
 -------------------------------------------------------------------------------
 
-Before returning JSON, ensure:
-- All listed fields are present.
-- All checkbox options are represented individually.
-- All radio groups contain only the selected option text.
-- All visible table cells are extracted.
-- All question labels in raw_text and markdown_output are bold.
-- markdown_output is clean, readable, and useful for a human reviewer.
-- sections array includes all sections 1 through 8.
+EXAMPLE — correct output for "4.1 Assets at Home" (checkbox group):
+
+  {"label": "4.1 Assets at Home — Washing Machine", "value": "✓", "confidence": 95, "confidence_reason": "clearly checked", "page": 3, "section": 4, "needs_clarification": false, "reason": null, "position_hint": "right_of_label"},
+  {"label": "4.1 Assets at Home — Fridge", "value": "✗", "confidence": 95, "confidence_reason": "clearly unchecked", "page": 3, "section": 4, "needs_clarification": false, "reason": null, "position_hint": "right_of_label"},
+  {"label": "4.1 Assets at Home — AC", "value": "✗", "confidence": 90, "confidence_reason": "clearly unchecked", "page": 3, "section": 4, "needs_clarification": false, "reason": null, "position_hint": "right_of_label"}
+
+EXAMPLE — correct output for "2.5 Family Members" (table with 4 rows):
+
+  {"label": "2.5 Family Members — Row 1 — Name", "value": "Ramesh", "confidence": 95, "confidence_reason": "clearly visible", "page": 2, "section": 2, "needs_clarification": false, "reason": null, "position_hint": "right_of_label"},
+  {"label": "2.5 Family Members — Row 1 — Age", "value": "42", "confidence": 95, ...},
+  {"label": "2.5 Family Members — Row 1 — Education", "value": "10th", "confidence": 90, ...},
+  {"label": "2.5 Family Members — Row 2 — Name", "value": "Sita", "confidence": 95, ...},
+  {"label": "2.5 Family Members — Row 2 — Age", "value": "38", "confidence": 95, ...},
+  {"label": "2.5 Family Members — Row 2 — Education", "value": "8th", "confidence": 90, ...},
+  {"label": "2.5 Family Members — Row 3 — Name", "value": "Ravi", "confidence": 95, ...},
+  {"label": "2.5 Family Members — Row 4 — Name", "value": "", "confidence": 20, "confidence_reason": "field appears empty", ...}
+
+RUN THIS CHECKLIST BEFORE RETURNING:
+
+[ ] Every field in the FIELD TEMPLATE appears exactly once in "fields". Count them.
+[ ] For every table, you counted the visible rows and extracted exactly that many rows.
+[ ] Every checkbox option label follows the "{Parent Label} — {Option}" format.
+[ ] Every conditional field or table has "N/A" when the parent radio is clearly "No".
+[ ] Every radio value is one of the allowed options.
+[ ] clarification_needed has one entry per field with needs_clarification=true.
+[ ] raw_text and markdown_output have **bold** labels and --- Page {n} --- separators.
 
 Now analyze the document and return the JSON object only.
 '''
@@ -399,6 +321,11 @@ Priority order:
 3. checkbox consistency
 4. table cell completeness
 5. markdown readability
+
+Table row completeness:
+- Count rows for each table (e.g. 2.5 Family Members).
+- If the table has N visible rows but only N-1 were extracted, add the missing row with the correct sequential Row number.
+- A table row may have empty cells — still extract it if the row structure is visible in the form.
 
 Existing fields from first pass:
 {fields_json}

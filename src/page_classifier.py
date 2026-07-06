@@ -128,7 +128,7 @@ class PageClassifier:
             for pat in patterns:
                 matches = pat.findall(text)
                 if matches:
-                    scores[page_num] += 10.0 * len(matches)
+                    scores[page_num] += min(10.0 * len(matches), 30.0)
 
         words = text_lower.split()
         word_count = len(words)

@@ -67,23 +67,32 @@ _last_good_status: dict[str, dict] = {}
 
 async def _set_status(job_dir: Path, status: str, message: str = "", pages: int = 0, fields: list[dict] | None = None) -> None:
     path = job_dir / "status.json"
-    existing = {"log": []}
-    if path.exists():
-        with open(path) as f:
-            existing = json.load(f)
+    loop = asyncio.get_running_loop()
 
-    log = existing.get("log", [])
-    if message:
-        log.append({"t": datetime.now().strftime("%H:%M:%S"), "msg": message})
+    def _write_status() -> dict:
+        existing = {"log": []}
+        if path.exists():
+            with open(path) as f:
+                existing = json.load(f)
 
-    data = {
-        "status": status,
-        "message": message or existing.get("message", ""),
-        "log": log,
-        "pages": pages or existing.get("pages", 0),
-    }
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+        log = existing.get("log", [])
+        if message:
+            log.append({"t": datetime.now().strftime("%H:%M:%S"), "msg": message})
+
+        data = {
+            "status": status,
+            "message": message or existing.get("message", ""),
+            "log": log,
+            "pages": pages or existing.get("pages", 0),
+        }
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+        return data
+
+    data = await loop.run_in_executor(None, _write_status)
+    stored_message = data.get("message", message or "")
+    stored_log = data.get("log", [])
+    stored_pages = data.get("pages", pages or 0)
 
     pct = STAGE_PROGRESS.get(status, 0)
     name_path = job_dir / "original_name.txt"
@@ -117,9 +126,9 @@ async def _set_status(job_dir: Path, status: str, message: str = "", pages: int 
 
     sse_payload = {
         "status": status,
-        "message": message or existing.get("message", ""),
-        "log": log,
-        "pages": pages or existing.get("pages", 0),
+        "message": stored_message,
+        "log": stored_log,
+        "pages": stored_pages,
         "progress": {
             "overall": pct,
             "pdfs": pdfs_map,

@@ -69,7 +69,7 @@ def detect_item_type(item_path: str | Path) -> str:
         return "pdf"
     if p.is_dir():
         images = [f for f in p.iterdir() if f.is_file() and is_image(f)]
-        if len(images) >= 4:
+        if len(images) == 6:
             return "image_set"
     return "unknown"
 
