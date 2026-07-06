@@ -40,49 +40,98 @@ function Sidebar({ jobs, currentJobId, onSelect }: {
   const entries = Object.entries(jobs);
   return (
     <div style={{
-      width: 240, borderRight: '1px solid var(--color-border)', background: 'var(--color-surface)',
-      display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0,
+      width: 260,
+      borderRight: '1px solid var(--color-border)',
+      background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+      flexShrink: 0,
+      boxShadow: '2px 0 12px rgba(15, 23, 42, 0.03)',
+      position: 'relative',
+      zIndex: 5,
     }}>
       <div style={{
-        padding: '10px 12px', borderBottom: '1px solid var(--color-border)',
-        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '16px 18px',
+        borderBottom: '1px solid var(--color-border)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        background: '#ffffff',
       }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text)' }}>Batch Jobs</span>
-        <span style={{ fontSize: 10, color: 'var(--color-text-muted)', background: 'var(--color-bg)', padding: '1px 6px', borderRadius: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text)', letterSpacing: '0.03em', textTransform: 'uppercase' }}>
+          Batch Documents
+        </span>
+        <span style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: 'var(--color-primary)',
+          background: 'var(--color-primary-light)',
+          padding: '2px 8px',
+          borderRadius: 'var(--radius-full)',
+        }}>
           {entries.length}
         </span>
       </div>
-      <div style={{ flex: 1, overflow: 'auto', padding: 4 }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '10px 8px' }}>
         {entries.length === 0 ? (
-          <div style={{ padding: 16, textAlign: 'center', fontSize: 11, color: 'var(--color-text-muted)' }}>
-            No jobs
+          <div style={{ padding: 24, textAlign: 'center', fontSize: 13, color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+            No jobs found
           </div>
         ) : entries.map(([jid, info]) => {
           const isActive = jid === currentJobId;
           const s = info.status;
           const statusColor = STATUS_COLORS[s] || '#64748b';
           const isProcessing = s !== 'done' && s !== 'error' && s !== 'incomplete';
-          const typeIcon = info.input_type === 'image_set' ? '🖼️' : '📄';
+          const typeIcon = info.input_type === 'image_set' ? '📸' : '📄';
           const displayName = info.filename || jid.slice(0, 12) + '…';
+
+          // Curated status chip background
+          const statusBg = s === 'done' ? '#dcfce7' : s === 'error' ? '#fee2e2' : '#f1f5f9';
+
           return (
             <div
               key={jid}
               onClick={() => jid !== currentJobId && onSelect(jid)}
               style={{
-                padding: '7px 8px', borderRadius: 'var(--radius-md)', cursor: 'pointer',
-                borderBottom: '1px solid var(--color-border-light)',
-                background: isActive ? 'var(--color-primary-light)' : 'transparent',
-                borderLeft: isActive ? '3px solid var(--color-primary)' : '3px solid transparent',
-                transition: 'background var(--transition-fast)',
+                padding: '12px 14px',
+                borderRadius: 'var(--radius-lg)',
+                cursor: 'pointer',
+                marginBottom: 6,
+                background: isActive ? '#ffffff' : 'transparent',
+                border: isActive ? '1px solid var(--color-primary-border)' : '1px solid transparent',
+                boxShadow: isActive ? '0 4px 12px rgba(37, 99, 235, 0.08)' : 'none',
+                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                transform: isActive ? 'translateX(2px)' : 'none',
               }}
-              onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--color-bg)'; }}
-              onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+              onMouseEnter={(e) => {
+                if (!isActive) {
+                  e.currentTarget.style.background = '#ffffff';
+                  e.currentTarget.style.borderColor = 'var(--color-border)';
+                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(15, 23, 42, 0.04)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isActive) {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.borderColor = 'transparent';
+                  e.currentTarget.style.boxShadow = 'none';
+                }
+              }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <span style={{ fontSize: 12 }}>{typeIcon}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 14, filter: 'grayscale(0.2)' }}>{typeIcon}</span>
                 <span style={{
-                  fontSize: 11, fontWeight: 500, color: 'var(--color-text)',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+                  fontSize: 12,
+                  fontWeight: isActive ? 600 : 500,
+                  color: isActive ? 'var(--color-primary-dark)' : 'var(--color-text)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  flex: 1,
                 }}>
                   {displayName}
                 </span>
@@ -90,10 +139,30 @@ function Sidebar({ jobs, currentJobId, onSelect }: {
                   <span className="spinner-sm" style={{ flexShrink: 0 }} />
                 )}
               </div>
-              <div style={{ display: 'flex', gap: 4, marginTop: 1, fontSize: 10, alignItems: 'center' }}>
-                <span style={{ color: statusColor, fontWeight: 600 }}>{s.replace(/_/g, ' ')}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
+                <span style={{
+                  color: statusColor,
+                  background: statusBg,
+                  padding: '2px 8px',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.02em',
+                }}>
+                  {s.replace(/_/g, ' ')}
+                </span>
                 {info.overall_confidence != null && (
-                  <span style={{ color: 'var(--color-text-muted)' }}>{info.overall_confidence}%</span>
+                  <span style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: 'var(--color-text-secondary)',
+                    background: 'var(--color-border-light)',
+                    padding: '1px 6px',
+                    borderRadius: 4,
+                  }}>
+                    {info.overall_confidence}%
+                  </span>
                 )}
               </div>
             </div>
@@ -398,95 +467,167 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
         />
 
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '4px 16px', background: 'var(--color-bg)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '10px 20px',
+          background: '#ffffff',
           borderBottom: '1px solid var(--color-border)',
+          boxShadow: '0 1px 3px rgba(15, 23, 42, 0.02)',
+          flexWrap: 'wrap',
         }}>
           <span style={{ fontSize: 13, color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>{filteredFields.length}</span> / <span style={{ color: 'var(--color-text-muted)' }}>{fields.length}</span> fields
+            <span style={{ fontWeight: 700, color: 'var(--color-text)', fontSize: 14 }}>{filteredFields.length}</span>
+            <span style={{ color: 'var(--color-text-muted)' }}>/</span>
+            <span style={{ color: 'var(--color-text-secondary)', fontWeight: 500 }}>{fields.length}</span>
+            <span style={{ color: 'var(--color-text-muted)', marginLeft: 2 }}>fields</span>
             {totalCorrected > 0 && (
-              <> · <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>{totalCorrected}</span> corrected</>
+              <>
+                <span style={{ color: 'var(--color-text-muted)', margin: '0 4px' }}>•</span>
+                <span style={{
+                  color: 'var(--color-success)',
+                  background: 'var(--color-success-light)',
+                  padding: '2px 8px',
+                  borderRadius: 'var(--radius-full)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                }}>
+                  {totalCorrected} corrected
+                </span>
+              </>
             )}
           </span>
 
+          <div style={{ flex: 1 }} />
+
           {/* Priority filter */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8 }}>
-            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--color-text-secondary)' }}>Priority:</span>
-            <div style={{ display: 'flex', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', overflow: 'hidden', background: 'var(--color-surface)' }}>
-              <button
-                onClick={() => setPriorityFilter('all')}
-                style={{
-                  padding: '5px 10px', fontSize: 11, fontWeight: 600, border: 'none',
-                  borderRight: '1px solid var(--color-border)', cursor: 'pointer',
-                  background: priorityFilter === 'all' ? 'var(--color-border-light)' : 'transparent',
-                  color: priorityFilter === 'all' ? 'var(--color-text)' : 'var(--color-text-secondary)',
-                  transition: 'all var(--transition-fast)',
-                }}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setPriorityFilter('high')}
-                style={{
-                  padding: '5px 10px', fontSize: 11, fontWeight: 600, border: 'none',
-                  borderRight: '1px solid var(--color-border)', cursor: 'pointer',
-                  background: priorityFilter === 'high' ? '#fef2f2' : 'transparent',
-                  color: priorityFilter === 'high' ? '#dc2626' : 'var(--color-text-secondary)',
-                  transition: 'all var(--transition-fast)',
-                }}
-                title="Low confidence fields (<70%) or needs clarification"
-              >
-                🔴 High
-              </button>
-              <button
-                onClick={() => setPriorityFilter('medium')}
-                style={{
-                  padding: '5px 10px', fontSize: 11, fontWeight: 600, border: 'none',
-                  borderRight: '1px solid var(--color-border)', cursor: 'pointer',
-                  background: priorityFilter === 'medium' ? '#fffbeb' : 'transparent',
-                  color: priorityFilter === 'medium' ? '#d97706' : 'var(--color-text-secondary)',
-                  transition: 'all var(--transition-fast)',
-                }}
-                title="Medium confidence fields (70% - 90%)"
-              >
-                🟡 Med
-              </button>
-              <button
-                onClick={() => setPriorityFilter('low')}
-                style={{
-                  padding: '5px 10px', fontSize: 11, fontWeight: 600, border: 'none',
-                  cursor: 'pointer',
-                  background: priorityFilter === 'low' ? '#f0fdf4' : 'transparent',
-                  color: priorityFilter === 'low' ? '#16a34a' : 'var(--color-text-secondary)',
-                  transition: 'all var(--transition-fast)',
-                }}
-                title="High confidence fields (>=90%)"
-              >
-                🟢 Low
-              </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>Filter:</span>
+            <div style={{
+              display: 'flex',
+              padding: 2,
+              background: '#f1f5f9',
+              borderRadius: 'var(--radius-lg)',
+              gap: 2,
+            }}>
+              {[
+                { id: 'all', label: 'All', activeColor: 'var(--color-text)', activeBg: '#ffffff', textColor: 'var(--color-text-secondary)' },
+                { id: 'high', label: '🔴 High', activeColor: '#dc2626', activeBg: '#fee2e2', textColor: '#b91c1c' },
+                { id: 'medium', label: '🟡 Med', activeColor: '#d97706', activeBg: '#fef3c7', textColor: '#b45309' },
+                { id: 'low', label: '🟢 Low', activeColor: '#16a34a', activeBg: '#dcfce7', textColor: '#15803d' },
+              ].map(item => {
+                const isActive = priorityFilter === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setPriorityFilter(item.id as any)}
+                    style={{
+                      padding: '5px 12px',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      background: isActive ? item.activeBg : 'transparent',
+                      color: isActive ? item.activeColor : 'var(--color-text-secondary)',
+                      boxShadow: isActive && item.id === 'all' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px' }} />
+          <div style={{ width: 1, height: 20, background: 'var(--color-border)' }} />
 
+          {/* View toggle */}
           <button
             onClick={() => setTextView(v => !v)}
             style={{
-              padding: '6px 12px', fontSize: 12, fontWeight: 600,
-              border: `1px solid ${textView ? 'var(--color-primary)' : 'var(--color-border-hover)'}`,
-              borderRadius: 'var(--radius-md)',
+              padding: '7px 14px',
+              fontSize: 12,
+              fontWeight: 700,
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg)',
               cursor: 'pointer',
-              background: textView ? 'var(--color-primary-light)' : 'var(--color-surface)',
+              background: textView ? 'var(--color-primary-light)' : '#ffffff',
               color: textView ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-              transition: 'all var(--transition-fast)',
+              boxShadow: '0 1px 2px rgba(15, 23, 42, 0.02)',
+              transition: 'all 0.15s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
             }}
-            title={textView ? 'Switch to side-by-side view' : 'Switch to full text view'}
+            onMouseEnter={e => {
+              if (!textView) {
+                e.currentTarget.style.borderColor = 'var(--color-border-hover)';
+                e.currentTarget.style.background = 'var(--color-bg)';
+              }
+            }}
+            onMouseLeave={e => {
+              if (!textView) {
+                e.currentTarget.style.borderColor = 'var(--color-border)';
+                e.currentTarget.style.background = '#ffffff';
+              }
+            }}
           >
-            {textView ? '🖼️ Side-by-Side' : '📝 Full Text'}
+            {textView ? '📖 Side-by-Side' : '📝 Full Text View'}
           </button>
 
-          <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px' }} />
+          <div style={{ width: 1, height: 20, background: 'var(--color-border)' }} />
 
+          {/* Left panel format selector */}
+          {!textView && (
+            <div style={{
+              display: 'flex',
+              padding: 2,
+              background: '#f1f5f9',
+              borderRadius: 'var(--radius-lg)',
+              gap: 2,
+            }}>
+              <button
+                onClick={() => setRightPanelFormat('fields')}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  background: rightPanelFormat === 'fields' ? '#ffffff' : 'transparent',
+                  color: rightPanelFormat === 'fields' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                  boxShadow: rightPanelFormat === 'fields' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                Form Fields
+              </button>
+              <button
+                onClick={() => setRightPanelFormat('txt')}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  background: rightPanelFormat === 'txt' ? '#ffffff' : 'transparent',
+                  color: rightPanelFormat === 'txt' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                  boxShadow: rightPanelFormat === 'txt' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                ✏️ Edit Raw Text
+              </button>
+            </div>
+          )}
+
+          <div style={{ width: 1, height: 20, background: 'var(--color-border)' }} />
+
+          {/* Save to DB */}
           <button
             onClick={async () => {
               try {
@@ -497,56 +638,33 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
               }
             }}
             style={{
-              padding: '6px 12px', fontSize: 12, fontWeight: 600,
-              border: '1px solid var(--color-border-hover)',
-              borderRadius: 'var(--radius-md)',
+              padding: '7px 16px',
+              fontSize: 12,
+              fontWeight: 700,
+              border: 'none',
+              borderRadius: 'var(--radius-lg)',
               cursor: 'pointer',
-              background: 'var(--color-surface)',
-              color: 'var(--color-text)',
-              transition: 'all var(--transition-fast)',
-            }}
-            title="Save extraction results to database"
-          >
-            💾 Save to DB
-          </button>
-
-          {!textView && (
-            <div style={{
+              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              color: '#ffffff',
+              boxShadow: '0 2px 6px rgba(16, 185, 129, 0.2)',
+              transition: 'all 0.15s ease',
               display: 'flex',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-md)',
-              overflow: 'hidden',
-              background: 'var(--color-surface)',
-            }}>
-              <button
-                onClick={() => setRightPanelFormat('fields')}
-                style={{
-                  padding: '5px 12px', fontSize: 12, fontWeight: 600,
-                  border: 'none',
-                  borderRight: '1px solid var(--color-border)',
-                  cursor: 'pointer',
-                  background: rightPanelFormat === 'fields' ? 'var(--color-primary-light)' : 'transparent',
-                  color: rightPanelFormat === 'fields' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                  transition: 'all var(--transition-fast)',
-                }}
-              >
-                Fields View
-              </button>
-              <button
-                onClick={() => setRightPanelFormat('txt')}
-                style={{
-                  padding: '5px 12px', fontSize: 12, fontWeight: 600,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: rightPanelFormat === 'txt' ? 'var(--color-primary-light)' : 'transparent',
-                  color: rightPanelFormat === 'txt' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                  transition: 'all var(--transition-fast)',
-                }}
-              >
-                📝 Edit Page Text
-              </button>
-            </div>
-          )}
+              alignItems: 'center',
+              gap: 6,
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.filter = 'brightness(1.05)';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+              e.currentTarget.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.3)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.filter = 'none';
+              e.currentTarget.style.transform = 'none';
+              e.currentTarget.style.boxShadow = '0 2px 6px rgba(16, 185, 129, 0.2)';
+            }}
+          >
+            💾 Save to Database
+          </button>
         </div>
 
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>

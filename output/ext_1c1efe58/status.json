@@ -1,0 +1,79 @@
+{
+  "status": "done",
+  "message": "OCR complete \u2014 PDF on Supabase, Creator fields POST failed",
+  "log": [
+    {
+      "t": "04:03:47",
+      "msg": "OCR extract queued for TEMP-2026-8334 (1 files)"
+    },
+    {
+      "t": "04:03:47",
+      "msg": "Downloading for TEMP-2026-8334"
+    },
+    {
+      "t": "04:03:47",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "04:03:47",
+      "msg": "Downloading 1 files..."
+    },
+    {
+      "t": "04:03:50",
+      "msg": "Downloaded 1 files"
+    },
+    {
+      "t": "04:03:50",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "04:03:51",
+      "msg": "PDF created (6 pages, 672 KB)"
+    },
+    {
+      "t": "04:03:51",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "04:03:51",
+      "msg": "Preprocessing PDF (TEMP-2026-8334)..."
+    },
+    {
+      "t": "04:03:54",
+      "msg": "Preprocessing done."
+    },
+    {
+      "t": "04:03:54",
+      "msg": "Running OCR + LLM extraction (OpenAICompatible)..."
+    },
+    {
+      "t": "04:04:24",
+      "msg": "Merged 26 fields."
+    },
+    {
+      "t": "04:04:24",
+      "msg": "Filling missing template fields..."
+    },
+    {
+      "t": "04:04:24",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "04:04:24",
+      "msg": "Extraction complete. Results ready for download."
+    },
+    {
+      "t": "04:04:24",
+      "msg": "Writing fields to Creator + Supabase upload..."
+    },
+    {
+      "t": "04:04:24",
+      "msg": "Setting OCR_Status=updated..."
+    },
+    {
+      "t": "04:04:25",
+      "msg": "OCR complete \u2014 PDF on Supabase, Creator fields POST failed"
+    }
+  ],
+  "pages": 6
+}

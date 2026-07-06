@@ -1,0 +1,133 @@
+# OCR Extraction Results — Home Visit Questionnaire
+
+**Job:** `startup_a8d092f7`  ·  **Date:** Unknown  ·  **Pages:** 6
+
+---
+
+## Page 1
+
+### Header Information
+
+- **Volunteer Name:** M. Mohammed Riaz
+- **Co-Volunteer Name:** Harini Mohan
+- **Date of Visit:** 05/07/2026
+
+### Section 1 — Student Profile
+
+- **1.1 Application ID:** TEMP - 2026 - 8944
+- **1.2 Student Full Name:** Bimal. S
+- **1.3 Gender:** Male
+
+### Section 2 — Family Background
+
+- **2.1 Family Status:** Having both parents
+- **2.2 Relationship Details — Year of Death / Separation:** 
+- **2.2 Relationship Details — Reason for Death / Separation:** 
+- **2.3 Is Father/Mother photograph kept at home?:** Yes
+- **2.4 Government ID Verified:** Aadhaar Card
+
+## Page 2
+
+### Section 2 — Family Background
+
+| # | **Name** | **Age** | **Education** | **Occupation** | **Annual Income** |
+|---|---|---|---|---|---|
+| 1 | A. Suresh | 49 | X | Lorry Driver | Rs. 1.08 Lakh |
+| 2 | S. Ambika | 42 | VIII | Tailoring | Rs. 72000/- |
+| 3 | S. Kamal | 20 | B.E IV year | Student | NA |
+| 4 | — | — | — | — | — |
+
+### Section 3 — Housing Condition
+
+☐ **Individual**
+☐ **Private Apartment**
+☑ **Housing Board**
+☐ **Line House**
+☐ **Others**
+
+☐ **Roof (Kurai)**
+☐ **Tiled**
+☐ **Asbestos / Sheet**
+☑ **Concrete**
+
+☐ **Separate Kitchen**
+☑ **Hall with Kitchen**
+
+
+- **3.1 House Ownership:** Own
+- **3.1.1 If rented, what is the rent amount?:** N/A
+- **3.4 Number of Bedrooms:** Single room (hall cum room)
+- **3.4.1 Type of Bedroom:** No Separate Bedroom
+- **3.5 Bathroom:** Separate
+
+## Page 3
+
+### Section 4 — Financial Background
+
+☑ **Washing Machine**
+☑ **Fridge**
+☑ **AC**
+☑ **LED TV**
+☑ **Two-Wheeler**
+☐ **Car**
+☑ **Smartphone**
+☐ **Separate Wi-Fi**
+☐ **Others**
+
+
+| # | **Property Description** | **Owner Name** | **Approximate Value** |
+|---|---|---|---|
+| 1 | N/A | N/A | N/A |
+| 2 | N/A | N/A | N/A |
+
+
+- **4.2 Amount of Last Electricity Bill:** Rs. 700/- for 2 months
+- **4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?:** No
+- **4.1 Assets at Home:** 
+
+## Page 4
+
+### Section 4 — Financial Background
+
+| # | **Source of Income** | **Amount** |
+|---|---|---|
+| 1 | N/A | N/A |
+| 2 | N/A | N/A |
+
+| # | **Loan Purpose** | **Loan Amount Taken** | **Pending Loan Amount** |
+|---|---|---|---|
+| 1 | Gold loan IOB & Federal Bnk (obtained for medical treatment) | 10 Lakh | 10 Lakh |
+| 2 | — | — | — |
+
+
+- **4.4 Apart from your job, is there any other source of income?:** No
+- **4.5 Income Type:** Daily
+- **4.6 Do you have any loans?:** Yes
+- **4.7 If you choose any college, how much is the college fee?:** Rs. 1.50 Lakh per year
+- **4.8 If the college fee is higher, how will you manage it?:** By obtaining loans
+- **4.9 If you do not receive this scholarship, how will you pay the fees?:** By raising funds / loans from relatives
+
+## Page 5
+
+### Section 5 — Health Information
+
+- **5.1 Does the student have any health issues?:** Yes
+- **5.2 If yes, list the health issues:** Wheezing issue
+
+### Section 6 — Student Commitment
+
+- **6.1 Will you study college for three years without any obstacle?:** Yes
+- **6.2 If we have a training program within 15 km from your home, can you come?:** Yes
+- **6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?:** Yes
+
+## Page 6
+
+### Section 7 — Scholarship Information
+
+- **7.1 Has the student received or applied for any other scholarships for their UG degree?:** NIL
+
+### Section 8 — Volunteer Observation
+
+- **8.1 What is your opinion about the student, their family members, and their living condition?:** The applicant is a highly studious individual from an economically weaker background. The family faces severe financial strain as the father works as a lorry driver, earning is very low & unpredictable. To support the household, the mother undertakes petty tailoring work from home.
+- **8.2 Will you recommend this student for this scholarship?:** Yes
+- **8.3 Any other comments you want to share?:** The family is already managing high cost of the candidate's elder brother engineering course. Displaced by hardships, they are currently living in Tsunami Rehabilitation Flats by Tamilnadu Housing board. This student warrants highly favourable consideration for financial aid.

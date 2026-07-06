@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 
 TokenUsage = dict
 
+# Shared across all client instances to coordinate rate limits globally
+_SHARED_LLM_RL = RateLimiter()
+
 
 def _load_dotenv(path: str = None) -> None:
     if path is None:
@@ -73,7 +76,7 @@ class OpenAICompatibleClient(ModelClient):
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.model_name = model
         self.provider = provider.lower().strip()
-        self._rl = RateLimiter()
+        self._rl = _SHARED_LLM_RL  # shared across all instances to enforce global RP
 
     def _use_response_format(self) -> bool:
         if self.provider == "deepseek":

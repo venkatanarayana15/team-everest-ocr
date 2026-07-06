@@ -12,6 +12,7 @@ import numpy as np
 from src.backends import WordBox
 from src.config import Config
 from src.extraction_pipeline import ExtractionPipeline, KNOWN_TEMPLATE_FIELDS, StructuredField
+from src.chandra_client import call_chandra_ocr
 from src.model_client import get_model_client
 from src.page_classifier import PageClassifier
 from src.renderers import _render_markdown, _format_job_datetime
@@ -250,12 +251,16 @@ async def _run_core_extraction(
     use_cache: bool = False,
     checkpoint=None,
 ) -> dict:
+    _t = {k: 0.0 for k in ("preprocess", "tesseract", "chandra", "llm", "merge", "save")}
+    _t["wall_start"] = time.time()
+
     if checkpoint:
         step, fields, overall_confidence, raw_text, sections_data = checkpoint
         word_boxes = []
         primary_token_usage = {}
     else:
-        await status_func("primary_extraction", f"Running Tesseract + primary extraction ({primary_name})...")
+        await status_func("primary_extraction", f"Running OCR + LLM extraction ({primary_name})...")
+        _t["preprocess"] = time.time() - _t["wall_start"]
 
         loop = asyncio.get_running_loop()
 
@@ -266,18 +271,45 @@ async def _run_core_extraction(
                 cached = _load_bbox_cache(bbox_cache, cache_key)
                 if cached is not None:
                     return cached
+            t0 = time.time()
             wb = await loop.run_in_executor(None, pipeline.run_bbox_images, processed_images)
+            _t["tesseract"] = time.time() - t0
             if use_cache and cache_key:
                 _save_bbox_cache(bbox_cache, cache_key, wb)
             return wb
 
         tesseract_task = asyncio.create_task(_run_tesseract())
-        llm_task = asyncio.create_task(pipeline.run_primary_extraction(pdf_path, processed_images))
+        chandra_task = asyncio.create_task(
+            call_chandra_ocr(page_images=processed_images)
+        ) if processed_images else None
 
         word_boxes = await tesseract_task
         if not word_boxes:
             logger.warning("Tesseract returned no word boxes — LLM extraction may produce degraded results")
-        model_data, primary_token_usage = await llm_task
+
+        chandra_markdown = None
+        if chandra_task:
+            try:
+                t0 = time.time()
+                chandra_markdown = await asyncio.wait_for(chandra_task, timeout=120.0)
+                _t["chandra"] = time.time() - t0
+                logger.info("Chandra-2 markdown received: %d chars (%.1fs)", len(chandra_markdown), _t["chandra"])
+            except Exception as e:
+                _t["chandra"] = time.time() - t0
+                logger.warning("Chandra-2 failed (%s, %.1fs) — falling back to vision LLM", e, _t["chandra"])
+
+        t0 = time.time()
+        if chandra_markdown:
+            from src.markdown_parser import parse_markdown
+            model_data = parse_markdown(chandra_markdown)
+            primary_token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "calls": 0}
+            logger.info("Markdown parser extracted %d fields", len(model_data.get("fields", [])))
+        else:
+            llm_task = asyncio.create_task(
+                pipeline.run_primary_extraction(pdf_path, processed_images)
+            )
+            model_data, primary_token_usage = await llm_task
+        _t["llm"] = time.time() - t0
 
         _save_tesseract_data(job_dir, word_boxes)
 
@@ -285,7 +317,9 @@ async def _run_core_extraction(
             overall_confidence = model_data.get("overall_confidence", 0)
             raw_text = model_data.get("raw_text", "")
             raw_text = _insert_page_markers(raw_text, model_data.get("fields", []))
+            t_m = time.time()
             fields = pipeline.merge_fields(model_data, word_boxes, prefix=primary_name)
+            _t["merge"] = time.time() - t_m
             await status_func("field_mapping", f"Merged {len(fields)} fields.")
         else:
             await status_func("field_mapping", "Primary extraction failed — using Tesseract words.")
@@ -304,6 +338,13 @@ async def _run_core_extraction(
         sections_data.sort(key=lambda s: s["number"])
 
         _save_checkpoint(job_dir, "mapped", fields, overall_confidence, raw_text, sections=sections_data)
+        _t["save"] = time.time() - t_m
+
+    _t["total"] = time.time() - _t["wall_start"]
+    logger.info(
+        "STAGE TIMING | preprocess=%.1fs tesseract=%.1fs chandra=%.1fs llm=%.1fs merge=%.1fs save=%.1fs total=%.1fs",
+        _t["preprocess"], _t["tesseract"], _t["chandra"], _t["llm"], _t["merge"], _t["save"], _t["total"],
+    )
 
     token_usage = {
         "primary": primary_token_usage,
@@ -796,13 +837,15 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
 
             for f in simple:
                 label = f.get("label", "?")
-                val = f.get("value") or "—"
+                raw_val = f.get("value")
+                if raw_val is None or raw_val == "":
+                    val_display = r"<empty>"
+                else:
+                    val_display = str(raw_val)
                 
                 # Highlight fields needing review
                 if f.get("needs_clarification"):
-                    val_display = f"\033[93m{val} (needs review)\033[0m"
-                else:
-                    val_display = val
+                    val_display = f"\033[93m{val_display} (needs review)\033[0m"
                 
                 print(f"      {label:<54} {val_display}")
 

@@ -11,7 +11,7 @@ class RateLimiter:
     """Sliding-window rate limiter with both sync and async wait."""
 
     def __init__(self, rpm: int | None = None):
-        self.rpm = rpm or int(os.environ.get("LLM_RATE_LIMIT_RPM", "30"))
+        self.rpm = rpm or int(os.environ.get("LLM_RATE_LIMIT_RPM", "35"))
         self._timestamps: list[float] = []
 
     def wait(self) -> None:

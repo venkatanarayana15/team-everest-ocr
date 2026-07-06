@@ -1,0 +1,63 @@
+{
+  "status": "error",
+  "message": "OCR pipeline failed \u2014 status set to failed",
+  "log": [
+    {
+      "t": "02:47:37",
+      "msg": "Auto: TEMP-2026-9491 (1 files)"
+    },
+    {
+      "t": "02:47:37",
+      "msg": "Downloading for TEMP-2026-9491"
+    },
+    {
+      "t": "02:47:37",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "02:47:37",
+      "msg": "Downloading 1 files..."
+    },
+    {
+      "t": "02:47:40",
+      "msg": "Downloaded 1 files"
+    },
+    {
+      "t": "02:47:40",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "02:47:40",
+      "msg": "PDF created (6 pages, 892 KB)"
+    },
+    {
+      "t": "02:47:40",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "02:47:41",
+      "msg": "Preprocessing PDF (TEMP-2026-9491)..."
+    },
+    {
+      "t": "02:47:44",
+      "msg": "Preprocessing done."
+    },
+    {
+      "t": "02:47:44",
+      "msg": "Running OCR + LLM extraction (Gemini)..."
+    },
+    {
+      "t": "02:47:58",
+      "msg": "InvalidArgument: 400 API key not valid. Please pass a valid API key. [reason: \"API_KEY_INVALID\"\ndomain: \"googleapis.com\"\nmetadata {\n  key: \"service\"\n  value: \"generativelanguage.googleapis.com\"\n}\n, locale: \"en-US\"\nmessage: \"API key not valid. Please pass a valid API key.\"\n]"
+    },
+    {
+      "t": "02:47:58",
+      "msg": "Marking record as failed..."
+    },
+    {
+      "t": "02:47:59",
+      "msg": "OCR pipeline failed \u2014 status set to failed"
+    }
+  ],
+  "pages": 6
+}

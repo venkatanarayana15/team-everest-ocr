@@ -7,9 +7,22 @@ const TABLE_ROW_RE = /^(.+?)\s*[—–-]\s*Row\s+(\d+)\s*[—–-]\s*(.+)$/;
 const CHECKBOX_VALS = new Set(['yes', 'no', 'true', 'false', '✓', '✗', '?']);
 
 function isCheckbox(field: Field): boolean {
-  return CHECKBOX_VALS.has(field.value.trim().toLowerCase()) &&
-    field.label.toLowerCase().includes('checkbox');
+  if (TABLE_ROW_RE.test(field.label)) return false;
+  const isValCheckbox = CHECKBOX_VALS.has(field.value.trim().toLowerCase());
+  const hasSeparator = field.label.includes('\u2014') || field.label.includes('\u2013') || field.label.includes(' — ') || field.label.includes(' - ');
+  return isValCheckbox && hasSeparator;
 }
+
+function parseCheckboxLabel(label: string): { parent: string; option: string } {
+  const parts = label.split(/\s*[\u2014\u2013-]\s*/);
+  if (parts.length >= 2) {
+    const option = parts.pop() || '';
+    const parent = parts.join(' — ');
+    return { parent, option };
+  }
+  return { parent: label, option: '' };
+}
+
 
 function confidenceColor(c: number): string {
   if (c >= 0.8) return '#16a34a';
@@ -476,24 +489,100 @@ function CheckboxItem({ field, isSelected, onFieldClick, onFieldUpdate }: {
 }
 
 function CheckboxGroupView({
-  fields, selectedField, onFieldClick, onFieldUpdate,
+  fields, selectedField, onFieldClick, onFieldsUpdate,
 }: {
   fields: Field[];
   selectedField: Field | null;
   onFieldClick: (f: Field) => void;
-  onFieldUpdate: (f: Field, newVal: string) => void;
+  onFieldsUpdate: (updates: Array<{ field: Field; newVal: string }>) => void;
 }) {
+  if (fields.length === 0) return null;
+  const { parent } = parseCheckboxLabel(fields[0].label);
+
+  // Find the selected/checked option
+  const activeField = fields.find(f => {
+    const v = f.value.trim().toLowerCase();
+    return v === 'yes' || v === 'true' || v === '✓';
+  });
+
+  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedLabel = e.target.value;
+    if (!selectedLabel) return;
+    const targetField = fields.find(f => parseCheckboxLabel(f.label).option === selectedLabel);
+    if (!targetField) return;
+
+    // Trigger field selection in document review panel
+    onFieldClick(targetField);
+
+    // Prepare batch updates
+    const updates: Array<{ field: Field; newVal: string }> = [];
+    fields.forEach(f => {
+      const isTarget = f === targetField;
+      const currentVal = f.value.trim().toLowerCase();
+      let positiveVal = '✓';
+      let negativeVal = '✗';
+      if (currentVal === 'yes' || currentVal === 'no') {
+        positiveVal = 'yes';
+        negativeVal = 'no';
+      } else if (currentVal === 'true' || currentVal === 'false') {
+        positiveVal = 'true';
+        negativeVal = 'false';
+      }
+      updates.push({ field: f, newVal: isTarget ? positiveVal : negativeVal });
+    });
+    onFieldsUpdate(updates);
+  };
+
+  const isGroupSelected = fields.some(f => f === selectedField);
+
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '6px 0' }}>
-      {fields.map(f => (
-        <CheckboxItem
-          key={f.label}
-          field={f}
-          isSelected={selectedField === f}
-          onFieldClick={onFieldClick}
-          onFieldUpdate={onFieldUpdate}
-        />
-      ))}
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 6,
+      padding: '8px 10px',
+      border: `1px solid ${isGroupSelected ? 'var(--color-primary)' : 'var(--color-border)'}`,
+      borderRadius: 'var(--radius-md)',
+      background: isGroupSelected ? 'var(--color-primary-light)' : 'var(--color-surface)',
+      marginBottom: 6,
+      fontFamily: 'var(--font-sans)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--color-label)' }}>{parent}</span>
+        {activeField && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Badge color={confidenceColor(activeField.confidence)}>
+              {confidenceLabel(activeField.confidence)}
+            </Badge>
+            {activeField.original_value !== null && <Badge color="var(--color-success)">edited</Badge>}
+          </div>
+        )}
+      </div>
+      <select
+        value={activeField ? parseCheckboxLabel(activeField.label).option : ''}
+        onChange={handleChange}
+        style={{
+          width: '100%',
+          padding: '6px 8px',
+          borderRadius: 'var(--radius-sm)',
+          border: '1px solid var(--color-border)',
+          background: 'var(--color-surface)',
+          color: 'var(--color-text)',
+          fontSize: 13,
+          outline: 'none',
+          cursor: 'pointer',
+        }}
+      >
+        <option value="">-- Select option --</option>
+        {fields.map(f => {
+          const { option } = parseCheckboxLabel(f.label);
+          return (
+            <option key={f.label} value={option}>
+              {option}
+            </option>
+          );
+        })}
+      </select>
     </div>
   );
 }
@@ -554,6 +643,24 @@ export default function ExtractedDataPanel({
     }));
   }, [fields, onFieldsUpdated]);
 
+  const handleBatchValueChange = useCallback((updates: Array<{ field: Field; newVal: string }>) => {
+    const updateMap = new Map<Field, string>();
+    for (const u of updates) {
+      updateMap.set(u.field, u.newVal);
+    }
+    onFieldsUpdated(fields.map(f => {
+      if (updateMap.has(f)) {
+        const newVal = updateMap.get(f)!;
+        return {
+          ...f,
+          value: newVal,
+          original_value: f.original_value ?? f.value,
+        };
+      }
+      return f;
+    }));
+  }, [fields, onFieldsUpdated]);
+
   const handlePrevPage = useCallback(() => {
     if (currentPage > 1) onPageClick(currentPage - 1);
   }, [currentPage, onPageClick]);
@@ -586,7 +693,7 @@ export default function ExtractedDataPanel({
 
       // Detect tables: fields sharing the same section prefix in label
       const tableFields = new Map<string, Field[]>();
-      const checkboxFields: Field[] = [];
+      const checkboxFieldsMap = new Map<string, Field[]>();
       const otherFields: Field[] = [];
 
       for (const f of secFields) {
@@ -596,7 +703,11 @@ export default function ExtractedDataPanel({
           if (!tableFields.has(sectionPrefix)) tableFields.set(sectionPrefix, []);
           tableFields.get(sectionPrefix)!.push(f);
         } else if (isCheckbox(f)) {
-          checkboxFields.push(f);
+          const { parent } = parseCheckboxLabel(f.label);
+          if (!checkboxFieldsMap.has(parent)) {
+            checkboxFieldsMap.set(parent, []);
+          }
+          checkboxFieldsMap.get(parent)!.push(f);
         } else {
           otherFields.push(f);
         }
@@ -607,7 +718,7 @@ export default function ExtractedDataPanel({
         sectionName: name,
         fields: otherFields,
         tables: Array.from(tableFields.values()),
-        checkboxGroups: checkboxFields.length > 0 ? [checkboxFields] : [],
+        checkboxGroups: Array.from(checkboxFieldsMap.values()),
       });
     }
 
@@ -760,7 +871,7 @@ export default function ExtractedDataPanel({
                         fields={grp}
                         selectedField={selectedField}
                         onFieldClick={onFieldClick}
-                        onFieldUpdate={handleValueChange}
+                        onFieldsUpdate={handleBatchValueChange}
                       />
                     </div>
                   ))}

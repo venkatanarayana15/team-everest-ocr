@@ -1,0 +1,92 @@
+# OCR Extraction Results — Home Visit Questionnaire
+
+**Job:** `ext_a76f9ee2`  ·  **Date:** Unknown  ·  **Pages:** 6
+
+---
+
+## Page 1
+
+### Header Information
+
+- **Co-Volunteer Name:** Application ID
+- **Date of Visit:** Application ID
+- **Volunteer Name:** <br><u>HARINATH ARON</u> | Co-Volunteer Name:<br><u></u> | Date of Visit:<br><u>28/6/26.</u> |
+
+### Section 1 — Student Profile
+
+- **1.1 Application ID:** Temp - 2026-9575
+- **1.2 Student Full Name:** 
+- **1.3 Gender:** 
+
+### Section 2 — Family Background
+
+- **2.1 Family Status:** 
+
+### Section 4 — Financial Background
+
+- **4.4.1 If yes, list other sources of income:** N/A
+
+## Page 2
+
+### Section 2 — Family Background
+
+- **2.3 Is Father/Mother photograph kept at home?:** 
+- **2.4 Government ID Verified:** 
+
+### Section 3 — Housing Condition
+
+- **3.1 House Ownership:** 
+- **3.1.1 If rented, what is the rent amount?:** 
+
+## Page 3
+
+### Section 3 — Housing Condition
+
+- **3.4 Number of Bedrooms:** 
+- **3.4.1 Type of Bedroom:** 
+- **3.5 Bathroom:** 
+
+### Section 4 — Financial Background
+
+- **4.1 Assets at Home:** 
+- **4.2 Amount of Last Electricity Bill:** 
+- **4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?:** 
+
+## Page 4
+
+### Section 4 — Financial Background
+
+- **4.4 Apart from your job, is there any other source of income?:** No
+- **4.5 Income Type:** Daily
+- **4.6 Do you have any loans?:** Yes
+- **4.7 If you choose any college, how much is the college fee?:** Amount in \$
+
+## Page 5
+
+### Section 4 — Financial Background
+
+- **4.8 If the college fee is higher, how will you manage it?:** Ready to work part-time job.
+- **4.9 If you do not receive this scholarship, how will you pay the fees?:** As above ready to work and manage but will feel short which family is ready to support through loan.
+
+### Section 5 — Health Information
+
+- **5.1 Does the student have any health issues?:** No
+- **5.2 If yes, list the health issues:** Describe health issues
+
+### Section 6 — Student Commitment
+
+- **6.1 Will you study college for three years without any obstacle?:** Very determined and nothing is going to stop her from securing a degree.
+- **6.2 If we have a training program within 15 km from your home, can you come?:** Yes
+- **6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?:** Yes
+
+## Page 6
+
+### Section 7 — Scholarship Information
+
+- **7.1 Has the student received or applied for any other scholarships for their UG degree?:** No.
+
+### Section 8 — Volunteer Observation
+
+- **8.1 What is your opinion about the student, their family members, and their living condition?:** A very large family living in a very small house which doesn't have concrete ceiling or a separate room to sleep. Very often father falls ill and unable to cook fulltime. Family income is not stable. Ladies in the house are home-maker and often goes for work as maid. Living condition is very poor, but very determined.
+- **8.2 Will you recommend this student for this scholarship?:** Yes
+- **8.3 Any other comments you want to share?:** Highly recommend for the scholarship. With all these troubles father wants his daughter wants to graduate and live happy life. Request to consider this case.

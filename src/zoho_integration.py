@@ -334,11 +334,29 @@ SUBFORM_REQUIRED_COLUMNS: dict[str, set[str]] = {
 _SUBROW_RE = re.compile(r'^(.+?) — Row (\d+) — (.+)$')
 
 
+_INLINE_CHECKBOX_RE = re.compile(r"[☐☒☑✓✗]\s*([^☐☒☑✓✗]+?)(?=\s*[☐☒☑✓✗]|\s*$)")
+
+
 def _sanitize_value(value: str, zoho_field: str) -> Any:
     """Coerce an OCR-extracted string value to the Zoho Creator field type."""
-    if not value or value in ("nil", "N/A", "—"):
+    if not value:
+        return ""
+    if value == "N/A":
+        return value
+    if value.lower() in ("nil", "n/a", "na", "none", "—"):
         return ""
     cleaned = value.strip()
+    # Inline checkbox fallback: "☐ Yes ☒ No" → extract the checked option
+    if "☐" in cleaned or "☒" in cleaned:
+        checked_match = re.search(r"☒\s*([^☐☒☑✓✗]+?)(?=\s*[☐☒☑✓✗]|\s*$)", cleaned)
+        if checked_match:
+            opt = checked_match.group(1).strip()
+            if opt.lower() in ("yes", "no"):
+                return opt.capitalize()
+            if opt:
+                return opt
+        # Ambiguous checkbox with no ☒ — can't determine value, skip
+        return ""
     if zoho_field in ZOHO_NUMERIC_FIELDS:
         m = re.search(r'[\d,]+(?:\.\d+)?', cleaned)
         if m:
@@ -357,17 +375,25 @@ def _sanitize_value(value: str, zoho_field: str) -> Any:
             except (ValueError, OverflowError):
                 return ""
         return ""
-    if cleaned.lower() == "yes":
-        return "Yes"
-    if cleaned.lower() == "no":
-        return "No"
+    # Strip trailing period: "No." → "No", "Yes." → "Yes"
+    if cleaned.rstrip(".").lower() in ("yes", "no"):
+        return cleaned.rstrip(".").capitalize()
+    # Heuristic for long-text boolean answers: positive/affirmative → "Yes"
+    if zoho_field in ZOHO_BOOLEAN_FIELDS and len(cleaned) > 10:
+        positive_words = {"yes", "will", "determined", "commit", "sure", "of course", "definitely", "absolutely", "agree"}
+        negative_words = {"no", "not", "can't", "cannot", "won't", "unable", "unlikely", "never"}
+        cleaned_lower = cleaned.lower()
+        pos_score = sum(1 for w in positive_words if w in cleaned_lower)
+        neg_score = sum(1 for w in negative_words if w in cleaned_lower)
+        if pos_score > neg_score:
+            return "Yes"
     return cleaned
 
 
 def _normalize_label(label: str) -> str:
     """Strip section number prefix and normalize whitespace for fuzzy matching."""
     text = re.sub(r'^\d+(\.\d+)*\s+', '', label)
-    text = re.sub(r'\s+/\s*', '/', text)
+    text = re.sub(r'\s*/\s*', '/', text)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
@@ -396,10 +422,10 @@ def _build_creator_payload(result: dict) -> dict:
     for f in fields:
         label = f.get("label", "")
         value = f.get("value", "")
-        if not label or not value:
+        if not label:
             continue
-        if value in ("", "nil", "N/A", "—"):
-            continue
+        if value in ("nil", "—"):
+            value = ""
 
         # 1) Table row: "Table — Row N — Column"
         m = _SUBROW_RE.match(label)
@@ -462,18 +488,28 @@ def _build_creator_payload(result: dict) -> dict:
                     zoho_field = fv
                     break
         if zoho_field:
+            # Dedup: skip empty value if a non-empty one is already set (handles cross-page duplicates)
+            sanitized = _sanitize_value(value, zoho_field)
+            if not sanitized:
+                existing = payload.get(zoho_field)
+                if existing and existing not in ("", None, [], {}):
+                    continue  # keep the non-empty value
             if zoho_field in ZOHO_STRINGLIST_FIELDS:
-                payload[zoho_field] = [_sanitize_value(value, zoho_field)]
+                if sanitized:
+                    payload[zoho_field] = [sanitized]
+                continue
             elif zoho_field in ZOHO_BOOLEAN_FIELDS:
-                sanitized = _sanitize_value(value, zoho_field)
                 if sanitized not in ("Yes", "No"):
-                    logger.warning("Skipping boolean field %s: unexpected value %r", zoho_field, value)
+                    if sanitized:
+                        logger.warning("Skipping boolean field %s: unexpected value %r", zoho_field, value)
                     continue
                 payload[zoho_field] = sanitized
             else:
-                payload[zoho_field] = _sanitize_value(value, zoho_field)
+                payload[zoho_field] = sanitized
         else:
-            logger.warning("Zoho mapping: no match for label %r (value=%r)", label, value)
+            # Suppress warning for known table parents & aggregate prefixes (they are handled structurally)
+            if label not in TABLE_TO_SUBFORM and not any(label.startswith(p) for p in AGGREGATE_MAP):
+                logger.warning("Zoho mapping: no match for label %r (value=%r)", label, value)
 
     # Flush aggregates
     for prefix, info in AGGREGATE_MAP.items():
@@ -495,15 +531,29 @@ def _build_creator_payload(result: dict) -> dict:
     # Flush table subform rows
     for sk, rows in subform_rows.items():
         sorted_rows = [rows[n] for n in sorted(rows)]
-        required = SUBFORM_REQUIRED_COLUMNS.get(sk)
+        required = SUBFORM_REQUIRED_COLUMNS.get(sk, set())
+        # Make required columns dynamic: only enforce columns that exist in at least one row
+        populated_cols: set[str] = set()
+        for r in sorted_rows:
+            for c, v in r.items():
+                if isinstance(v, dict):
+                    if any(v.values()):
+                        populated_cols.add(c)
+                elif v:
+                    populated_cols.add(c)
         if required:
-            # A column might be a string or a dict (for composite Name fields)
+            required = required & populated_cols  # only require what's actually populated
             def has_val(r, col):
                 val = r.get(col)
                 if isinstance(val, dict):
                     return any(val.values())
                 return bool(val)
             sorted_rows = [r for r in sorted_rows if all(has_val(r, c) for c in required)]
+        # Drop rows where all values are N/A or empty (conditional subform tables with parent="No")
+        sorted_rows = [
+            r for r in sorted_rows
+            if any(v not in ("N/A", "", None, 0, 0.0) for v in (r.values() if isinstance(r, dict) else []))
+        ]
         if sorted_rows:
             payload[sk] = sorted_rows
 
@@ -641,6 +691,7 @@ async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest) -> str | 
     Returns the Zoho access token on success (for later use in
     ``_run_pipeline_only``), or ``None`` on failure.
     """
+    dl_t0 = time.time()
     rid = req.record_id
     app_id = req.application_id or ""
     aid = f"  [app={app_id}]" if app_id else ""
@@ -651,7 +702,8 @@ async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest) -> str | 
         await _set_status(job_dir, "oauth", "Zoho OAuth...")
         loop = asyncio.get_running_loop()
         access_token = await loop.run_in_executor(None, _get_zoho_access_token)
-        logger.info("Zoho OAuth token acquired")
+        _t_oauth = time.time() - dl_t0
+        logger.info("Zoho OAuth token acquired (%.1fs)", _t_oauth)
 
         download_dir = job_dir / "downloads"
         download_dir.mkdir(exist_ok=True)
@@ -683,7 +735,8 @@ async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest) -> str | 
                     return None
         downloaded = [results_map[i] for i in sorted(results_map)]
 
-        logger.info("All %d files downloaded", len(downloaded))
+        _t_dl = time.time() - dl_t0
+        logger.info("All %d files downloaded (%.1fs)", len(downloaded), _t_dl)
         await _set_status(job_dir, "downloading", f"Downloaded {len(downloaded)} files")
 
         combined_pdf = job_dir / "combined.pdf"
@@ -694,12 +747,13 @@ async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest) -> str | 
         _page_count = _fitz.open(str(combined_pdf)).page_count
         if _page_count == 0:
             raise RuntimeError(f"Merged PDF has 0 pages — all input files may be unsupported or corrupt")
-        logger.info("Merged PDF created (%d pages, %.0f KB from %d files)", _page_count, pdf_size / 1024, len(downloaded))
+        _t_total_dl = time.time() - dl_t0
+        logger.info("Merged PDF created (%d pages, %.0f KB from %d files) [%.1fs]", _page_count, pdf_size / 1024, len(downloaded), _t_total_dl)
         await _set_status(job_dir, "converting", f"PDF created ({_page_count} pages, {pdf_size/1024:.0f} KB)")
 
         input_pdf = job_dir / "input.pdf"
         combined_pdf.rename(input_pdf)
-        logger.info("Download-prepare done | record=%s%s", rid, aid)
+        logger.info("Download-prepare done | record=%s%s (%.1fs)", rid, aid, _t_total_dl)
         return access_token
 
     except Exception as e:
@@ -736,7 +790,9 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
     ``False`` otherwise.  On failure ``OCR_Status`` in Creator is set to
     ``"failed"`` so the record can be retried.
     """
-    t0 = time.time()
+    _pt: dict[str, float] = {}
+    _tick = time.time()
+    t0 = _tick
     rid = req.record_id
     app_id = req.application_id or ""
     aid = f"  [app={app_id}]" if app_id else ""
@@ -752,6 +808,8 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
         await _set_status(job_dir, "pipeline_start", "Starting extraction pipeline...")
         logger.info("Starting extraction pipeline...")
         await run_pipeline(job_dir, str(input_pdf))
+        _pt["pipeline"] = time.time() - _tick
+        _tick = time.time()
 
         result_path = job_dir / "results" / "result.json"
         ocr_result = None
@@ -766,25 +824,24 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
         pipeline_ok = ocr_result is not None
 
         if ocr_result:
-            # ── Step 1: POST fields to Creator questionnaire ──
+            # ── Steps 1 & 2: POST fields + Supabase upload (parallel I/O) ──
             creator_fields_ok = False
-            await _set_status(job_dir, "zoho_fields", "Writing fields to Home_Visit_Questionnaire...")
-            try:
+            supabase_ok = False
+            await _set_status(job_dir, "zoho_fields", "Writing fields to Creator + Supabase upload...")
+
+            async def _do_zoho():
+                nonlocal creator_fields_ok
+                _zs = time.time()
                 await loop.run_in_executor(
                     None, _update_zoho_creator_fields, access_token, req, ocr_result,
                 )
                 creator_fields_ok = True
-                logger.info("Home_Visit_Questionnaire fields updated | record=%s%s", rid, aid)
-                print(f"  ✓ Creator form updated for {rid}{aid}")
-            except Exception as e:
-                logger.error("Failed to update Questionnaire_Report | record=%s | error=%s%s",
-                    rid, e, aid)
-                print(f"  ⚠ Creator form update failed for {rid}{aid}: {e}")
+                _pt["zoho_fields"] = time.time() - _zs
+                logger.info("Home_Visit_Questionnaire fields updated | record=%s%s (%.1fs)", rid, aid, _pt["zoho_fields"])
 
-            # ── Step 2: Upload PDF to Supabase (independent of Step 1) ──
-            supabase_ok = False
-            await _set_status(job_dir, "supabase_upload", "Uploading PDF to Supabase Storage...")
-            try:
+            async def _do_supabase():
+                nonlocal supabase_ok
+                _ss = time.time()
                 input_pdf_bytes = input_pdf.read_bytes()
                 supabase_path = f"{req.record_id}/{req.record_id}.pdf"
                 await loop.run_in_executor(
@@ -792,10 +849,22 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
                     input_pdf_bytes, "application/pdf",
                 )
                 supabase_ok = True
-                logger.info("Supabase upload complete | record=%s%s", rid, aid)
-            except Exception as sb_err:
-                logger.error("Supabase upload failed | record=%s | error=%s%s",
-                    rid, sb_err, aid)
+                _pt["supabase"] = time.time() - _ss
+                logger.info("Supabase upload complete | record=%s%s (%.1fs)", rid, aid, _pt["supabase"])
+
+            sb_task = asyncio.create_task(_do_supabase())
+            zoho_task = asyncio.create_task(_do_zoho())
+
+            for label, task in [
+                ("Zoho Creator", zoho_task),
+                ("Supabase upload", sb_task),
+            ]:
+                try:
+                    await task
+                    print(f"  ✓ {label} for {rid}{aid}")
+                except Exception as e:
+                    logger.error("%s failed | record=%s | error=%s%s", label, rid, e, aid)
+                    print(f"  ⚠ {label} failed for {rid}{aid}: {e}")
 
             # ── Step 3: Update OCR_Status based on combined outcome ──
             status_to_set = "updated"
@@ -813,6 +882,8 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
                 await loop.run_in_executor(
                     None, _update_zoho_creator, access_token, req, status_to_set,
                 )
+                _pt["ocr_status"] = time.time() - _tick
+                _tick = time.time()
                 logger.info("Zoho Creator OCR_Status=%s | record=%s%s",
                     status_to_set, rid, aid)
                 print(f"  ✓ OCR_Status set to '{status_to_set}' for {rid}{aid}")
@@ -833,6 +904,13 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
                 logger.error("Zoho Creator status=failed update error | record=%s | error=%s%s",
                     rid, zoho_err, aid)
             await _set_status(job_dir, "error", "OCR pipeline failed — status set to failed")
+
+        logger.info(
+            "PIPELINE TIMING | pipeline=%.1fs zoho_fields=%.1fs supabase=%.1fs ocr_status=%.1fs total=%.1fs  |  %s",
+            _pt.get("pipeline", 0), _pt.get("zoho_fields", 0),
+            _pt.get("supabase", 0), _pt.get("ocr_status", 0),
+            time.time() - t0, rid,
+        )
 
         elapsed = round(time.time() - t0, 1)
 
@@ -976,7 +1054,7 @@ async def process_pending_on_startup(base_dir: Path) -> None:
     app_link_name = os.environ.get("ZOHO_POLL_APP_LINK_NAME", "iatc-selection-one-app")
     report_link_name = os.environ.get("ZOHO_POLL_REPORT_LINK_NAME", "Volunteer_Home_Visited_Form_Report")
     file_field_link_name = os.environ.get("ZOHO_POLL_FILE_FIELD_LINK_NAME", "Upload_Home_Visit_Form")
-    max_concurrent = int(os.environ.get("ZOHO_POLL_MAX_CONCURRENT", "5"))
+    max_concurrent = int(os.environ.get("ZOHO_POLL_MAX_CONCURRENT", "10"))
     criteria = os.environ.get("ZOHO_POLL_CRITERIA",'(OCR_Status=="yes")')
                             #   '(OCR_Status==null || OCR_Status=="") && OCR_Status!="updated"')
 

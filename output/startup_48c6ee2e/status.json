@@ -1,0 +1,63 @@
+{
+  "status": "error",
+  "message": "OCR pipeline failed \u2014 status set to failed",
+  "log": [
+    {
+      "t": "02:52:11",
+      "msg": "Auto: TEMP-2026-9491 (1 files)"
+    },
+    {
+      "t": "02:52:11",
+      "msg": "Downloading for TEMP-2026-9491"
+    },
+    {
+      "t": "02:52:11",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "02:52:11",
+      "msg": "Downloading 1 files..."
+    },
+    {
+      "t": "02:52:16",
+      "msg": "Downloaded 1 files"
+    },
+    {
+      "t": "02:52:16",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "02:52:16",
+      "msg": "PDF created (6 pages, 892 KB)"
+    },
+    {
+      "t": "02:52:16",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "02:52:16",
+      "msg": "Preprocessing PDF (TEMP-2026-9491)..."
+    },
+    {
+      "t": "02:52:20",
+      "msg": "Preprocessing done."
+    },
+    {
+      "t": "02:52:20",
+      "msg": "Running OCR + LLM extraction (OpenAICompatible)..."
+    },
+    {
+      "t": "02:52:28",
+      "msg": "NotFoundError: 404 page not found"
+    },
+    {
+      "t": "02:52:28",
+      "msg": "Marking record as failed..."
+    },
+    {
+      "t": "02:52:29",
+      "msg": "OCR pipeline failed \u2014 status set to failed"
+    }
+  ],
+  "pages": 6
+}
