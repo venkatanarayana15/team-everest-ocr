@@ -454,7 +454,7 @@ def test_classify_from_text_page4():
 
 def test_classify_from_text_page5():
     classifier = PageClassifier()
-    text = "5.1 Does the student have any health issues?\n5.2 If yes, list the health issues: N/A\n6.1 Will you study college for three years without any obstacle?\n6.2 If we have a training program within 15 km from your home, can you come?\n6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays?"
+    text = "5.1 Does the student have any health issues?\n5.2 If yes, list the health issues: N/A\n4.8 If the college fee is higher, how will you manage it?\n6.1 Will you study college for three years without any obstacle?"
     result = classifier.classify_from_text(text)
     assert result.page_number == 5
     assert result.confidence > 50
@@ -463,7 +463,7 @@ def test_classify_from_text_page5():
 
 def test_classify_from_text_page6():
     classifier = PageClassifier()
-    text = "7.1 Has the student received or applied for any other scholarships for their UG degree?\n8.1 What is your opinion about the student, their family members, and their living condition?\n8.2 Will you recommend this student for this scholarship?\nVolunteer Observation"
+    text = "6.2 If we have a training program within 15 km from your home, can you come?\n6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays?\n7.1 Has the student received or applied for any other scholarships for their UG degree?\n8.1 What is your opinion about the student, their family members, and their living condition?\n8.2 Will you recommend this student for this scholarship?\nVolunteer Observation"
     result = classifier.classify_from_text(text)
     assert result.page_number == 6
     assert result.confidence > 50

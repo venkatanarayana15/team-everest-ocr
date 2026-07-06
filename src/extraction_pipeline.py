@@ -72,8 +72,8 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "5.2 If yes, list the health issues", "section_number": 5, "page": 5},
     # Section 6 — Student Commitment
     {"label": "6.1 Will you study college for three years without any obstacle?", "section_number": 6, "page": 5},
-    {"label": "6.2 If we have a training program within 15 km from your home, can you come?", "section_number": 6, "page": 5},
-    {"label": "6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?", "section_number": 6, "page": 5},
+    {"label": "6.2 If we have a training program within 15 km from your home, can you come?", "section_number": 6, "page": 6},
+    {"label": "6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?", "section_number": 6, "page": 6},
     # ── Page 6 ──
     # Section 7 — Scholarship Information
     {"label": "7.1 Has the student received or applied for any other scholarships for their UG degree?", "section_number": 7, "page": 6},

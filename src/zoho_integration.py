@@ -160,7 +160,7 @@ def _upload_to_supabase(bucket: str, path: str, data: bytes, content_type: str) 
         "x-upsert": "true",
         "Content-Type": content_type,
     }
-    request = urllib.request.Request(url, data=data, headers=headers, method='PUT')
+    request = urllib.request.Request(url, data=data, headers=headers, method='POST')
     with _urlopen_with_retry(request, timeout=30) as resp:
         resp.read()
 
@@ -343,6 +343,12 @@ ZOHO_STRINGLIST_FIELDS: set[str] = {
 # Fields that accept only specific enum values — any other value is rejected to avoid Creator validation errors
 ZOHO_ENUM_FIELDS: dict[str, set[str]] = {
     "Gender": {"Male", "Female", "Others"},
+    "Family_Status": {"Single Parent", "Parentless", "Having both parents"},
+    "House_Ownership": {"Own", "Rented"},
+    "Type_of_Bedroom": {"Separate Bedroom", "No Separate Bedroom"},
+    "Bathroom": {"Separate", "Common for Apartment"},
+    "Income_Type": {"Monthly", "Daily", "Weekly", "Ad-Hoc"},
+    "Will_you_recommend_this_student_for_this_scholarship": {"Yes", "No", "Not Sure"},
 }
 
 # Fields that expect Yes/No values — reject any non-boolean value to avoid Creator validation errors
@@ -401,7 +407,7 @@ def _sanitize_value(value: str, zoho_field: str) -> Any:
         for v in valid:
             if cleaned.lower() == v.lower():
                 return v
-        logger.warning("Rejecting value for enum field %s: %r (valid: %s)", zoho_field, cleaned, sorted(valid))
+        logger.warning("FIELD  %s=%r  ✗ rejected — not in %s", zoho_field, cleaned, sorted(valid))
         return ""
     if cleaned.lower() == "yes":
         return "Yes"
@@ -538,11 +544,16 @@ def _build_creator_payload(result: dict) -> dict:
             elif zoho_field in ZOHO_BOOLEAN_FIELDS:
                 sanitized = _sanitize_value(value, zoho_field)
                 if sanitized not in ("Yes", "No"):
-                    logger.warning("Skipping boolean field %s: unexpected value %r", zoho_field, value)
+                    logger.warning("FIELD  %s=%r  ✗ boolean expected Yes/No", zoho_field, value)
                     continue
                 payload[zoho_field] = sanitized
             else:
-                payload[zoho_field] = _sanitize_value(value, zoho_field)
+                sanitized = _sanitize_value(value, zoho_field)
+                if isinstance(sanitized, str):
+                    sanitized = OPTION_VALUE_REPLACEMENTS.get(sanitized, sanitized)
+                if not sanitized and zoho_field in ZOHO_ENUM_FIELDS:
+                    continue
+                payload[zoho_field] = sanitized
         else:
             # Suppress warnings for table parent labels and aggregate prefixes
             # since their values are handled by the table/aggregate flows.
@@ -961,7 +972,7 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
             await _set_status(job_dir, "supabase_upload", "Uploading PDF to Supabase Storage...")
             try:
                 input_pdf_bytes = input_pdf.read_bytes()
-                supabase_path = f"{app_identifier}/{app_identifier}.pdf"
+                supabase_path = f"{rid}/{rid}.pdf"
                 await loop.run_in_executor(
                     None, _upload_to_supabase, req.bucket, supabase_path,
                     input_pdf_bytes, "application/pdf",

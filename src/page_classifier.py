@@ -41,9 +41,9 @@ PAGE_SIGNATURES: dict[int, list[str]] = {
         "health issues", "college fee is higher",
         "do not receive this scholarship",
         "study college for three years",
-        "training program", "skill development",
     ],
     6: [
+        "training program", "skill development",
         "other scholarships", "opinion about the student",
         "recommend this student", "Volunteer Observation",
         "comments",
@@ -64,8 +64,8 @@ FIELD_NUMBER_PATTERNS: dict[int, list[re.Pattern]] = {
     2: [re.compile(r"^\s*2\.\d"), re.compile(r"^\s*3\.\d")],
     3: [re.compile(r"^\s*3\.\d"), re.compile(r"^\s*4\.\d")],
     4: [re.compile(r"^\s*4\.\d")],
-    5: [re.compile(r"^\s*4\.\d"), re.compile(r"^\s*5\.\d"), re.compile(r"^\s*6\.\d")],
-    6: [re.compile(r"^\s*7\.\d"), re.compile(r"^\s*8\.\d")],
+     5: [re.compile(r"^\s*4\.\d"), re.compile(r"^\s*5\.\d")],
+     6: [re.compile(r"^\s*6\.\d"), re.compile(r"^\s*7\.\d"), re.compile(r"^\s*8\.\d")],
 }
 
 

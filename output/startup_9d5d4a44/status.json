@@ -1,0 +1,83 @@
+{
+  "status": "done",
+  "message": "OCR complete \u2014 Zoho record updated",
+  "log": [
+    {
+      "t": "09:35:08",
+      "msg": "Auto: TEMP-2026-8533 (1 files)"
+    },
+    {
+      "t": "09:35:08",
+      "msg": "Downloading for TEMP-2026-8533"
+    },
+    {
+      "t": "09:35:08",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "09:35:08",
+      "msg": "Downloading 1 files..."
+    },
+    {
+      "t": "09:35:11",
+      "msg": "Downloaded 1 files"
+    },
+    {
+      "t": "09:35:11",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "09:35:11",
+      "msg": "PDF created (6 pages, 1904 KB)"
+    },
+    {
+      "t": "09:35:11",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "09:35:12",
+      "msg": "Preprocessing PDF (TEMP-2026-8533)..."
+    },
+    {
+      "t": "09:35:19",
+      "msg": "Preprocessing done."
+    },
+    {
+      "t": "09:35:19",
+      "msg": "Running Tesseract + primary extraction (OpenAICompatible)..."
+    },
+    {
+      "t": "09:35:48",
+      "msg": "Merged 63 fields."
+    },
+    {
+      "t": "09:35:48",
+      "msg": "Filling missing template fields..."
+    },
+    {
+      "t": "09:35:48",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "09:35:48",
+      "msg": "Extraction complete. Results ready for download."
+    },
+    {
+      "t": "09:35:48",
+      "msg": "Writing fields to Home_Visit_Questionnaire..."
+    },
+    {
+      "t": "09:35:49",
+      "msg": "Uploading PDF to Supabase Storage..."
+    },
+    {
+      "t": "09:35:50",
+      "msg": "Setting OCR_Status=updated..."
+    },
+    {
+      "t": "09:35:51",
+      "msg": "OCR complete \u2014 Zoho record updated"
+    }
+  ],
+  "pages": 6
+}
