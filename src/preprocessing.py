@@ -48,8 +48,9 @@ def adaptive_threshold(image: np.ndarray, block_size: int = 15, c: int = 2) -> n
     )
 
 
-def preprocess(image: np.ndarray, config: Config) -> np.ndarray:
+def preprocess(image: np.ndarray, config: Config, is_digital: bool = False) -> np.ndarray:
     gray = to_grayscale(image)
     gray = deskew(gray, config.deskew_max_angle)
-    gray = denoise(gray, config.denoise_strength)
+    if not is_digital:
+        gray = denoise(gray, config.denoise_strength)
     return adaptive_threshold(gray, config.binarization_block_size, config.binarization_c)

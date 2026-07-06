@@ -11,3 +11,5 @@ class Config:
     ocr_backend: str = "tesseract"
     max_image_width: int = 1200
     bbox_render_dpi: int = 150
+    tesseract_workers: int = 4
+    tesseract_timeout: int = 120

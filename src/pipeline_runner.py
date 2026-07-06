@@ -1,7 +1,7 @@
 import asyncio
+import hashlib
 import json
 import logging
-import pickle
 import re
 import time
 from pathlib import Path
@@ -9,6 +9,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from src.backends import WordBox
 from src.config import Config
 from src.extraction_pipeline import ExtractionPipeline, KNOWN_TEMPLATE_FIELDS, StructuredField
 from src.model_client import get_model_client
@@ -20,6 +21,39 @@ from src.status import (
 )
 
 logger = logging.getLogger(__name__)
+
+_BBOX_CACHE_KEY: str | None = None
+
+
+def _get_bbox_cache_key() -> str:
+    global _BBOX_CACHE_KEY
+    if _BBOX_CACHE_KEY is not None:
+        return _BBOX_CACHE_KEY
+    data_path = Path("bin/eng.traineddata")
+    if data_path.exists():
+        _BBOX_CACHE_KEY = hashlib.md5(data_path.read_bytes()).hexdigest()
+    else:
+        _BBOX_CACHE_KEY = ""
+    return _BBOX_CACHE_KEY
+
+
+def _load_bbox_cache(cache_path: Path, key: str) -> list[WordBox] | None:
+    try:
+        with open(cache_path) as f:
+            cache = json.load(f)
+        if cache.get("key") == key:
+            return [WordBox(**wb) for wb in cache["data"]]
+    except Exception:
+        pass
+    return None
+
+
+def _save_bbox_cache(cache_path: Path, key: str, data: list[WordBox]) -> None:
+    try:
+        with open(cache_path, "w") as f:
+            json.dump({"key": key, "data": [wb.__dict__ for wb in data]}, f)
+    except Exception as e:
+        logger.warning("Failed to save bbox cache: %s", e)
 
 
 def _validate_pdf(path: str) -> tuple[bool, str]:
@@ -114,12 +148,14 @@ async def _set_batch_pdf_status(job_dir: Path, pdf_name: str, status: str, pct: 
 async def _wait_for_memory(job_dir: Path, min_free_mem_mb: int = 512, timeout: int = 3600) -> bool:
     import psutil
     start = time.time()
+    wait = 1.0
     while time.time() - start < timeout:
         free = psutil.virtual_memory().available / (1024 * 1024)
         if free >= min_free_mem_mb:
             return True
         logger.warning("Low memory: %.0f MB free (need %d MB). Delaying job...", free, min_free_mem_mb)
-        await asyncio.sleep(5)
+        await asyncio.sleep(wait)
+        wait = min(wait * 2, 60.0)
     await _set_status(job_dir, "error",
         f"Timed out waiting for memory (>{timeout}s, "
         f"free={free:.0f} MB < {min_free_mem_mb} MB). Try again later.")
@@ -224,20 +260,23 @@ async def _run_core_extraction(
         loop = asyncio.get_running_loop()
 
         async def _run_tesseract():
-            bbox_cache = job_dir / "bbox_cache.pkl"
-            if use_cache and bbox_cache.exists():
-                with open(bbox_cache, "rb") as f:
-                    return pickle.load(f)
+            bbox_cache = job_dir / "bbox_cache.json"
+            cache_key = _get_bbox_cache_key()
+            if use_cache and bbox_cache.exists() and cache_key:
+                cached = _load_bbox_cache(bbox_cache, cache_key)
+                if cached is not None:
+                    return cached
             wb = await loop.run_in_executor(None, pipeline.run_bbox_images, processed_images)
-            if use_cache:
-                with open(bbox_cache, "wb") as f:
-                    pickle.dump(wb, f)
+            if use_cache and cache_key:
+                _save_bbox_cache(bbox_cache, cache_key, wb)
             return wb
 
         tesseract_task = asyncio.create_task(_run_tesseract())
         llm_task = asyncio.create_task(pipeline.run_primary_extraction(pdf_path, processed_images))
 
         word_boxes = await tesseract_task
+        if not word_boxes:
+            logger.warning("Tesseract returned no word boxes — LLM extraction may produce degraded results")
         model_data, primary_token_usage = await llm_task
 
         _save_tesseract_data(job_dir, word_boxes)
@@ -291,15 +330,15 @@ async def _run_core_extraction(
     }
 
 
-async def _save_to_db(job_dir: Path) -> None:
+async def _save_to_db(job_dir: Path) -> bool:
     results_path = job_dir / "results" / "result.json"
     if not results_path.exists():
-        return
+        return True
     try:
         from src.database import upsert_ocr_document
     except ImportError:
         logger.info("DB module not available, skipping auto-save")
-        return
+        return True
 
     try:
         with open(results_path) as f:
@@ -328,8 +367,10 @@ async def _save_to_db(job_dir: Path) -> None:
             result_json=result_data,
         )
         logger.info("Auto-save to DB succeeded for job %s", job_dir.name)
+        return True
     except Exception as e:
         logger.warning("Auto-save to DB failed for job %s: %s", job_dir.name, e)
+        return False
 
 
 async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
@@ -378,9 +419,13 @@ async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
         _save_results(job_dir, res, job_dir.name)
         _print_field_report(job_dir, res)
         await _set_status(job_dir, "done", "Extraction complete. Results ready for download.")
-        await _save_to_db(job_dir)
+        _db_ok = await _save_to_db(job_dir)
+        if not _db_ok:
+            await _set_status(job_dir, "done", "Extraction complete but DB save failed")
+            logger.error("Pipeline extraction OK but DB save failed | job=%s", job_dir.name)
         print(f"{'='*80}")
-        print(f"  SUMMARY: 1 file processed — 1 succeeded, 0 failed")
+        _ok_label = "1 succeeded" if _db_ok else "1 extracted (DB save failed)"
+        print(f"  SUMMARY: 1 file processed — {_ok_label}, 0 failed")
         print(f"{'='*80}\n")
     except Exception as e:
         logger.exception("Pipeline failed")
