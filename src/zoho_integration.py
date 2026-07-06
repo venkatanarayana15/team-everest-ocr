@@ -104,6 +104,23 @@ def _get_zoho_access_token() -> str:
         return result["access_token"]
 
 
+async def _start_periodic_token_refresh() -> None:
+    """Background task: refresh Zoho OAuth token every 58 minutes.
+
+    The default Zoho token expiry is 3600 s (60 min).  We refresh at 3480 s
+    (58 min) to stay well within the window and avoid HTTP 400 errors from
+    stale tokens on concurrent requests.
+    """
+    loop = asyncio.get_running_loop()
+    while True:
+        try:
+            await loop.run_in_executor(None, _get_zoho_access_token)
+            logger.info("Periodic Zoho token refreshed (next in 58m)")
+        except Exception as e:
+            logger.warning("Periodic Zoho token refresh failed — %s", e)
+        await asyncio.sleep(58 * 60)
+
+
 def _download_zoho_file(access_token: str, req: OcrExtractRequest, file_name: str) -> bytes:
     encoded_path = urllib.parse.quote(file_name, safe='')
     owner = req.zoho_app_owner
@@ -170,7 +187,8 @@ FIELD_TO_ZOHO: dict[str, str] = {
     "Co-Volunteer Name": "Co_Volunteer_Name",
     "Date of Visit": "Date_of_Visit",
     # Section 1 — Student Profile
-    "1.1 Application ID": "Application_ID",
+    # NOTE: "1.1 Application ID" → Application_ID is handled separately in
+    # _update_zoho_creator_fields (lookup field, only set when numeric ID available).
     "1.2 Student Full Name": "Student_Full_Name",
     "1.3 Gender": "Gender",
     # Section 2 — Family Background
@@ -214,6 +232,20 @@ AGGREGATE_MAP: dict[str, dict[str, str]] = {
     "3.3 Type of Ceiling": {"target": "Type_of_Ceiling", "type": "text"},
     "3.6 Kitchen Type": {"target": "Kitchen_Type", "type": "text"},
     "4.1 Assets at Home": {"target": "Assets_at_Home_tick_all_that_apply", "type": "stringlist"},
+}
+
+# Map extracted option names to exact values expected by Zoho Creator
+# LLM may extract checkbox option text with variations (e.g. "Asbestos / Sheet" vs "Asbestos")
+OPTION_VALUE_REPLACEMENTS: dict[str, str] = {
+    # Type of Ceiling — Zoho options: Roof (Kurai), Tiled, Asbestos, Concrete
+    "Roof": "Roof (Kurai)",
+    "Asbestos / Sheet": "Asbestos",
+    "Asbestos sheet": "Asbestos",
+    "Asbestos Sheet": "Asbestos",
+    "Asbestos ": "Asbestos",
+    # Type of Home — Zoho options: Individual, Private Apartment, Housing Board, Line House, Others
+    # Kitchen Type — Zoho options: Separate Kitchen, Hall with Kitchen
+    # Assets at Home — no mapping needed (stringlist, all options valid)
 }
 
 # Table rows: OCR produces "{table_name} — Row {n} — {column}"
@@ -308,6 +340,11 @@ ZOHO_STRINGLIST_FIELDS: set[str] = {
     "Government_ID_Verified_Ration_Card_Aadhaar_Driving_Licence_Voter_ID",
 }
 
+# Fields that accept only specific enum values — any other value is rejected to avoid Creator validation errors
+ZOHO_ENUM_FIELDS: dict[str, set[str]] = {
+    "Gender": {"Male", "Female", "Others"},
+}
+
 # Fields that expect Yes/No values — reject any non-boolean value to avoid Creator validation errors
 ZOHO_BOOLEAN_FIELDS: set[str] = {
     "Is_Father_Mother_photograph_kept_at_home",
@@ -332,6 +369,7 @@ SUBFORM_REQUIRED_COLUMNS: dict[str, set[str]] = {
 }
 
 _SUBROW_RE = re.compile(r'^(.+?) — Row (\d+) — (.+)$')
+_FLAT_TABLE_RE = re.compile(r'^(.+?) — (.+)$')  # "Table — Column" without Row N
 
 
 def _sanitize_value(value: str, zoho_field: str) -> Any:
@@ -356,6 +394,14 @@ def _sanitize_value(value: str, zoho_field: str) -> Any:
                 return float(cleaned) if cleaned else ""
             except (ValueError, OverflowError):
                 return ""
+        return ""
+    if zoho_field in ZOHO_ENUM_FIELDS:
+        valid = ZOHO_ENUM_FIELDS[zoho_field]
+        # Case-insensitive match
+        for v in valid:
+            if cleaned.lower() == v.lower():
+                return v
+        logger.warning("Rejecting value for enum field %s: %r (valid: %s)", zoho_field, cleaned, sorted(valid))
         return ""
     if cleaned.lower() == "yes":
         return "Yes"
@@ -426,11 +472,36 @@ def _build_creator_payload(result: dict) -> dict:
                         subform_rows[sk][row_num][zoho_col] = sanitized_val
             continue
 
+        # 1b) Flat table row: "Table — Column" (no Row N — LLM sometimes omits it)
+        if not m:
+            fm = _FLAT_TABLE_RE.match(label)
+            if fm:
+                table_name = fm.group(1).strip()
+                col_name = fm.group(2).strip()
+                table_info = TABLE_TO_SUBFORM.get(table_name)
+                if table_info:
+                    sk = table_info["subform"]
+                    col_map = table_info["columns"]
+                    # Try direct column name match first, then fuzzy match
+                    zoho_col = col_map.get(col_name)
+                    if zoho_col:
+                        sanitized_val = _sanitize_value(value, zoho_col)
+                        subform_rows.setdefault(sk, {})
+                        subform_rows[sk].setdefault(1, {})
+                        if sk == "Family_Members_Table" and zoho_col == "Name":
+                            subform_rows[sk][1][zoho_col] = {
+                                "first_name": sanitized_val,
+                                "last_name": ""
+                            }
+                        else:
+                            subform_rows[sk][1][zoho_col] = sanitized_val
+                        continue
+
         # 2) Aggregate: prefix with trailing " — "
         matched_agg = False
         for prefix in agg_prefixes:
             if label.startswith(prefix + " — "):
-                option = label[len(prefix) + 3:]
+                option = label[len(prefix) + 3:].strip()
                 if option and value in ("✓", "1", "yes", "Yes", "true", "True", "Y", "y"):
                     aggregates.setdefault(prefix, []).append(option)
                 matched_agg = True
@@ -473,18 +544,24 @@ def _build_creator_payload(result: dict) -> dict:
             else:
                 payload[zoho_field] = _sanitize_value(value, zoho_field)
         else:
-            logger.warning("Zoho mapping: no match for label %r (value=%r)", label, value)
+            # Suppress warnings for table parent labels and aggregate prefixes
+            # since their values are handled by the table/aggregate flows.
+            is_table_parent = any(label == tk for tk in TABLE_TO_SUBFORM)
+            is_agg_parent = any(label == ap for ap in AGGREGATE_MAP)
+            if not is_table_parent and not is_agg_parent:
+                logger.warning("Zoho mapping: no match for label %r (value=%r)", label, value)
 
     # Flush aggregates
     for prefix, info in AGGREGATE_MAP.items():
-        if prefix in aggregates:
-            target = info["target"]
-            options = aggregates[prefix]
-            if info.get("type") == "stringlist":
-                payload[target] = sorted(options)
-            else:
-                payload[target] = ", ".join(sorted(options))
-        elif target := info.get("target"):
+      if prefix in aggregates:
+        target = info["target"]
+        options = aggregates[prefix]
+        if info.get("type") == "stringlist":
+          payload[target] = [OPTION_VALUE_REPLACEMENTS.get(opt, opt) for opt in sorted(options)]
+        elif options:
+          val = sorted(options)[0]
+          payload[target] = OPTION_VALUE_REPLACEMENTS.get(val, val)
+      elif target := info.get("target"):
             # If no individual options but a flat fallback was set via direct mapping,
             # convert STRINGLIST flat value to array
             if target in ZOHO_STRINGLIST_FIELDS and target in payload:
@@ -517,6 +594,41 @@ def _build_creator_payload(result: dict) -> dict:
     return payload
 
 
+def _query_numeric_app_id_from_creator(
+    access_token: str,
+    app_owner: str,
+    app_link_name: str,
+    report_link_name: str,
+    record_id: str,
+) -> str | None:
+    """Query Volunteer_Home_Visited_Form_Report to resolve the parent numeric Applications ID."""
+    try:
+        import urllib.parse
+        criteria = f'(Applicant_ID_String == "{record_id}")'
+        encoded_criteria = urllib.parse.quote(criteria)
+        url = (
+            f"https://www.zohoapis.com/creator/v2.1/data/{app_owner}/{app_link_name}/"
+            f"report/{report_link_name}?criteria={encoded_criteria}"
+        )
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json",
+        }
+        request = urllib.request.Request(url, headers=headers, method='GET')
+        with _urlopen_with_retry(request, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+            records = data.get("data", [])
+            if records:
+                app_id_obj = records[0].get("Applicant_ID") or {}
+                if isinstance(app_id_obj, dict):
+                    num_id = str(app_id_obj.get("ID") or "")
+                    if num_id.isdigit():
+                        return num_id
+    except Exception as e:
+        logger.warning("Failed to query numeric app ID for %s: %s", record_id, e)
+    return None
+
+
 def _update_zoho_creator_fields(
     access_token: str,
     req: OcrExtractRequest,
@@ -524,14 +636,34 @@ def _update_zoho_creator_fields(
 ) -> None:
     """POST extracted field values as a new row in Home_Visit_Questionnaire."""
     payload = _build_creator_payload(result)
-    # Application_ID is a lookup field — OCR extracts the display name which Zoho rejects.
-    # Only set it from the request's numeric lookup ID; strip any OCR-derived value otherwise.
+    # Application_ID is a lookup field that expects the numeric record ID
+    # of the parent Applications record, NOT the display Applicant_ID string.
+    # The lookup relationship is already established when the questionnaire
+    # record was created — only re-set it when we have a numeric ID.
     payload.pop("Application_ID", None)
-    if req.application_id:
-        payload["Application_ID"] = req.application_id
-        logger.info("application_id=%s injected into Creator payload | record=%s", req.application_id, req.record_id)
+    app_id = req.application_id or result.get("application_id", "")
+    if app_id and not app_id.isdigit():
+        logger.info("Resolving numeric Application_ID for %s from Creator report...", app_id)
+        resolved_id = _query_numeric_app_id_from_creator(
+            access_token,
+            req.zoho_app_owner,
+            req.zoho_app_link_name,
+            req.zoho_report_link_name,
+            app_id
+        )
+        if resolved_id:
+            app_id = resolved_id
+            logger.info("Successfully resolved numeric Application_ID: %s", app_id)
+
+    if app_id and app_id.isdigit():
+        payload["Application_ID"] = app_id
+        logger.info("Application_ID=%s set in Creator payload | record=%s",
+                     app_id, req.record_id)
+    elif app_id:
+        logger.warning("Application_ID=%s is non-numeric (display name, not lookup ID) — omitted from payload | record=%s",
+                        app_id, req.record_id)
     else:
-        logger.warning("No application_id on request — Application_ID omitted (lookup field) | record=%s", req.record_id)
+        logger.warning("No application_id available (request or OCR) — Application_ID omitted | record=%s", req.record_id)
     if not payload:
         print(f"\n{'='*80}")
         print(f"  ZOHO CREATOR UPDATE: No fields to write | record={req.record_id}")
@@ -546,18 +678,32 @@ def _update_zoho_creator_fields(
     table_items = [(k, len(v)) for k, v in payload.items() if isinstance(v, list) and v and isinstance(v[0], dict)]
     multi_items = [(k, v) for k, v in payload.items() if isinstance(v, list) and (not v or not isinstance(v[0], dict))]
 
-    print(f"\n{'='*80}")
-    print(f"  ZOHO CREATOR UPDATE | record={req.record_id}")
-    print(f"  Target: {req.questionnaire_report_link_name}  |  {len(payload)} fields  |  {simple_count} simple + {subform_count} subform")
-    print(f"{'─'*80}")
+    print(f"\n\033[95m\033[1m┌{'─'*78}┐\033[0m")
+    print(f"\033[95m\033[1m│\033[0m  \033[1mZOHO CREATOR UPDATE\033[0m  •  record={req.record_id}")
+    print(f"\033[95m\033[1m│\033[0m  Target: \033[1m{req.questionnaire_report_link_name}\033[0m  •  {len(payload)} fields ({simple_count} simple, {subform_count} subform)")
+    print(f"\033[95m\033[1m├{'─'*78}┤\033[0m")
     if simple_keys:
-        print(f"  Simple: {', '.join(simple_keys)}")
+        print(f"\033[95m\033[1m│\033[0m  \033[1mSimple fields:\033[0m {', '.join(simple_keys)}")
     for name, count in table_items:
-        print(f"  Table:  {name} ({count} rows)")
+        print(f"\033[95m\033[1m│\033[0m  \033[1mTable subform:\033[0m {name} ({count} rows)")
     for name, vals in multi_items:
         display = ", ".join(str(x) for x in vals) if vals else "(empty)"
-        print(f"  List:   {name}: [{display}]")
-    print(f"{'─'*80}")
+        print(f"\033[95m\033[1m│\033[0m  \033[1mMulti-select list:\033[0m {name} -> \033[92m[{display}]\033[0m")
+    print(f"\033[95m\033[1m└{'─'*78}┘\033[0m")
+
+    # ── Verbose payload dump for debugging ────────────────────────────────
+    logger.info("Creator PAYLOAD | record=%s | %d fields", req.record_id, len(payload))
+    for pk, pv in sorted(payload.items()):
+        if isinstance(pv, list):
+            if pv and isinstance(pv[0], dict):
+                logger.info("  PAYLOAD  %s (=%d subform rows)", pk, len(pv))
+                for ri, row in enumerate(pv):
+                    logger.info("    row[%d]: %s", ri, row)
+            else:
+                logger.info("  PAYLOAD  %s=[%s]", pk, ", ".join(str(x) for x in pv))
+        else:
+            logger.info("  PAYLOAD  %s=%r", pk, pv)
+    # ───────────────────────────────────────────────────────────────────────
 
     logger.info(
         "Writing %d fields to Home_Visit_Questionnaire | record=%s",
@@ -589,14 +735,25 @@ def _update_zoho_creator_fields(
                 with _urlopen_with_retry(request, timeout=30) as resp:
                     body = resp.read().decode()
             else:
+                # Log the response body for diagnostic purposes
+                _resp_body = e.read().decode()[:500] if hasattr(e, 'read') else str(e)[:500]
+                logger.warning("Creator POST retry failed | record=%s | status=%s | body=%s",
+                               req.record_id, e.code, _resp_body)
                 raise
         result = json.loads(body)
         code = result.get("code", 3000)
         if code not in (2000, 3000):
             err_msg = result.get("error", str(result))
             err_full = result.get("message", "")
+            # Build a field-level summary from the payload to help diagnose
+            field_summary = ", ".join(
+                f"{k}={repr(v)[:80]}" for k, v in payload.items()
+                if not k.startswith("_")
+            )
             raise RuntimeError(
-                f"Zoho Creator POST failed (code={code}): {err_msg} | message={err_full} | "
+                f"Zoho Creator rejected fields (code={code}): {err_msg} | "
+                f"message={err_full} | "
+                f"payload_fields=[{field_summary}] | "
                 f"full_body={body[:1000]}"
             )
         logger.info("Creator POST response | record=%s | status=200 | body=%s", req.record_id, body[:500])
@@ -677,7 +834,11 @@ async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest) -> str | 
                     idx, local_path = future.result()
                     results_map[idx] = local_path
                 except Exception as e:
-                    msg = f"Download failed for {fn}: {e}"
+                    msg = (
+                        f"Download failed for '{fn}' from Zoho Creator "
+                        f"(record={req.record_id}, file_field={req.file_field_link_name}, "
+                        f"application_id={req.application_id or 'N/A'}): {e}"
+                    )
                     logger.error(msg)
                     await _set_status(job_dir, "error", msg)
                     return None
@@ -703,9 +864,12 @@ async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest) -> str | 
         return access_token
 
     except Exception as e:
-        logger.exception("Download-prepare failed | record=%s%s", rid, aid)
+        logger.exception("Download-prepare failed | record=%s | app=%s | files=%d%s",
+                         rid, req.application_id, len(req.file_names), aid)
         await _set_status(job_dir, "error", f"Download/prepare failed: {e}")
-        print(f"  ✗ Download-prepare failed for {rid}{aid}: {e}")
+        print(f"  ✗ Download-prepare failed for {rid}"
+              f"{' (app=' + req.application_id + ')' if req.application_id else ''}: "
+              f"could not fetch {len(req.file_names)} file(s) from Zoho — {e}")
         return None
 
 
@@ -758,7 +922,13 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
         if result_path.exists():
             with open(result_path) as _f:
                 ocr_result = json.load(_f)
-            ocr_result["application_id"] = req.application_id
+            # Use extracted application_id from OCR if not provided in request
+            extracted_app_id = ""
+            for f in ocr_result.get("fields", []):
+                if f.get("label") == "1.1 Application ID":
+                    extracted_app_id = f.get("value", "")
+                    break
+            ocr_result["application_id"] = req.application_id or extracted_app_id or ""
             ocr_result["record_id"] = req.record_id
             with open(result_path, "w") as _f:
                 json.dump(ocr_result, _f, indent=2)
@@ -766,6 +936,8 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
         pipeline_ok = ocr_result is not None
 
         if ocr_result:
+            app_identifier = ocr_result.get("application_id") or rid
+
             # ── Step 1: POST fields to Creator questionnaire ──
             creator_fields_ok = False
             await _set_status(job_dir, "zoho_fields", "Writing fields to Home_Visit_Questionnaire...")
@@ -780,28 +952,33 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
                 logger.error("Failed to update Questionnaire_Report | record=%s | error=%s%s",
                     rid, e, aid)
                 print(f"  ⚠ Creator form update failed for {rid}{aid}: {e}")
+                if "Invalid column value" in str(e):
+                    print(f"    └─ Hint: check extracted field values match Zoho field types "
+                          f"(enum, numeric, boolean). See PAYLOAD log above for field details.")
 
             # ── Step 2: Upload PDF to Supabase (independent of Step 1) ──
             supabase_ok = False
             await _set_status(job_dir, "supabase_upload", "Uploading PDF to Supabase Storage...")
             try:
                 input_pdf_bytes = input_pdf.read_bytes()
-                supabase_path = f"{req.record_id}/{req.record_id}.pdf"
+                supabase_path = f"{app_identifier}/{app_identifier}.pdf"
                 await loop.run_in_executor(
                     None, _upload_to_supabase, req.bucket, supabase_path,
                     input_pdf_bytes, "application/pdf",
                 )
                 supabase_ok = True
-                logger.info("Supabase upload complete | record=%s%s", rid, aid)
+                logger.info("Supabase upload complete | record=%s | app=%s%s", rid, app_identifier, aid)
+                print(f"  ✓ PDF uploaded to Supabase | bucket={req.bucket} | path={supabase_path}")
             except Exception as sb_err:
-                logger.error("Supabase upload failed | record=%s | error=%s%s",
-                    rid, sb_err, aid)
+                logger.error("Supabase upload failed | record=%s | bucket=%s | path=%s | size=%d bytes | error=%s%s",
+                    rid, req.bucket, supabase_path, len(input_pdf_bytes), sb_err, aid)
+                print(f"  ⚠ Supabase upload failed | bucket={req.bucket} | path={supabase_path} | error={sb_err}")
 
             # ── Step 3: Update OCR_Status based on combined outcome ──
             status_to_set = "updated"
             status_msg = "OCR complete — Zoho record updated"
             if not creator_fields_ok and not supabase_ok:
-                status_to_set = "failed"
+                status_to_set = "null"
                 status_msg = "OCR complete but both Creator and Supabase writes failed"
             elif not creator_fields_ok:
                 status_msg = "OCR complete — PDF on Supabase, Creator fields POST failed"
@@ -977,8 +1154,8 @@ async def process_pending_on_startup(base_dir: Path) -> None:
     report_link_name = os.environ.get("ZOHO_POLL_REPORT_LINK_NAME", "Volunteer_Home_Visited_Form_Report")
     file_field_link_name = os.environ.get("ZOHO_POLL_FILE_FIELD_LINK_NAME", "Upload_Home_Visit_Form")
     max_concurrent = int(os.environ.get("ZOHO_POLL_MAX_CONCURRENT", "5"))
-    criteria = os.environ.get("ZOHO_POLL_CRITERIA",'(OCR_Status=="yes")')
-                            #   '(OCR_Status==null || OCR_Status=="") && OCR_Status!="updated"')
+    criteria = os.environ.get("ZOHO_POLL_CRITERIA",
+                               '(OCR_Status=="null" || OCR_Status=="no") && OCR_Status!="updated"')
 
     print(f"\n{'='*70}")
     print(f"  STARTUP AUTO-PROCESSOR")
@@ -992,6 +1169,9 @@ async def process_pending_on_startup(base_dir: Path) -> None:
     logger.info("STARTUP: scanning for pending Creator records (criteria=%s)", criteria)
 
     loop = asyncio.get_running_loop()
+
+    # Launch background token refresh (runs every 58 min independently)
+    asyncio.create_task(_start_periodic_token_refresh())
 
     # 1. Authenticate
     try:

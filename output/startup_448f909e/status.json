@@ -1,0 +1,51 @@
+{
+  "status": "primary_extraction",
+  "message": "Running Tesseract + primary extraction (OpenAICompatible)...",
+  "log": [
+    {
+      "t": "05:36:49",
+      "msg": "Auto: TEMP-2026-8735 (1 files)"
+    },
+    {
+      "t": "05:36:49",
+      "msg": "Downloading for TEMP-2026-8735"
+    },
+    {
+      "t": "05:36:52",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "05:37:02",
+      "msg": "Downloading 1 files..."
+    },
+    {
+      "t": "05:37:07",
+      "msg": "Downloaded 1 files"
+    },
+    {
+      "t": "05:37:07",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "05:37:19",
+      "msg": "PDF created (6 pages, 1171 KB)"
+    },
+    {
+      "t": "05:37:19",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "05:37:38",
+      "msg": "Preprocessing PDF (TEMP-2026-8735)..."
+    },
+    {
+      "t": "05:38:08",
+      "msg": "Preprocessing done."
+    },
+    {
+      "t": "05:38:17",
+      "msg": "Running Tesseract + primary extraction (OpenAICompatible)..."
+    }
+  ],
+  "pages": 6
+}

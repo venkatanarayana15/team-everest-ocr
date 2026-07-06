@@ -1,0 +1,83 @@
+{
+  "status": "done",
+  "message": "OCR complete \u2014 PDF on Supabase, Creator fields POST failed",
+  "log": [
+    {
+      "t": "06:53:12",
+      "msg": "OCR extract queued for TEMP-2026-8437 (1 files)"
+    },
+    {
+      "t": "06:53:12",
+      "msg": "Downloading for TEMP-2026-8437"
+    },
+    {
+      "t": "06:53:13",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "06:53:13",
+      "msg": "Downloading 1 files..."
+    },
+    {
+      "t": "06:53:33",
+      "msg": "Downloaded 1 files"
+    },
+    {
+      "t": "06:53:33",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "06:53:33",
+      "msg": "PDF created (6 pages, 600 KB)"
+    },
+    {
+      "t": "06:53:33",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "06:53:33",
+      "msg": "Preprocessing PDF (TEMP-2026-8437)..."
+    },
+    {
+      "t": "06:53:36",
+      "msg": "Preprocessing done."
+    },
+    {
+      "t": "06:53:36",
+      "msg": "Running Tesseract + primary extraction (OpenAICompatible)..."
+    },
+    {
+      "t": "06:54:12",
+      "msg": "Merged 69 fields."
+    },
+    {
+      "t": "06:54:12",
+      "msg": "Filling missing template fields..."
+    },
+    {
+      "t": "06:54:12",
+      "msg": "Saving results..."
+    },
+    {
+      "t": "06:54:12",
+      "msg": "Extraction complete. Results ready for download."
+    },
+    {
+      "t": "06:54:13",
+      "msg": "Writing fields to Home_Visit_Questionnaire..."
+    },
+    {
+      "t": "06:54:14",
+      "msg": "Uploading PDF to Supabase Storage..."
+    },
+    {
+      "t": "06:54:19",
+      "msg": "Setting OCR_Status=updated..."
+    },
+    {
+      "t": "06:54:22",
+      "msg": "OCR complete \u2014 PDF on Supabase, Creator fields POST failed"
+    }
+  ],
+  "pages": 6
+}

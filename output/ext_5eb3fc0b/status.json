@@ -1,0 +1,23 @@
+{
+  "status": "downloading",
+  "message": "Downloading 1 files...",
+  "log": [
+    {
+      "t": "07:06:38",
+      "msg": "OCR extract queued for TEMP-2026-8533 (1 files)"
+    },
+    {
+      "t": "07:06:38",
+      "msg": "Downloading for TEMP-2026-8533"
+    },
+    {
+      "t": "07:06:38",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "07:06:38",
+      "msg": "Downloading 1 files..."
+    }
+  ],
+  "pages": 0
+}

@@ -1,0 +1,1851 @@
+{
+  "overall_confidence": 84,
+  "num_pages": 6,
+  "raw_text": "**Volunteer Name:** Volunteer **Co-Volunteer Name:** Helen M.B. **Date of Visit:** 05/07/2026\n\n--- Page 1 ---\n\n## Section 1 \u2014 Student Profile\n\n**1.1 Application ID**\nEnter Application ID\n95321\n\n**1.2 Student Full Name**\nEnter full name\ntestyourtself\n\n**1.3 Gender**\n[\u25cf] Male  [\u25cb] Female  [\u25cb] Others\n\n## Section 2 \u2014 Family Background\n\n**2.1 Family Status**\n[\u25cb] Single Parent  [\u25cb] Parentless  [\u25cf] Having both parents\n\n**2.2 Relationship Details**\n\n| Year of Death / Separation | Reason for Death / Separation |\n|----------------------------|------------------------------|\n|                            |                              |\n\n**2.3 Is Father/ Mother photograph kept at home?**\n\n[\u25cf] Yes [\u25cb] No\n\n**\n\n--- Page 2 ---\n\n2.4 Government ID Verified**\n\n[\u25cf] Aadhaar Card [\u25cb] Ration Card [\u25cb] Driving Licence [\u25cb] Voter ID\n\n**2.5. Family Members**\n\n| Name       | Age | Education | Occupation | Annual Income |\n|------------|-----|-----------|------------|---------------|\n| Subramani  | 54  | 9th       | Plumber    | 75,000        |\n| Chithra    | 37  | 5th       | Housewife  |               |\n| Dharani    | 12  | 7th       |            |               |\n\n--- Page 2 ---\n\n**Section 3 \u2014 Housing Condition**\n\n**3.1 House Ownership**\n\n[\u25cb] Own [\u25cf] Rented\n\n**3.1.1 If rented, what is the rent amount?**\n\n\n**3.2 Type of Home**\n\n[ ] Individual [ ] Private Apartment [ ] Housing Board\n\n[ ] Line House [ ] Others\n\n--- Page 3 ---\n\n### Housing Condition\n\n**3.3 Type of Ceiling**\n- [\u2713] Roof (Kuruvi)\n- [\u2717] Tiled\n- [\u2717] Asbestos / Sheet\n- [\u2713] Concrete\n\n**\n\n--- Page 3 ---\n\n3.4 Number of Bedrooms**\n\n100 bedrooms\n\n**3.4.1 Type of Bedroom**\n- [\u25cb] Separate Bedroom\n- [\u25cf] No Separate Bedroom\n\n**3.5 Bathroom**\n- [\u25cf] Separate\n- [\u25cb] Common for Apartment\n\n**3.6 Kitchen Type**\n- [\u2713] Separate Kitchen\n- [\u2713] Hall with Kitchen\n\n### Section 4 \u2014 Financial Background\n\n**4.1 Assets at Home** (tick all that apply)\n- [\u2713] Washing Machine\n- [\u2713] Fridge\n- [\u2713] AC\n- [\u2717] LED TV\n- [\u2713] Two-Wheeler\n- [\u2717] Car\n- [\u2713] Smartphone\n- [\u2717] Separate Wi-Fi\n- [\u2717] Others\n\n**4.2 Amount of Last Electricity Bill**\n\n\u20b9500\n\n**4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?**\n- [\u25cb] Yes\n- [\u25cf] No\n\n\n\n--- Page 4 ---\n\n**4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?** [\u25cb] Yes [\u25cf] No\n\n**\n\n--- Page 4 ---\n\n4.4 Apart from your job, is there any other source of income?** [\u25cb] Yes [\u25cf] No\n\n**4.5 Income Type** [\u25cb] Monthly [\u25cb] Daily [\u25cb] Weekly [\u25cf] Ad-Hoc\n\n**4.6 Do you have any loans?** [\u25cf] Yes [\u25cb] No\n\n**4.6.1 If yes, share Loan Purpose, Loan Amount Taken, and Pending Loan Amount**\n\n| Loan Purpose   | Loan Amount Taken | Pending Loan Amount |\n| -------------- | ----------------- | ------------------- |\n| Credit Loan    | 75000             | 51000               |\n\n\n\n\n--- Page 5 ---\n\n**\n\n--- Page 5 ---\n\n5.1 Does the student have any health issues?** [\u25cb] Yes [\u25cf] No\n\n**5.2 If yes, list the health issues**\n\n**6.1 Will you study college for three years without any obstacle?**\nYes\n\n**6.2 If we have a training program within 15 km from your home, can you come?** [\u25cf] Yes [\u25cb] No [\u25cb] Maybe\n\n**6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?** [\u25cf] Yes [\u25cb] No\n\n\n\n\n--- Page 6 ---\n\n**\n\n--- Page 6 ---\n\n7.1 Has the student received or applied for any other scholarships for their UG degree?**\n\n**8.1 What is your opinion about the student, their family members, and their living condition?**\n\n**8.2 Will you recommend this student for this scholarship?** [\u25cf] Yes [\u25cb] No [\u25cb] Not Sure\n\n**8.3 Any other comments you want to share?**\n",
+  "primary_model": "OpenAICompatible",
+  "token_usage": {
+    "primary": {
+      "prompt_tokens": 21984,
+      "completion_tokens": 9334,
+      "total_tokens": 31318,
+      "calls": 6
+    },
+    "total": {
+      "prompt_tokens": 21984,
+      "completion_tokens": 9334,
+      "total_tokens": 31318
+    }
+  },
+  "llm_calls": 6,
+  "sections": [
+    {
+      "number": 1,
+      "name": "Student Profile",
+      "page": 1
+    },
+    {
+      "number": 2,
+      "name": "Family Background",
+      "page": 1
+    },
+    {
+      "number": 3,
+      "name": "Housing Condition**",
+      "page": 2
+    },
+    {
+      "number": 4,
+      "name": "Financial Background",
+      "page": 3
+    },
+    {
+      "number": 5,
+      "name": "Health Information",
+      "page": 5
+    },
+    {
+      "number": 6,
+      "name": "Student Commitment",
+      "page": 5
+    },
+    {
+      "number": 7,
+      "name": "Scholarship Information",
+      "page": 6
+    },
+    {
+      "number": 8,
+      "name": "Volunteer Observation",
+      "page": 6
+    }
+  ],
+  "fields": [
+    {
+      "label": "Volunteer Name",
+      "value": "Volunteer",
+      "confidence": 95,
+      "page": 1,
+      "section_number": null,
+      "bbox": [
+        157,
+        272,
+        822,
+        293
+      ],
+      "value_bbox": [
+        558,
+        273,
+        822,
+        288
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "Co-Volunteer Name",
+      "value": "Helen M.B.",
+      "confidence": 95,
+      "page": 1,
+      "section_number": null,
+      "bbox": [
+        157,
+        272,
+        822,
+        293
+      ],
+      "value_bbox": [
+        558,
+        273,
+        822,
+        288
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "Date of Visit",
+      "value": "05/07/2026",
+      "confidence": 95,
+      "page": 1,
+      "section_number": null,
+      "bbox": [
+        157,
+        272,
+        822,
+        293
+      ],
+      "value_bbox": [
+        558,
+        273,
+        822,
+        288
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "1.1 Application ID",
+      "value": "95321",
+      "confidence": 95,
+      "page": 1,
+      "section_number": 1,
+      "bbox": [
+        155,
+        540,
+        330,
+        559
+      ],
+      "value_bbox": [
+        163,
+        580,
+        324,
+        597
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "1.2 Student Full Name",
+      "value": "testyourtself",
+      "confidence": 90,
+      "page": 1,
+      "section_number": 1,
+      "bbox": [
+        154,
+        685,
+        368,
+        701
+      ],
+      "value_bbox": [
+        161,
+        725,
+        283,
+        739
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "1.3 Gender",
+      "value": "Male",
+      "confidence": 95,
+      "page": 1,
+      "section_number": 1,
+      "bbox": [
+        150,
+        832,
+        261,
+        848
+      ],
+      "value_bbox": [
+        150,
+        832,
+        261,
+        848
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.1 Family Status",
+      "value": "Having both parents",
+      "confidence": 95,
+      "page": 1,
+      "section_number": 2,
+      "bbox": [
+        144,
+        1062,
+        315,
+        1082
+      ],
+      "value_bbox": [
+        254,
+        1063,
+        315,
+        1079
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.2 Relationship Details \u2014 Year of Death / Separation",
+      "value": "",
+      "confidence": 10,
+      "page": 1,
+      "section_number": 2,
+      "bbox": [
+        139,
+        1188,
+        517,
+        1213
+      ],
+      "value_bbox": [
+        139,
+        1188,
+        517,
+        1213
+      ],
+      "needs_clarification": true,
+      "reason": "field appears empty",
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.2 Relationship Details \u2014 Reason for Death / Separation",
+      "value": "",
+      "confidence": 10,
+      "page": 1,
+      "section_number": 2,
+      "bbox": [
+        139,
+        1188,
+        517,
+        1213
+      ],
+      "value_bbox": [
+        139,
+        1188,
+        517,
+        1213
+      ],
+      "needs_clarification": true,
+      "reason": "field appears empty",
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.3 Is Father/Mother photograph kept at home?",
+      "value": "Yes",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        74,
+        143,
+        602,
+        168
+      ],
+      "value_bbox": [
+        447,
+        143,
+        602,
+        167
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.4 Government ID Verified",
+      "value": "Aadhaar Card",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        79,
+        281,
+        930,
+        309
+      ],
+      "value_bbox": [
+        528,
+        281,
+        930,
+        307
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 1 \u2014 Name",
+      "value": "Subramani",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        211,
+        506,
+        308,
+        524
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 1 \u2014 Age",
+      "value": "54",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        211,
+        506,
+        308,
+        524
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 1 \u2014 Education",
+      "value": "9th",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        211,
+        506,
+        308,
+        524
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 1 \u2014 Occupation",
+      "value": "Plumber",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        211,
+        506,
+        308,
+        524
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 1 \u2014 Annual Income",
+      "value": "75000",
+      "confidence": 90,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        211,
+        506,
+        308,
+        524
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 2 \u2014 Name",
+      "value": "Chithra",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        211,
+        506,
+        308,
+        524
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 2 \u2014 Age",
+      "value": "37",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        211,
+        506,
+        308,
+        524
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 2 \u2014 Education",
+      "value": "5th",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        211,
+        506,
+        308,
+        524
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 2 \u2014 Occupation",
+      "value": "Housewife",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        211,
+        506,
+        308,
+        524
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 2 \u2014 Annual Income",
+      "value": "",
+      "confidence": 20,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "needs_clarification": true,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 3 \u2014 Name",
+      "value": "Dharani",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        211,
+        506,
+        308,
+        524
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 3 \u2014 Age",
+      "value": "12",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        211,
+        506,
+        308,
+        524
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 3 \u2014 Education",
+      "value": "7th",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        211,
+        506,
+        308,
+        524
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 3 \u2014 Occupation",
+      "value": "",
+      "confidence": 20,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "needs_clarification": true,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "2.5 Family Members \u2014 Row 3 \u2014 Annual Income",
+      "value": "",
+      "confidence": 20,
+      "page": 2,
+      "section_number": 2,
+      "bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "value_bbox": [
+        90,
+        506,
+        308,
+        530
+      ],
+      "needs_clarification": true,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "3.1 House Ownership",
+      "value": "Rented",
+      "confidence": 95,
+      "page": 2,
+      "section_number": 3,
+      "bbox": [
+        119,
+        1078,
+        342,
+        1098
+      ],
+      "value_bbox": [
+        232,
+        1078,
+        342,
+        1098
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "3.1.1 If rented, what is the rent amount?",
+      "value": "",
+      "confidence": 20,
+      "page": 2,
+      "section_number": 3,
+      "bbox": [
+        194,
+        1181,
+        472,
+        1198
+      ],
+      "value_bbox": [
+        194,
+        1181,
+        472,
+        1198
+      ],
+      "needs_clarification": true,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "3.3 Type of Ceiling \u2014 Roof",
+      "value": "\u2713",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 3,
+      "bbox": [
+        168,
+        239,
+        779,
+        289
+      ],
+      "value_bbox": [
+        168,
+        239,
+        779,
+        289
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "3.3 Type of Ceiling \u2014 Tiled",
+      "value": "\u2717",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 3,
+      "bbox": [
+        168,
+        239,
+        779,
+        289
+      ],
+      "value_bbox": [
+        168,
+        239,
+        779,
+        289
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "3.3 Type of Ceiling \u2014 Asbestos",
+      "value": "\u2717",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 3,
+      "bbox": [
+        168,
+        239,
+        779,
+        289
+      ],
+      "value_bbox": [
+        168,
+        239,
+        779,
+        289
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "3.3 Type of Ceiling \u2014 Concrete",
+      "value": "\u2713",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 3,
+      "bbox": [
+        168,
+        239,
+        779,
+        289
+      ],
+      "value_bbox": [
+        490,
+        250,
+        779,
+        287
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "3.4 Number of Bedrooms",
+      "value": "100 bedrooms",
+      "confidence": 90,
+      "page": 3,
+      "section_number": 3,
+      "bbox": [
+        172,
+        347,
+        395,
+        363
+      ],
+      "value_bbox": [
+        181,
+        384,
+        281,
+        397
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "3.4.1 Type of Bedroom",
+      "value": "No Separate Bedroom",
+      "confidence": 90,
+      "page": 3,
+      "section_number": 3,
+      "bbox": [
+        176,
+        462,
+        617,
+        513
+      ],
+      "value_bbox": [
+        409,
+        482,
+        617,
+        503
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "3.5 Bathroom",
+      "value": "Separate",
+      "confidence": 90,
+      "page": 3,
+      "section_number": 3,
+      "bbox": [
+        177,
+        571,
+        300,
+        586
+      ],
+      "value_bbox": [
+        177,
+        571,
+        300,
+        586
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "3.6 Kitchen Type \u2014 Separate Kitchen",
+      "value": "\u2713",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 3,
+      "bbox": [
+        179,
+        678,
+        563,
+        730
+      ],
+      "value_bbox": [
+        179,
+        678,
+        563,
+        730
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "3.6 Kitchen Type \u2014 Hall with Kitchen",
+      "value": "\u2713",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 3,
+      "bbox": [
+        179,
+        678,
+        563,
+        730
+      ],
+      "value_bbox": [
+        179,
+        678,
+        563,
+        730
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.1 Assets at Home \u2014 Washing Machine",
+      "value": "\u2713",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 4,
+      "bbox": [
+        181,
+        872,
+        1002,
+        936
+      ],
+      "value_bbox": [
+        181,
+        872,
+        1002,
+        936
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.1 Assets at Home \u2014 Fridge",
+      "value": "\u2713",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 4,
+      "bbox": [
+        181,
+        872,
+        1002,
+        936
+      ],
+      "value_bbox": [
+        642,
+        894,
+        1002,
+        918
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.1 Assets at Home \u2014 AC",
+      "value": "\u2713",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 4,
+      "bbox": [
+        181,
+        872,
+        1002,
+        936
+      ],
+      "value_bbox": [
+        642,
+        894,
+        1002,
+        918
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.1 Assets at Home \u2014 LED TV",
+      "value": "\u2717",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 4,
+      "bbox": [
+        181,
+        872,
+        1002,
+        936
+      ],
+      "value_bbox": [
+        642,
+        894,
+        1002,
+        918
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.1 Assets at Home \u2014 Two-Wheeler",
+      "value": "\u2713",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 4,
+      "bbox": [
+        181,
+        872,
+        1002,
+        936
+      ],
+      "value_bbox": [
+        642,
+        894,
+        1002,
+        918
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.1 Assets at Home \u2014 Car",
+      "value": "\u2717",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 4,
+      "bbox": [
+        181,
+        872,
+        1002,
+        936
+      ],
+      "value_bbox": [
+        181,
+        872,
+        1002,
+        936
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.1 Assets at Home \u2014 Smartphone",
+      "value": "\u2713",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 4,
+      "bbox": [
+        181,
+        872,
+        1002,
+        936
+      ],
+      "value_bbox": [
+        642,
+        894,
+        1002,
+        918
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.1 Assets at Home \u2014 Separate Wi-Fi",
+      "value": "\u2717",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 4,
+      "bbox": [
+        181,
+        872,
+        1002,
+        936
+      ],
+      "value_bbox": [
+        179,
+        977,
+        656,
+        1012
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.1 Assets at Home \u2014 Others",
+      "value": "\u2717",
+      "confidence": 95,
+      "page": 3,
+      "section_number": 4,
+      "bbox": [
+        181,
+        872,
+        1002,
+        936
+      ],
+      "value_bbox": [
+        642,
+        894,
+        1002,
+        918
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.2 Amount of Last Electricity Bill",
+      "value": "\u20b9500",
+      "confidence": 90,
+      "page": 3,
+      "section_number": 4,
+      "bbox": [
+        182,
+        1058,
+        486,
+        1081
+      ],
+      "value_bbox": [
+        362,
+        1058,
+        486,
+        1077
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?",
+      "value": "No",
+      "confidence": 90,
+      "page": 3,
+      "section_number": 4,
+      "bbox": [
+        183,
+        1235,
+        262,
+        1251
+      ],
+      "value_bbox": [
+        183,
+        1235,
+        262,
+        1251
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.3.1 If yes, list their properties \u2014 Row 1 \u2014 Property Description",
+      "value": "N/A",
+      "confidence": 90,
+      "page": 4,
+      "section_number": 4,
+      "bbox": [
+        172,
+        153,
+        853,
+        183
+      ],
+      "value_bbox": [
+        172,
+        153,
+        853,
+        183
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.3.1 If yes, list their properties \u2014 Row 1 \u2014 Owner Name",
+      "value": "N/A",
+      "confidence": 90,
+      "page": 4,
+      "section_number": 4,
+      "bbox": [
+        172,
+        153,
+        853,
+        183
+      ],
+      "value_bbox": [
+        172,
+        153,
+        853,
+        183
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.3.1 If yes, list their properties \u2014 Row 1 \u2014 Approximate Value",
+      "value": "N/A",
+      "confidence": 90,
+      "page": 4,
+      "section_number": 4,
+      "bbox": [
+        172,
+        153,
+        853,
+        183
+      ],
+      "value_bbox": [
+        172,
+        153,
+        853,
+        183
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.4 Apart from your job, is there any other source of income?",
+      "value": "No",
+      "confidence": 95,
+      "page": 4,
+      "section_number": 4,
+      "bbox": [
+        170,
+        430,
+        766,
+        466
+      ],
+      "value_bbox": [
+        487,
+        430,
+        766,
+        464
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.5 Income Type",
+      "value": "Ad-Hoc",
+      "confidence": 95,
+      "page": 4,
+      "section_number": 4,
+      "bbox": [
+        165,
+        833,
+        327,
+        853
+      ],
+      "value_bbox": [
+        281,
+        834,
+        327,
+        853
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.6 Do you have any loans?",
+      "value": "Yes",
+      "confidence": 95,
+      "page": 4,
+      "section_number": 4,
+      "bbox": [
+        161,
+        953,
+        434,
+        973
+      ],
+      "value_bbox": [
+        329,
+        954,
+        434,
+        973
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.6.1 If yes, share Loan Purpose, Loan Amount Taken, and Pending Loan Amount \u2014 Row 1 \u2014 Loan Purpose",
+      "value": "Credit Loan",
+      "confidence": 95,
+      "page": 4,
+      "section_number": 4,
+      "bbox": [
+        158,
+        1057,
+        801,
+        1090
+      ],
+      "value_bbox": [
+        158,
+        1057,
+        801,
+        1090
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.6.1 If yes, share Loan Purpose, Loan Amount Taken, and Pending Loan Amount \u2014 Row 1 \u2014 Loan Amount Taken",
+      "value": "75000",
+      "confidence": 95,
+      "page": 4,
+      "section_number": 4,
+      "bbox": [
+        158,
+        1057,
+        801,
+        1090
+      ],
+      "value_bbox": [
+        158,
+        1057,
+        801,
+        1090
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.6.1 If yes, share Loan Purpose, Loan Amount Taken, and Pending Loan Amount \u2014 Row 1 \u2014 Pending Loan Amount",
+      "value": "51000",
+      "confidence": 95,
+      "page": 4,
+      "section_number": 4,
+      "bbox": [
+        158,
+        1057,
+        801,
+        1090
+      ],
+      "value_bbox": [
+        158,
+        1057,
+        801,
+        1090
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "5.1 Does the student have any health issues?",
+      "value": "No",
+      "confidence": 100,
+      "page": 5,
+      "section_number": 5,
+      "bbox": null,
+      "value_bbox": null,
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "5.2 If yes, list the health issues",
+      "value": "",
+      "confidence": 10,
+      "page": 5,
+      "section_number": 5,
+      "bbox": null,
+      "value_bbox": null,
+      "needs_clarification": true,
+      "reason": "field appears empty",
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "6.1 Will you study college for three years without any obstacle?",
+      "value": "Yes",
+      "confidence": 100,
+      "page": 5,
+      "section_number": 6,
+      "bbox": null,
+      "value_bbox": null,
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "6.2 If we have a training program within 15 km from your home, can you come?",
+      "value": "Yes",
+      "confidence": 100,
+      "page": 5,
+      "section_number": 6,
+      "bbox": null,
+      "value_bbox": null,
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?",
+      "value": "Yes",
+      "confidence": 100,
+      "page": 5,
+      "section_number": 6,
+      "bbox": [
+        186,
+        173,
+        919,
+        255
+      ],
+      "value_bbox": [
+        578,
+        173,
+        919,
+        194
+      ],
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "7.1 Has the student received or applied for any other scholarships for their UG degree?",
+      "value": "",
+      "confidence": 10,
+      "page": 6,
+      "section_number": 7,
+      "bbox": null,
+      "value_bbox": null,
+      "needs_clarification": true,
+      "reason": "field appears empty",
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "8.1 What is your opinion about the student, their family members, and their living condition?",
+      "value": "",
+      "confidence": 10,
+      "page": 6,
+      "section_number": 8,
+      "bbox": [
+        58,
+        291,
+        681,
+        341
+      ],
+      "value_bbox": [
+        58,
+        291,
+        681,
+        341
+      ],
+      "needs_clarification": true,
+      "reason": "field appears empty",
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "8.2 Will you recommend this student for this scholarship?",
+      "value": "Yes",
+      "confidence": 95,
+      "page": 6,
+      "section_number": 8,
+      "bbox": null,
+      "value_bbox": null,
+      "needs_clarification": false,
+      "reason": null,
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "8.3 Any other comments you want to share?",
+      "value": "",
+      "confidence": 10,
+      "page": 6,
+      "section_number": 8,
+      "bbox": null,
+      "value_bbox": null,
+      "needs_clarification": true,
+      "reason": "field appears empty",
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "OpenAICompatible",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.1 Assets at Home",
+      "value": "",
+      "confidence": 0,
+      "page": 3,
+      "section_number": 4,
+      "bbox": null,
+      "value_bbox": null,
+      "needs_clarification": true,
+      "reason": "Not extracted by LLM",
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "template_fill",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.7 If you choose any college, how much is the college fee?",
+      "value": "",
+      "confidence": 0,
+      "page": 4,
+      "section_number": 4,
+      "bbox": null,
+      "value_bbox": null,
+      "needs_clarification": true,
+      "reason": "Not extracted by LLM",
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "template_fill",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.8 If the college fee is higher, how will you manage it?",
+      "value": "",
+      "confidence": 0,
+      "page": 5,
+      "section_number": 4,
+      "bbox": null,
+      "value_bbox": null,
+      "needs_clarification": true,
+      "reason": "Not extracted by LLM",
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "template_fill",
+      "verified_by": null,
+      "original_value": null
+    },
+    {
+      "label": "4.9 If you do not receive this scholarship, how will you pay the fees?",
+      "value": "",
+      "confidence": 0,
+      "page": 5,
+      "section_number": 4,
+      "bbox": null,
+      "value_bbox": null,
+      "needs_clarification": true,
+      "reason": "Not extracted by LLM",
+      "is_verified": false,
+      "verifier_confidence": null,
+      "verification_note": null,
+      "extracted_by": "template_fill",
+      "verified_by": null,
+      "original_value": null
+    }
+  ],
+  "processing_time": 106.43,
+  "input_type": "pdf",
+  "pdf_names": [
+    "TEMP-2026-9307"
+  ],
+  "application_id": "406160000134930572",
+  "record_id": "TEMP-2026-9307"
+}

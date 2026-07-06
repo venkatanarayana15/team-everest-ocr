@@ -1,0 +1,59 @@
+{
+  "status": "template_fill",
+  "message": "Filling missing template fields...",
+  "log": [
+    {
+      "t": "05:36:49",
+      "msg": "Auto: TEMP-2026-9883 (1 files)"
+    },
+    {
+      "t": "05:36:49",
+      "msg": "Downloading for TEMP-2026-9883"
+    },
+    {
+      "t": "05:36:49",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "05:36:49",
+      "msg": "Downloading 1 files..."
+    },
+    {
+      "t": "05:36:52",
+      "msg": "Downloaded 1 files"
+    },
+    {
+      "t": "05:36:55",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "05:37:02",
+      "msg": "PDF created (6 pages, 1481 KB)"
+    },
+    {
+      "t": "05:37:07",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "05:37:07",
+      "msg": "Preprocessing PDF (TEMP-2026-9883)..."
+    },
+    {
+      "t": "05:37:12",
+      "msg": "Preprocessing done."
+    },
+    {
+      "t": "05:37:19",
+      "msg": "Running Tesseract + primary extraction (OpenAICompatible)..."
+    },
+    {
+      "t": "05:45:59",
+      "msg": "Merged 44 fields."
+    },
+    {
+      "t": "05:46:00",
+      "msg": "Filling missing template fields..."
+    }
+  ],
+  "pages": 6
+}

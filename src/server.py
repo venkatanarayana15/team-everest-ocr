@@ -51,11 +51,52 @@ except ImportError as e:
     logger = logging.getLogger(__name__)
     logger.warning("Database module not available (%s). Dedup + DB features disabled.", e)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)-7s] %(name)s: %(message)s",
-    stream=sys.stdout,
-)
+class BeautifulColorFormatter(logging.Formatter):
+    COLORS = {
+        'DEBUG': '\033[90m',     # Gray
+        'INFO': '\033[94m',      # Light Blue
+        'WARNING': '\033[93m',   # Yellow
+        'ERROR': '\033[91m',     # Red
+        'CRITICAL': '\033[1;91m' # Bold Red
+    }
+    RESET = '\033[0m'
+
+    def format(self, record):
+        log_color = self.COLORS.get(record.levelname, self.RESET)
+        time_str = self.formatTime(record, "%H:%M:%S")
+        
+        name_parts = record.name.split('.')
+        short_name = name_parts[-1] if name_parts else record.name
+        
+        msg = record.getMessage()
+        if "SUCCESS" in msg:
+            msg = msg.replace("SUCCESS", "\033[92mSUCCESS\033[0m")
+        if "succeeded" in msg:
+            msg = msg.replace("succeeded", "\033[92msucceeded\033[0m")
+        if "failed" in msg:
+            msg = msg.replace("failed", "\033[91mfailed\033[0m")
+        if "FAILED" in msg:
+            msg = msg.replace("FAILED", "\033[91mFAILED\033[0m")
+        if "Skipping boolean field" in msg:
+            msg = msg.replace("Skipping boolean field", "\033[93mSkipping boolean field\033[0m")
+        if "No application_id" in msg:
+            msg = msg.replace("No application_id", "\033[93mNo application_id\033[0m")
+            
+        formatted = f"\033[90m{time_str}\033[0m {log_color}[{record.levelname:<7}]{self.RESET} \033[36m{short_name:<16}\033[0m \033[90m│\033[0m {msg}"
+        
+        if record.exc_info:
+            formatted += "\n" + self.formatException(record.exc_info)
+        return formatted
+
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+for handler in list(root_logger.handlers):
+    root_logger.removeHandler(handler)
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(BeautifulColorFormatter())
+root_logger.addHandler(handler)
+
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager

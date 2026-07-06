@@ -1,0 +1,43 @@
+{
+  "status": "preprocessing",
+  "message": "Preprocessing PDF (TEMP-2026-9307)...",
+  "log": [
+    {
+      "t": "06:49:11",
+      "msg": "Auto: TEMP-2026-9307 (6 files)"
+    },
+    {
+      "t": "06:49:11",
+      "msg": "Downloading for TEMP-2026-9307"
+    },
+    {
+      "t": "06:49:11",
+      "msg": "Zoho OAuth..."
+    },
+    {
+      "t": "06:49:11",
+      "msg": "Downloading 6 files..."
+    },
+    {
+      "t": "06:50:03",
+      "msg": "Downloaded 6 files"
+    },
+    {
+      "t": "06:50:03",
+      "msg": "Converting to single PDF..."
+    },
+    {
+      "t": "06:50:04",
+      "msg": "PDF created (6 pages, 15792 KB)"
+    },
+    {
+      "t": "06:50:04",
+      "msg": "Starting extraction pipeline..."
+    },
+    {
+      "t": "06:50:05",
+      "msg": "Preprocessing PDF (TEMP-2026-9307)..."
+    }
+  ],
+  "pages": 0
+}
