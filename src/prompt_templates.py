@@ -8,7 +8,7 @@ GROUND RULES
 3. Radio → exact allowed option. Checkbox → ✓/✗ with label "{Group} — {Option}".
 4. Table → count pre-printed rows first. Every cell: "{Table} — Row {n} — {Column}".
 5. Never invent values. If unreadable: "" and low confidence.
-6. If you cannot see the label area at all on the page, still output the field with value="".
+6. OUTPUT ALL FIELDS ON THIS PAGE. If you cannot read the value, output value="" with low confidence. If the label area is cropped/blurry, output value="" anyway — do not omit the field.
 
 -------------------------------------------------------------------------------
 CORE OUTPUT SCHEMA
@@ -66,7 +66,7 @@ Numeric fields (output as plain numbers, no ₹, no commas, no spaces):
 
 Boolean fields (only "Yes" or "No" — never "yes", "no", "true", "false", "Y", "N"):
   All conditional radio fields with [radio → Yes | No]
-  Also: 6.2, 6.3, 8.2
+  Also: 6.3
 
 Enum fields (exact value from allowed set):
   "Gender":        exactly "Male" | "Female" | "Others"
@@ -159,7 +159,7 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
   6.2 If we have a training program within 15 km from your home, can you come?          ← pg 6
       [radio → Yes | No | Maybe]
   6.3 Are you ready to send your son/daughter to weekly skill development classes
-      on Sundays (16 classes a year)? [radio → Yes | No]
+      on Sundays (16 classes a year)? [radio → Yes | No]          ← pg 6
 
 --- Section 7 — Scholarship Information (Page 6) — 1 field ---
   7.1 Has the student received or applied for any other scholarships for their UG degree? [text]

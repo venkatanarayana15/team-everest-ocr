@@ -278,11 +278,11 @@ class ExtractionPipeline:
                 f"You are examining Page {page_num} of {len(page_images)}.\n\n"
                 f"RULES (these override any conflicting instructions below):\n"
                 f"1. You are seeing ONE page image — do not expect multiple pages.\n"
-                f"2. Only extract fields whose labels are VISIBLE in this image.\n"
-                f"3. Do NOT extract fields that appear on other pages.\n"
-                f"4. Set 'page' field to {page_num} for every extracted field.\n"
-                f"5. Use the field template below only to know the expected schema — "
-                f"NOT to decide what fields to include.\n\n"
+                f"2. Output EVERY field whose page marker (← pg N) matches {page_num} or whose section spans this page.\n"
+                f"3. If a field IS VISIBLE in the image → extract its value from the image.\n"
+                f"4. If a field is NOT visible (cropped/blank/hidden) → output value=\"\" with low confidence.\n"
+                f"5. Set 'page' field to {page_num} for every extracted field.\n"
+                f"6. When uncertain which page a field belongs to, INCLUDE it anyway — extra fields are merged and deduplicated downstream.\n\n"
                 f"{PRIMARY_EXTRACTION_PROMPT}"
             )
             data, token_usage = await self.primary_client.extract_structured(

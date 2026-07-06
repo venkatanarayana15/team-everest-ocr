@@ -961,7 +961,8 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
             await _set_status(job_dir, "supabase_upload", "Uploading PDF to Supabase Storage...")
             try:
                 input_pdf_bytes = input_pdf.read_bytes()
-                supabase_path = f"{app_identifier}/{app_identifier}.pdf"
+                safe_name = app_identifier.replace(" ", "").replace("(", "_").replace(")", "_")
+                supabase_path = f"{safe_name}/{safe_name}.pdf"
                 await loop.run_in_executor(
                     None, _upload_to_supabase, req.bucket, supabase_path,
                     input_pdf_bytes, "application/pdf",

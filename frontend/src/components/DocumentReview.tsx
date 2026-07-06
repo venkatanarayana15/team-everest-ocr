@@ -240,7 +240,8 @@ export default function DocumentReview({
             ref={el => setBlockRef(pageNum, el)}
             style={{
               display: 'flex',
-              height: 'calc(100vh - 180px)',
+              height: 'auto',
+              minHeight: 'calc(100vh - 180px)',
               margin: 12,
               borderRadius: 'var(--radius-xl)',
               border: `1px solid ${isSelectedPage ? 'var(--color-primary)' : 'var(--color-border)'}`,
@@ -256,7 +257,7 @@ export default function DocumentReview({
               width: '55%',
               display: 'flex',
               flexDirection: 'column',
-              minHeight: 0,
+              minHeight: 'auto',
               background: '#fafafa',
             }}>
               <div style={{
@@ -292,8 +293,8 @@ export default function DocumentReview({
 
               <div style={{
                 flex: 1,
-                minHeight: 0,
-                overflow: 'auto',
+                minHeight: 'auto',
+                overflow: 'visible',
                 display: 'flex',
                 justifyContent: fitMode ? 'center' : 'flex-start',
                 alignItems: 'flex-start',
@@ -349,8 +350,8 @@ export default function DocumentReview({
               width: '45%',
               display: 'flex',
               flexDirection: 'column',
-              minHeight: 0,
-              overflow: 'hidden',
+              minHeight: 'auto',
+              overflow: 'visible',
               borderLeft: '1px solid var(--color-border)',
               background: 'var(--color-surface)',
             }}>

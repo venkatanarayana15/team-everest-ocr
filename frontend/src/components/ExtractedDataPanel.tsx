@@ -7,8 +7,7 @@ const TABLE_ROW_RE = /^(.+?)\s*[—–-]\s*Row\s+(\d+)\s*[—–-]\s*(.+)$/;
 const CHECKBOX_VALS = new Set(['yes', 'no', 'true', 'false', '✓', '✗', '?']);
 
 function isCheckbox(field: Field): boolean {
-  return CHECKBOX_VALS.has(field.value.trim().toLowerCase()) &&
-    field.label.toLowerCase().includes('checkbox');
+  return CHECKBOX_VALS.has(field.value.trim().toLowerCase());
 }
 
 function confidenceColor(c: number): string {
@@ -29,6 +28,68 @@ function checkboxDisplay(val: string): { icon: string; color: string } {
   if (v === 'yes' || v === 'true' || v === '✓') return { icon: '✓', color: '#16a34a' };
   if (v === 'no' || v === 'false' || v === '✗') return { icon: '✗', color: '#dc2626' };
   return { icon: '?', color: '#94a3b8' };
+}
+
+function parseDateToYmd(val: string): string {
+  if (!val) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+  const slashMatch = val.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (slashMatch) {
+    return `${slashMatch[3]}-${slashMatch[2]}-${slashMatch[1]}`;
+  }
+  const dashMatch = val.match(/^(\d{2})-([a-zA-Z]{3})-(\d{4})$/);
+  if (dashMatch) {
+    const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const monthIndex = months.indexOf(dashMatch[2].toLowerCase());
+    if (monthIndex !== -1) {
+      const mm = String(monthIndex + 1).padStart(2, '0');
+      return `${dashMatch[3]}-${mm}-${dashMatch[1]}`;
+    }
+  }
+  return '';
+}
+
+function formatYmdToDdMmmYyyy(ymd: string): string {
+  if (!ymd) return '';
+  const match = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return ymd;
+  const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  const monthName = months[parseInt(match[2], 10) - 1] || 'JAN';
+  return `${match[3]}-${monthName}-${match[1]}`;
+}
+
+function getRadioOptions(label: string): string[] | null {
+  const lbl = label.toLowerCase();
+  if (lbl.includes('number of bedrooms')) {
+    return ['0', '1', '2', '3', '4', 'More than 4', 'N/A'];
+  }
+  if (lbl.includes('3.5 bathroom')) {
+    return ['Separate', 'Common for Apartment', 'None', 'N/A'];
+  }
+  if (lbl.includes('2.1 family status')) {
+    return ['Having both parents', 'Single Parent', 'Parentless'];
+  }
+  if (lbl.includes('3.1 house ownership')) {
+    return ['Own', 'Rented'];
+  }
+  if (
+    lbl.includes('do you own any other assets') ||
+    lbl.includes('apart from your job') ||
+    lbl.includes('do you have any loans') ||
+    lbl.includes('does the student have any health issues') ||
+    lbl.includes('will you study college for three years') ||
+    lbl.includes('ready to send your son/daughter') ||
+    lbl.includes('photograph kept at home')
+  ) {
+    return ['Yes', 'No'];
+  }
+  if (lbl.includes('training program within 15 km')) {
+    return ['Yes', 'No', 'Maybe'];
+  }
+  if (lbl.includes('4.5 income type')) {
+    return ['Monthly', 'Daily', 'Weekly', 'Ad-Hoc'];
+  }
+  return null;
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
@@ -198,14 +259,144 @@ function FieldValue({
         )}
       </div>
 
-      {isCheckboxField ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-          <CheckboxIcon value={field.value} />
-          <span style={{ fontSize: 13, color: 'var(--color-text)' }}>{field.value}</span>
-        </div>
-      ) : editing ? (
-        <InlineEditor value={field.value} onSave={handleSave} onCancel={handleCancel} />
-      ) : (
+      {(() => {
+        const lbl = field.label.toLowerCase();
+        
+        if (lbl.includes('date of visit')) {
+          return (
+            <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 4 }}>
+              <input
+                type="date"
+                value={parseDateToYmd(field.value)}
+                onChange={(e) => {
+                  const ymd = e.target.value;
+                  const formatted = formatYmdToDdMmmYyyy(ymd);
+                  onValueChange(formatted);
+                }}
+                style={{
+                  padding: '4px 6px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-surface)',
+                  color: 'var(--color-text)',
+                  fontSize: 13,
+                  outline: 'none',
+                }}
+              />
+            </div>
+          );
+        }
+
+        if (lbl.includes('government id verified')) {
+          const idOptions = ['Aadhaar Card', 'Ration Card', 'Voter ID', 'Driving Licence'];
+          let currentSelection: string[] = [];
+          try {
+            if (field.value.startsWith('[')) {
+              currentSelection = JSON.parse(field.value);
+            } else if (field.value && field.value !== '—') {
+              currentSelection = field.value.split(',').map((s: string) => s.trim());
+            }
+          } catch {
+            currentSelection = [];
+          }
+
+          return (
+            <div 
+              style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {idOptions.map(opt => {
+                const isChecked = currentSelection.includes(opt);
+                const toggle = () => {
+                  let next: string[];
+                  if (isChecked) {
+                    next = currentSelection.filter(s => s !== opt);
+                  } else {
+                    next = [...currentSelection, opt];
+                  }
+                  onValueChange(JSON.stringify(next));
+                };
+                return (
+                  <div
+                    key={opt}
+                    onClick={toggle}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '3px 6px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: `1px solid ${isChecked ? 'var(--color-success-border)' : 'var(--color-border-light)'}`,
+                      background: isChecked ? 'var(--color-success-light)' : 'var(--color-bg)',
+                      fontSize: 11,
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      readOnly
+                      style={{ pointerEvents: 'none', marginRight: 2 }}
+                    />
+                    <span style={{ color: 'var(--color-text)' }}>{opt}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        }
+
+        const radioOpts = getRadioOptions(field.label);
+        if (radioOpts) {
+          return (
+            <div 
+              style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 4 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {radioOpts.map(opt => {
+                const isChecked = field.value.trim().toLowerCase() === opt.toLowerCase();
+                return (
+                  <label 
+                    key={opt} 
+                    style={{ 
+                      display: 'inline-flex', 
+                      alignItems: 'center', 
+                      gap: 4, 
+                      fontSize: 12, 
+                      color: 'var(--color-text)',
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name={field.label}
+                      checked={isChecked}
+                      onChange={() => onValueChange(opt)}
+                    />
+                    {opt}
+                  </label>
+                );
+              })}
+            </div>
+          );
+        }
+        if (isCheckboxField) {
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+              <CheckboxIcon value={field.value} />
+              <span style={{ fontSize: 13, color: 'var(--color-text)' }}>{field.value}</span>
+            </div>
+          );
+        }
+        if (editing) {
+          return (
+            <InlineEditor value={field.value} onSave={handleSave} onCancel={handleCancel} />
+          );
+        }
+        return null;
+      })() || (
         <div
           onDoubleClick={handleStartEdit}
           style={{
@@ -475,6 +666,169 @@ function CheckboxItem({ field, isSelected, onFieldClick, onFieldUpdate }: {
   );
 }
 
+function CheckboxDropdownGroup({
+  groupLabel,
+  fields,
+  selectedField,
+  onFieldClick,
+  onFieldUpdate,
+}: {
+  groupLabel: string;
+  fields: Field[];
+  selectedField: Field | null;
+  onFieldClick: (f: Field) => void;
+  onFieldUpdate: (f: Field, newVal: string) => void;
+}) {
+  const activeSelected = fields.find(f => {
+    const v = f.value.trim().toLowerCase();
+    return v === 'yes' || v === 'true' || v === '✓';
+  });
+
+  const isGroupSelected = selectedField ? fields.includes(selectedField) : false;
+
+  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const chosenLabel = e.target.value;
+    fields.forEach(f => {
+      const parts = f.label.split(' — ');
+      const optName = parts[1] || parts[0];
+      const isChosen = optName === chosenLabel;
+      const newVal = isChosen ? 'yes' : 'no';
+      if (f.value !== newVal) {
+        onFieldUpdate(f, newVal);
+      }
+    });
+  };
+
+  const options = fields.map(f => {
+    const parts = f.label.split(' — ');
+    return parts[1] || parts[0];
+  });
+
+  const currentVal = activeSelected ? (activeSelected.label.split(' — ')[1] || activeSelected.label) : '';
+
+  return (
+    <div
+      onClick={() => onFieldClick(activeSelected || fields[0])}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+        padding: '6px 10px',
+        border: `1px solid ${isGroupSelected ? 'var(--color-primary)' : 'var(--color-border)'}`,
+        borderRadius: 'var(--radius-md)',
+        background: isGroupSelected ? 'var(--color-primary-light)' : 'var(--color-surface)',
+        marginBottom: 6,
+        cursor: 'pointer',
+        boxSizing: 'border-box',
+        width: '100%',
+      }}
+    >
+      <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)', userSelect: 'none' }}>
+        {groupLabel}
+      </label>
+      <select
+        value={currentVal}
+        onChange={handleChange}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%',
+          padding: '6px 8px',
+          borderRadius: 'var(--radius-sm)',
+          border: '1px solid var(--color-border)',
+          background: 'var(--color-surface)',
+          color: 'var(--color-text)',
+          fontSize: 13,
+          outline: 'none',
+        }}
+      >
+        <option value="">-- Select Option --</option>
+        {options.map(opt => (
+          <option key={opt} value={opt}>
+            {opt}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function CheckboxMultiSelectGroup({
+  groupLabel,
+  fields,
+  selectedField,
+  onFieldClick,
+  onFieldUpdate,
+}: {
+  groupLabel: string;
+  fields: Field[];
+  selectedField: Field | null;
+  onFieldClick: (f: Field) => void;
+  onFieldUpdate: (f: Field, newVal: string) => void;
+}) {
+  const isGroupSelected = selectedField ? fields.includes(selectedField) : false;
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        padding: '8px 10px',
+        border: `1px solid ${isGroupSelected ? 'var(--color-primary)' : 'var(--color-border)'}`,
+        borderRadius: 'var(--radius-md)',
+        background: 'var(--color-surface)',
+        marginBottom: 6,
+        width: '100%',
+        boxSizing: 'border-box',
+      }}
+    >
+      <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)', userSelect: 'none' }}>
+        {groupLabel} (Multi-Select)
+      </label>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {fields.map(f => {
+          const optName = f.label.split(' — ')[1] || f.label;
+          const isChecked = f.value.trim().toLowerCase() === 'yes' || f.value.trim().toLowerCase() === 'true' || f.value.trim().toLowerCase() === '✓';
+          const isItemSel = selectedField === f;
+
+          const toggleChecked = (e: React.MouseEvent) => {
+            e.stopPropagation();
+            onFieldClick(f);
+            onFieldUpdate(f, isChecked ? 'no' : 'yes');
+          };
+
+          return (
+            <div
+              key={f.label}
+              onClick={toggleChecked}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '4px 8px',
+                borderRadius: 'var(--radius-sm)',
+                border: `1px solid ${isItemSel ? 'var(--color-primary)' : isChecked ? 'var(--color-success-border)' : 'var(--color-border-light)'}`,
+                background: isItemSel ? 'var(--color-primary-light)' : isChecked ? 'var(--color-success-light)' : 'var(--color-bg)',
+                fontSize: 12,
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={isChecked}
+                readOnly
+                style={{ pointerEvents: 'none', marginRight: 4 }}
+              />
+              <span style={{ color: 'var(--color-text)' }}>{optName}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function CheckboxGroupView({
   fields, selectedField, onFieldClick, onFieldUpdate,
 }: {
@@ -483,17 +837,46 @@ function CheckboxGroupView({
   onFieldClick: (f: Field) => void;
   onFieldUpdate: (f: Field, newVal: string) => void;
 }) {
+  const groups = useMemo(() => {
+    const map = new Map<string, Field[]>();
+    fields.forEach(f => {
+      const parts = f.label.split(' — ');
+      const prefix = parts[0];
+      if (!map.has(prefix)) {
+        map.set(prefix, []);
+      }
+      map.get(prefix)!.push(f);
+    });
+    return Array.from(map.entries());
+  }, [fields]);
+
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '6px 0' }}>
-      {fields.map(f => (
-        <CheckboxItem
-          key={f.label}
-          field={f}
-          isSelected={selectedField === f}
-          onFieldClick={onFieldClick}
-          onFieldUpdate={onFieldUpdate}
-        />
-      ))}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', padding: '4px 0' }}>
+      {groups.map(([groupLabel, grpFields]) => {
+        const isMulti = groupLabel.toLowerCase().includes('assets at home');
+        if (isMulti) {
+          return (
+            <CheckboxMultiSelectGroup
+              key={groupLabel}
+              groupLabel={groupLabel}
+              fields={grpFields}
+              selectedField={selectedField}
+              onFieldClick={onFieldClick}
+              onFieldUpdate={onFieldUpdate}
+            />
+          );
+        }
+        return (
+          <CheckboxDropdownGroup
+            key={groupLabel}
+            groupLabel={groupLabel}
+            fields={grpFields}
+            selectedField={selectedField}
+            onFieldClick={onFieldClick}
+            onFieldUpdate={onFieldUpdate}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -595,17 +978,24 @@ export default function ExtractedDataPanel({
           const sectionPrefix = match[1];
           if (!tableFields.has(sectionPrefix)) tableFields.set(sectionPrefix, []);
           tableFields.get(sectionPrefix)!.push(f);
-        } else if (isCheckbox(f)) {
+        } else if (isCheckbox(f) && (f.label.includes(' — ') || f.label.includes(' - ') || f.label.includes(' – '))) {
           checkboxFields.push(f);
         } else {
           otherFields.push(f);
         }
       }
 
+      const cbPrefixes = new Set<string>();
+      for (const f of checkboxFields) {
+        const parts = f.label.split(' — ');
+        cbPrefixes.add(parts[0]);
+      }
+      const filteredOtherFields = otherFields.filter(f => !cbPrefixes.has(f.label));
+
       map.set(sn, {
         sectionNumber: sn,
         sectionName: name,
-        fields: otherFields,
+        fields: filteredOtherFields,
         tables: Array.from(tableFields.values()),
         checkboxGroups: checkboxFields.length > 0 ? [checkboxFields] : [],
       });
@@ -695,7 +1085,7 @@ export default function ExtractedDataPanel({
       )}
 
       {/* ── Section list ── */}
-      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
+      <div style={{ flex: 1, overflowY: hideToolbar ? 'visible' : 'auto', overflowX: 'hidden' }}>
         {sectionGroups.length === 0 && (
           <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
             No fields on this page.
