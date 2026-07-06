@@ -1,5 +1,18 @@
 # OCR Extraction — Architecture Plan
+- 6.2 → page 5
+- 6.3 → page 6
+▣  Build · Big Pickle · 13.8s
+for key in ("Application_ID", "Applicant_ID"):
+                    app_id_obj = record.get(key) or {}
+                    if isinstance(app_id_obj, dict):
+                        num_id = str(app_id_obj.get("ID") or "")
+                        if num_id.isdigit():
+                            logger.info("Resolved Application_ID via field '%s': %s", key, num_id)
+                            return num_id
+                # Log what we actually got to help diagnose if neither key matches
+                logger.warning("Application_ID lookup: field not found; record keys=%s", list(record.keys())[:20]) 
 
+use this lines it will upload with correct application id
 ## Goal
 Fully automated OCR extraction from PDF forms — no manual corrections needed.
 Upload multiple PDFs, get structured JSON + Markdown results.

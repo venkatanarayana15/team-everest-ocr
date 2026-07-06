@@ -32,20 +32,35 @@ function checkboxDisplay(val: string): { icon: string; color: string } {
 
 function parseDateToYmd(val: string): string {
   if (!val) return '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
-  const slashMatch = val.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const v = val.trim();
+  
+  const isoMatch = v.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return isoMatch[0];
+  
+  // Try DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY (with 2 or 4 digit year)
+  const slashMatch = v.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2}|\d{4})/);
   if (slashMatch) {
-    return `${slashMatch[3]}-${slashMatch[2]}-${slashMatch[1]}`;
+    const dd = slashMatch[1].padStart(2, '0');
+    const mm = slashMatch[2].padStart(2, '0');
+    let yy = slashMatch[3];
+    if (yy.length === 2) yy = '20' + yy;
+    return `${yy}-${mm}-${dd}`;
   }
-  const dashMatch = val.match(/^(\d{2})-([a-zA-Z]{3})-(\d{4})$/);
+  
+  // Try DD-MMM-YYYY, DD MMM YYYY, etc.
+  const dashMatch = v.match(/(\d{1,2})[\/\-\s]+([a-zA-Z]{3,})[\/\-\s]+(\d{2}|\d{4})/);
   if (dashMatch) {
     const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-    const monthIndex = months.indexOf(dashMatch[2].toLowerCase());
+    const monthIndex = months.findIndex(m => dashMatch[2].toLowerCase().startsWith(m));
     if (monthIndex !== -1) {
       const mm = String(monthIndex + 1).padStart(2, '0');
-      return `${dashMatch[3]}-${mm}-${dashMatch[1]}`;
+      const dd = dashMatch[1].padStart(2, '0');
+      let yy = dashMatch[3];
+      if (yy.length === 2) yy = '20' + yy;
+      return `${yy}-${mm}-${dd}`;
     }
   }
+  
   return '';
 }
 
@@ -263,14 +278,31 @@ function FieldValue({
         const lbl = field.label.toLowerCase();
         
         if (lbl.includes('date of visit')) {
+          // Convert current value (which might be DD-MMM-YYYY or raw text) to DD-MM-YYYY for editing
+          const ymd = parseDateToYmd(field.value);
+          let initialMasked = field.value;
+          if (ymd) {
+            const parts = ymd.split('-');
+            if (parts.length === 3) initialMasked = `${parts[2]}-${parts[1]}-${parts[0]}`;
+          }
+
           return (
             <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 4 }}>
               <input
-                type="date"
-                value={parseDateToYmd(field.value)}
+                type="text"
+                placeholder="DD-MM-YYYY"
+                value={initialMasked}
                 onChange={(e) => {
-                  const ymd = e.target.value;
-                  const formatted = formatYmdToDdMmmYyyy(ymd);
+                  let val = e.target.value.replace(/\D/g, ''); // keep only digits
+                  if (val.length > 8) val = val.slice(0, 8); // max 8 digits
+                  
+                  let formatted = val;
+                  if (val.length >= 5) {
+                    formatted = `${val.slice(0, 2)}-${val.slice(2, 4)}-${val.slice(4)}`;
+                  } else if (val.length >= 3) {
+                    formatted = `${val.slice(0, 2)}-${val.slice(2)}`;
+                  }
+                  
                   onValueChange(formatted);
                 }}
                 style={{
@@ -281,6 +313,8 @@ function FieldValue({
                   color: 'var(--color-text)',
                   fontSize: 13,
                   outline: 'none',
+                  width: '120px',
+                  fontFamily: 'var(--font-mono)'
                 }}
               />
             </div>

@@ -107,7 +107,11 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
   2.2 Relationship Details — Year of Death / Separation [text]      ← pg 2
   2.2 Relationship Details — Reason for Death / Separation [text]   ← pg 2
   2.3 Is Father/Mother photograph kept at home?         [radio → Yes | No]
-  2.4 Government ID Verified                            [radio → Aadhaar Card | Ration Card | Driving Licence | Voter ID | Other]
+  2.4 Government ID Verified — Aadhaar Card      [checkbox]
+  2.4 Government ID Verified — Ration Card       [checkbox]
+  2.4 Government ID Verified — Driving Licence   [checkbox]
+  2.4 Government ID Verified — Voter ID          [checkbox]
+  2.4 Government ID Verified — Other              [checkbox]
   2.5 Family Members                                    [table — columns: Name, Age, Education, Occupation, Annual Income]  ← pg 2
 
 --- Section 3 — Housing Condition (Pages 2-3) — 12 fields ---

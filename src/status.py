@@ -2,12 +2,15 @@ import asyncio
 import json
 import logging
 import time
+import re
 from datetime import datetime
 from pathlib import Path
 
 from src.extraction_pipeline import StructuredField
 
 logger = logging.getLogger(__name__)
+
+# ─── Status & Progress Tracking ───────────────────────────────────
 
 STAGE_PROGRESS: dict[str, int] = {
     "queued": 0,
@@ -27,10 +30,9 @@ STAGE_PROGRESS: dict[str, int] = {
 }
 
 _progress_store: dict[str, dict] = {}
-
 _status_queues: dict[str, asyncio.Queue] = {}
-
 _new_job_queues: list[asyncio.Queue] = []
+_last_good_status: dict[str, dict] = {}
 
 
 def update_progress(job_id: str, data: dict) -> None:
@@ -62,9 +64,6 @@ def _push_new_job(job_id: str) -> None:
         _new_job_queues.pop(i)
 
 
-_last_good_status: dict[str, dict] = {}
-
-
 async def _set_status(job_dir: Path, status: str, message: str = "", pages: int = 0, fields: list[dict] | None = None) -> None:
     path = job_dir / "status.json"
     loop = asyncio.get_running_loop()
@@ -72,8 +71,12 @@ async def _set_status(job_dir: Path, status: str, message: str = "", pages: int 
     def _write_status() -> dict:
         existing = {"log": []}
         if path.exists():
-            with open(path) as f:
-                existing = json.load(f)
+            try:
+                raw = path.read_text()
+                if raw.strip():
+                    existing = json.loads(raw)
+            except (json.JSONDecodeError, OSError):
+                existing = {"log": []}
 
         log = existing.get("log", [])
         if message:
@@ -85,8 +88,10 @@ async def _set_status(job_dir: Path, status: str, message: str = "", pages: int 
             "log": log,
             "pages": pages or existing.get("pages", 0),
         }
-        with open(path, "w") as f:
+        tmp = path.with_name(f".{path.name}.tmp")
+        with open(tmp, "w") as f:
             json.dump(data, f, indent=2)
+        tmp.replace(path)
         return data
 
     data = await loop.run_in_executor(None, _write_status)
@@ -207,3 +212,212 @@ def _cleanup_intermediate(job_dir: Path) -> None:
     ts = job_dir / "tesseract_data.json"
     if ts.exists():
         ts.unlink(missing_ok=True)
+    tmp = job_dir / ".status.json.tmp"
+    if tmp.exists():
+        tmp.unlink(missing_ok=True)
+
+
+# ─── Report Rendering Logic ───────────────────────────────────────
+
+_TABLE_ROW_RE = re.compile(r"(.+?) — Row (\d+) — (.+)")
+_OPTION_CHARS = {"✓", "✗", "●", "○"}
+_CHECKED = {"✓", "●"}
+_CHECK_MARK = "\u2611"
+_UNCHECK_MARK = "\u2610"
+
+SECTION_TITLES: dict[int | None, str] = {
+    None: "Header Information",
+    1: "Section 1 — Student Profile",
+    2: "Section 2 — Family Background",
+    3: "Section 3 — Housing Condition",
+    4: "Section 4 — Financial Background",
+    5: "Section 5 — Health Information",
+    6: "Section 6 — Student Commitment",
+    7: "Section 7 — Scholarship Information",
+    8: "Section 8 — Volunteer Observation",
+}
+
+
+def _format_job_datetime(job_id: str) -> str:
+    parts = job_id.split("_")
+    if len(parts) >= 3:
+        date_str = parts[-2]
+        time_str = parts[-1].replace("-", ":")
+        return f"{date_str} {time_str}"
+    return "Unknown"
+
+
+def _is_option(value: str) -> bool:
+    return value in _OPTION_CHARS
+
+
+def _is_checked(value: str) -> bool:
+    return value in _CHECKED
+
+
+def _render_section_fields(lines: list[str], fields: list[dict]) -> None:
+    regular: list[dict] = []
+    checkbox_groups: dict[str, list[tuple[str, str]]] = {}
+    table_groups: dict[str, dict[int, dict[str, str]]] = {}
+
+    for f in fields:
+        label = f["label"]
+        value = f.get("value") or ""
+
+        table_match = _TABLE_ROW_RE.match(label)
+        if table_match:
+            group_key = table_match.group(1).strip()
+            row_num = int(table_match.group(2))
+            col_name = table_match.group(3).strip()
+            table_groups.setdefault(group_key, {})
+            table_groups[group_key].setdefault(row_num, {})
+            table_groups[group_key][row_num][col_name] = value
+            continue
+
+        last_dash = label.rfind(" — ")
+        if last_dash > 0 and _is_option(value):
+            group_key = label[:last_dash].strip()
+            option = label[last_dash + 3:].strip()
+            checkbox_groups.setdefault(group_key, [])
+            checkbox_groups[group_key].append((option, value))
+            continue
+
+        regular.append(f)
+
+    if checkbox_groups:
+        lines.append("")
+    for group_key, options in checkbox_groups.items():
+        for option, val in options:
+            symbol = _CHECK_MARK if _is_checked(val) else _UNCHECK_MARK
+            lines.append(f"{symbol} **{option}**")
+        lines.append("")
+
+    if table_groups:
+        lines.append("")
+    for group_key, rows in table_groups.items():
+        sorted_row_nums = sorted(rows.keys())
+        all_cols: list[str] = []
+        seen = set()
+        for rn in sorted_row_nums:
+            for col in rows[rn]:
+                if col not in seen:
+                    all_cols.append(col)
+                    seen.add(col)
+        if not all_cols:
+            continue
+        header = "| # | " + " | ".join(f"**{c}**" for c in all_cols) + " |"
+        sep = "|---|" + "|".join(["---"] * len(all_cols)) + "|"
+        lines.append(header)
+        lines.append(sep)
+        for rn in sorted_row_nums:
+            row_data = rows[rn]
+            cells = " | ".join(row_data.get(col, "") or "—" for col in all_cols)
+            lines.append(f"| {rn} | {cells} |")
+        lines.append("")
+
+    if regular:
+        lines.append("")
+    for f in regular:
+        label = f["label"]
+        value = f.get("value") or ""
+        lines.append(f"- **{label}:** {value}")
+    if regular:
+        lines.append("")
+
+
+def _render_markdown(data: dict, job_id: str) -> str:
+    lines = []
+    dt = _format_job_datetime(job_id)
+    num_pages = data.get("num_pages", "?")
+    lines.append("# OCR Extraction Results — Home Visit Questionnaire")
+    lines.append("")
+    lines.append(f"**Job:** `{job_id}`  ·  **Date:** {dt}  ·  **Pages:** {num_pages}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    fields = data.get("fields", [])
+    if not fields:
+        lines.append("_No fields extracted._")
+        lines.append("")
+        return "\n".join(lines)
+
+    pages: dict[int, list[dict]] = {}
+    for f in fields:
+        pages.setdefault(f["page"], []).append(f)
+
+    for page_num in sorted(pages):
+        page_fields = pages[page_num]
+        lines.append(f"## Page {page_num}")
+        lines.append("")
+
+        section_fields: dict[int | None, list[dict]] = {}
+        for f in page_fields:
+            section_fields.setdefault(f.get("section_number"), []).append(f)
+
+        section_keys = sorted(section_fields.keys(), key=lambda x: -1 if x is None else (x if x is not None else 0))
+
+        for sec_num in section_keys:
+            sec_fields = section_fields[sec_num]
+            sec_title = SECTION_TITLES.get(sec_num, f"Section {sec_num}")
+            lines.append(f"### {sec_title}")
+            _render_section_fields(lines, sec_fields)
+
+    return "\n".join(lines)
+
+
+def _render_text(data: dict, job_id: str) -> str:
+    lines = [
+        "OCR EXTRACTION RESULTS",
+        "======================",
+        f"Job ID: {job_id}",
+        f"Date Created: {_format_job_datetime(job_id)}",
+        f"Overall Confidence: {data.get('overall_confidence', '?')}%",
+        f"Processing Time: {data.get('processing_time', '?')}s",
+        f"Number of Pages: {data.get('num_pages', '?')}",
+        "",
+        "=" * 60,
+        "",
+    ]
+
+    fields = data.get("fields", [])
+    if not fields:
+        return "\n".join(lines)
+
+    pages: dict[int, list[dict]] = {}
+    for f in fields:
+        pages.setdefault(f["page"], []).append(f)
+
+    for page_num in sorted(pages):
+        page_fields = pages[page_num]
+        lines.append(f"Page {page_num}:")
+        lines.append("-" * 40)
+
+        section_fields: dict[int | None, list[dict]] = {}
+        for f in page_fields:
+            section_fields.setdefault(f.get("section_number"), []).append(f)
+
+        section_keys = sorted(section_fields.keys(), key=lambda x: -1 if x is None else (x if x is not None else 0))
+
+        for sec_num in section_keys:
+            sec_fields = section_fields[sec_num]
+            sec_title = SECTION_TITLES.get(sec_num, f"Section {sec_num}")
+            lines.append(f"  [{sec_title}]")
+            for f in sec_fields:
+                label = f["label"]
+                value = f.get("value") or "(empty)"
+                conf = f["confidence"]
+                badges = []
+                if f.get("needs_clarification"):
+                    badges.append("needs clarification")
+                if f.get("is_verified"):
+                    badges.append("verified")
+                badge_str = f" ({', '.join(badges)})" if badges else ""
+                lines.append(f"    {label}: {value} (conf: {conf}%){badge_str}")
+                if f.get("reason"):
+                    lines.append(f"      Reason: {f['reason']}")
+                if f.get("verification_note") and f["verification_note"] != "High confidence, auto-accepted":
+                    lines.append(f"      Note: {f['verification_note']}")
+            lines.append("")
+
+    return "\n".join(lines)

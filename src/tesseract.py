@@ -1,13 +1,13 @@
 import logging
 import os
 import time
+import hashlib
+import json
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-
 import numpy as np
-
-from src.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,6 @@ if _tesseract_bin.exists():
     os.environ.setdefault("TESSDATA_PREFIX", str(_tesseract_bin.parent))
 
 # ─── Shared data types ────────────────────────────────────────────
-
 
 @dataclass
 class WordBox:
@@ -38,12 +37,11 @@ class OCRResult:
 
 class OCRBackend(ABC):
     @abstractmethod
-    def process(self, pdf_path: str, config: Config) -> OCRResult:
+    def process(self, pdf_path: str, config) -> OCRResult:
         ...
 
 
 # ─── Tesseract BBox Backend ───────────────────────────────────────
-
 
 class TesseractBackend(OCRBackend):
     """Lightweight bounding-box detection using Tesseract OCR.
@@ -89,10 +87,10 @@ class TesseractBackend(OCRBackend):
             "word_bboxes": word_bboxes,
         }
 
-    def process(self, pdf_path: str, config: Config) -> OCRResult:
+    def process(self, pdf_path: str, config) -> OCRResult:
         import fitz
         from PIL import Image
-        from concurrent.futures import ThreadPoolExecutor, wait, FIRST_EXCEPTION, TimeoutError as FuturesTimeout
+        from concurrent.futures import ThreadPoolExecutor, wait, FIRST_EXCEPTION
 
         doc = fitz.open(pdf_path)
         pages_arr: list[tuple[np.ndarray, int]] = []
@@ -127,15 +125,11 @@ class TesseractBackend(OCRBackend):
         return OCRResult(pages_data=pages_data, word_boxes=all_boxes)
 
     def process_images(
-        self, image_paths: dict[int, str], config: Config
+        self, image_paths: dict[int, str], config
     ) -> OCRResult:
-        """Run Tesseract on a dict of page_num -> image_path.
-
-        Unlike process(), this takes already-rendered images and assigns
-        page numbers directly from the dict keys.
-        """
+        """Run Tesseract on a dict of page_num -> image_path."""
         from PIL import Image
-        from concurrent.futures import ThreadPoolExecutor, wait, FIRST_EXCEPTION, TimeoutError as FuturesTimeout
+        from concurrent.futures import ThreadPoolExecutor, wait, FIRST_EXCEPTION
 
         pages_arr: list[tuple[np.ndarray, int]] = []
         for page_num in sorted(image_paths):
@@ -163,9 +157,6 @@ class TesseractBackend(OCRBackend):
         return OCRResult(pages_data=pages_data, word_boxes=all_boxes)
 
 
-# ─── Factory ───────────────────────────────────────────────────────
-
-
 _backends: dict[str, type[OCRBackend]] = {
     "tesseract": TesseractBackend,
 }
@@ -176,3 +167,88 @@ def get_backend(name: str, **kwargs) -> OCRBackend:
         raise ValueError(f"Unknown backend: {name}. Available: {list(_backends.keys())}")
     cls = _backends[name]
     return cls(**kwargs)
+
+
+# ─── BBox Cache & Processor Logic ─────────────────────────────────
+
+_BBOX_CACHE_KEY: str | None = None
+
+
+def _get_bbox_cache_key() -> str:
+    global _BBOX_CACHE_KEY
+    if _BBOX_CACHE_KEY is not None:
+        return _BBOX_CACHE_KEY
+    data_path = Path("bin/eng.traineddata")
+    if data_path.exists():
+        _BBOX_CACHE_KEY = hashlib.md5(data_path.read_bytes()).hexdigest()
+    else:
+        _BBOX_CACHE_KEY = ""
+    return _BBOX_CACHE_KEY
+
+
+def _load_bbox_cache(cache_path: Path, key: str) -> list[WordBox] | None:
+    try:
+        with open(cache_path) as f:
+            cache = json.load(f)
+        if cache.get("key") == key:
+            return [WordBox(**wb) for wb in cache["data"]]
+    except Exception:
+        pass
+    return None
+
+
+def _save_bbox_cache(cache_path: Path, key: str, data: list[WordBox]) -> None:
+    try:
+        with open(cache_path, "w") as f:
+            json.dump({"key": key, "data": [wb.__dict__ for wb in data]}, f)
+    except Exception as e:
+        logger.warning("Failed to save bbox cache: %s", e)
+
+
+def _save_tesseract_data(job_dir: Path, word_boxes: list[WordBox]) -> None:
+    pages_data: dict[int, list[dict]] = {}
+    for wb in word_boxes:
+        p = wb.page_num
+        if p not in pages_data:
+            pages_data[p] = []
+        pages_data[p].append({
+            "text": wb.text, "page": p,
+            "bbox": list(wb.bbox), "confidence": wb.confidence,
+        })
+    data = {"pages": {str(k): v for k, v in pages_data.items()}}
+    path = job_dir / "tesseract_data.json"
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    logger.info("Saved tesseract data for %d pages (%d total words)", len(pages_data), len(word_boxes))
+
+
+import asyncio
+
+_TESSERACT_SEMAPHORE = None
+
+def _get_tesseract_semaphore():
+    global _TESSERACT_SEMAPHORE
+    if _TESSERACT_SEMAPHORE is None:
+        _TESSERACT_SEMAPHORE = asyncio.Semaphore(2)
+    return _TESSERACT_SEMAPHORE
+
+async def run_tesseract_async(
+    loop,
+    pipeline,
+    processed_images: dict[int, str],
+    job_dir: Path,
+    use_cache: bool = False,
+) -> list[WordBox]:
+    bbox_cache = job_dir / "bbox_cache.json"
+    cache_key = _get_bbox_cache_key()
+    if use_cache and bbox_cache.exists() and cache_key:
+        cached = _load_bbox_cache(bbox_cache, cache_key)
+        if cached is not None:
+            return cached
+            
+    async with _get_tesseract_semaphore():
+        wb = await loop.run_in_executor(None, pipeline.run_bbox_images, processed_images)
+        
+    if use_cache and cache_key:
+        _save_bbox_cache(bbox_cache, cache_key, wb)
+    return wb

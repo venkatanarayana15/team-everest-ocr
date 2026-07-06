@@ -15,17 +15,106 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-from src.config import Config
-from src.extraction_pipeline import ExtractionPipeline, StructuredField
-from src.input_handler import extract_zip, scan_folder, IMAGE_EXTENSIONS
+from src.extraction_pipeline import ExtractionPipeline, StructuredField, Config
 from src.page_classifier import PageClassifier
-from src.renderers import _render_markdown, _render_text, _format_job_datetime
 from src.status import (
     _set_status, _get_status, update_progress, get_job_progress,
     _push_sse, _push_new_job, _new_job_queues,
     _status_queues, _cleanup_intermediate,
     STAGE_PROGRESS, _progress_store,
+    _render_markdown, _render_text, _format_job_datetime,
 )
+
+import zipfile
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tiff", ".tif"}
+
+
+def is_pdf(file_path: str | Path) -> bool:
+    return Path(file_path).suffix.lower() == ".pdf"
+
+
+def is_image(file_path: str | Path) -> bool:
+    return Path(file_path).suffix.lower() in IMAGE_EXTENSIONS
+
+
+def is_zip(file_path: str | Path) -> bool:
+    return Path(file_path).suffix.lower() == ".zip"
+
+
+def detect_input_type(paths: list[str | Path]) -> str:
+    if len(paths) == 1 and is_pdf(paths[0]):
+        return "pdf"
+    if len(paths) == 1 and is_zip(paths[0]):
+        return "zip"
+    image_count = sum(1 for p in paths if is_image(p))
+    pdf_count = sum(1 for p in paths if is_pdf(p))
+    if image_count > 0 and pdf_count == 0:
+        return "image_set"
+    if pdf_count > 0 and image_count == 0:
+        if pdf_count == 1:
+            return "pdf"
+        return "pdf_set"
+    if pdf_count > 0 and image_count > 0:
+        return "mixed"
+    return "unknown"
+
+
+def detect_item_type(item_path: str | Path) -> str:
+    p = Path(item_path)
+    if p.is_file() and is_pdf(p):
+        return "pdf"
+    if p.is_dir():
+        images = [f for f in p.iterdir() if f.is_file() and is_image(f)]
+        if len(images) == 6:
+            return "image_set"
+    return "unknown"
+
+
+def extract_zip(zip_path: str | Path, extract_dir: str | Path) -> list[str]:
+    extract_dir = Path(extract_dir)
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    image_paths: list[str] = []
+    with zipfile.ZipFile(str(zip_path), "r") as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            ext = Path(info.filename).suffix.lower()
+            if ext in IMAGE_EXTENSIONS:
+                zf.extract(info, extract_dir)
+                extracted_path = extract_dir / info.filename
+                if extracted_path.exists():
+                    image_paths.append(str(extracted_path.resolve()))
+    image_paths.sort()
+    return image_paths
+
+
+def scan_folder(folder_path: str | Path) -> list[dict]:
+    folder = Path(folder_path)
+    items: list[dict] = []
+    for entry in sorted(folder.iterdir()):
+        if entry.name.startswith("."):
+            continue
+        if entry.is_file() and is_pdf(entry):
+            items.append({
+                "path": str(entry.resolve()),
+                "type": "pdf",
+                "name": entry.name,
+                "images": [],
+            })
+        elif entry.is_dir():
+            images = sorted([
+                str(f.resolve()) for f in entry.iterdir()
+                if f.is_file() and is_image(f)
+            ])
+            if len(images) >= 4:
+                items.append({
+                    "path": str(entry.resolve()),
+                    "type": "image_set",
+                    "name": entry.name,
+                    "images": images,
+                })
+    return items
 from src.pipeline_runner import (
     run_pipeline, run_batch_pdfs_pipeline, run_image_pipeline_from_zip,
     _validate_pdf, _validate_images,

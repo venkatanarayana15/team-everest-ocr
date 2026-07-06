@@ -223,43 +223,46 @@ export default function DocumentReview({
 
   return (
     <div style={{
-      flex: 1, overflowY: 'auto',
-      fontFamily: 'var(--font-sans)',
-      background: 'var(--color-bg)',
+      flex: 1, display: 'flex', fontFamily: 'var(--font-sans)',
+      background: 'var(--color-bg)', overflow: 'hidden',
     }}>
-      {Array.from({ length: numPages }, (_, i) => {
-        const pageNum = i + 1;
-        const fitMode = fitModes[pageNum] ?? true;
-        const dims = imgDims[pageNum];
-        const isSelectedPage = selectedOnPage === pageNum;
-        const pageFields = fields.filter(f => f.page === pageNum);
+      {/* ── Left pane: PDF pages (independent scroll) ── */}
+      <div style={{
+        width: '55%',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        borderRight: '1px solid var(--color-border)',
+        background: '#fafafa',
+        display: 'block',
+      }}>
+        {Array.from({ length: numPages }, (_, i) => {
+          const pageNum = i + 1;
+          const fitMode = fitModes[pageNum] ?? true;
+          const dims = imgDims[pageNum];
+          const isSelectedPage = selectedOnPage === pageNum;
+          const pageFields = fields.filter(f => f.page === pageNum);
 
-        return (
-          <div
-            key={pageNum}
-            ref={el => setBlockRef(pageNum, el)}
-            style={{
-              display: 'flex',
-              height: 'auto',
-              minHeight: 'calc(100vh - 180px)',
-              margin: 12,
-              borderRadius: 'var(--radius-xl)',
-              border: `1px solid ${isSelectedPage ? 'var(--color-primary)' : 'var(--color-border)'}`,
-              boxShadow: isSelectedPage
-                ? '0 0 0 2px rgba(37,99,235,0.15), var(--shadow-md)'
-                : 'var(--shadow-sm)',
-              background: 'var(--color-surface)',
-              transition: 'border-color var(--transition-normal), box-shadow var(--transition-normal)',
-            }}
-          >
-            {/* ── Left: PDF page ── */}
-            <div style={{
-              width: '55%',
-              display: 'flex',
-              flexDirection: 'column',
-              minHeight: 'auto',
-              background: '#fafafa',
-            }}>
+          return (
+            <div
+              key={pageNum}
+              ref={el => setBlockRef(pageNum, el)}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                margin: 12,
+                minHeight: 'calc(100vh - 180px)',
+                height: 'auto',
+                borderRadius: 'var(--radius-xl)',
+                border: `1px solid ${isSelectedPage ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                boxShadow: isSelectedPage
+                  ? '0 0 0 2px rgba(37,99,235,0.15), var(--shadow-md)'
+                  : 'var(--shadow-sm)',
+                background: 'var(--color-surface)',
+                transition: 'border-color var(--transition-normal), box-shadow var(--transition-normal)',
+                overflow: 'hidden',
+              }}
+            >
+              {/* Page header */}
               <div style={{
                 padding: '8px 14px',
                 background: 'var(--color-surface)',
@@ -267,7 +270,6 @@ export default function DocumentReview({
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                flexShrink: 0,
               }}>
                 <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text)' }}>Page {pageNum}</span>
                 <span style={{ color: 'var(--color-text-placeholder)' }}>·</span>
@@ -291,16 +293,16 @@ export default function DocumentReview({
                 </button>
               </div>
 
+              {/* Page image */}
               <div style={{
                 flex: 1,
                 minHeight: 'auto',
-                overflow: 'visible',
+                overflow: fitMode ? 'visible' : 'auto',
                 display: 'flex',
                 justifyContent: fitMode ? 'center' : 'flex-start',
                 alignItems: 'flex-start',
                 position: 'relative',
               }}>
-                {/* ── Fit mode: image scales to width, height auto ── */}
                 {fitMode ? (
                   <div style={{ position: 'relative', width: '100%' }}>
                     <img
@@ -344,41 +346,79 @@ export default function DocumentReview({
                 )}
               </div>
             </div>
+          );
+        })}
+      </div>
 
-            {/* ── Right: Extracted data / Raw Text ── */}
-            <div style={{
-              width: '45%',
+      {/* ── Right pane: Extracted data / Raw text (independent scroll) ── */}
+      <div style={{
+        width: '45%',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        background: 'var(--color-bg)',
+        display: 'block',
+      }}>
+        {Array.from({ length: numPages }, (_, i) => {
+          const pageNum = i + 1;
+          return (
+            <div key={pageNum} style={{
+              margin: '12px 12px 0 12px',
+              borderRadius: 'var(--radius-xl)',
+              background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
               display: 'flex',
               flexDirection: 'column',
-              minHeight: 'auto',
-              overflow: 'visible',
-              borderLeft: '1px solid var(--color-border)',
-              background: 'var(--color-surface)',
+              boxShadow: 'var(--shadow-sm)',
+              overflow: 'hidden',
             }}>
-              {rightPanelFormat === 'fields' ? (
-                <ExtractedDataPanel
-                  fields={fields}
-                  sections={sections}
-                  selectedField={selectedField}
-                  onFieldClick={handleFieldClick}
-                  onPageClick={() => {}}
-                  currentPage={pageNum}
-                  numPages={numPages}
-                  jobId={jobId}
-                  onFieldsUpdated={onFieldsUpdated}
-                  hideToolbar
-                />
-              ) : (
-                <EditableTextViewer
-                  pageNum={pageNum}
-                  rawText={rawText}
-                  onSave={handlePageTextChange}
-                />
-              )}
+              <div style={{
+                padding: '12px 16px',
+                background: '#fafafa',
+                borderBottom: '1px solid var(--color-border)',
+                fontWeight: 600,
+                fontSize: 14,
+                color: 'var(--color-text)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}>
+                <span style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 24, height: 24, borderRadius: '50%', background: 'var(--color-primary-light)',
+                  color: 'var(--color-primary)', fontSize: 12, fontWeight: 700,
+                }}>
+                  {pageNum}
+                </span>
+                Page {pageNum} Data
+              </div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                {rightPanelFormat === 'fields' ? (
+                  <ExtractedDataPanel
+                    fields={fields}
+                    sections={sections}
+                    selectedField={selectedField}
+                    onFieldClick={handleFieldClick}
+                    onPageClick={() => {}}
+                    currentPage={pageNum}
+                    numPages={numPages}
+                    jobId={jobId}
+                    onFieldsUpdated={onFieldsUpdated}
+                    hideToolbar
+                  />
+                ) : (
+                  <EditableTextViewer
+                    pageNum={pageNum}
+                    rawText={rawText}
+                    onSave={handlePageTextChange}
+                  />
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+        {/* Spacer at the bottom so the last item isn't flush against the window edge */}
+        <div style={{ height: 12, flexShrink: 0 }} />
+      </div>
     </div>
   );
 }

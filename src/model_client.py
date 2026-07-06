@@ -4,9 +4,123 @@ import json
 import logging
 import os
 from abc import ABC, abstractmethod
-from src.ratelimit import RateLimiter, call_with_retry, call_with_retry_async
+import time
+import random
 
 logger = logging.getLogger(__name__)
+
+# Global semaphore that caps total concurrent LLM calls across ALL pipelines.
+# This prevents LLM API overload regardless of how many pipelines are active.
+_global_llm_semaphore = asyncio.Semaphore(
+    int(os.environ.get("GLOBAL_LLM_MAX_CONCURRENCY", "6"))
+)
+
+
+class RateLimiter:
+    """Sliding-window rate limiter with both sync and async wait."""
+
+    def __init__(self, rpm: int | None = None, max_concurrency: int | None = None):
+        self.rpm = rpm or int(os.environ.get("LLM_RATE_LIMIT_RPM", "30"))
+        self.max_concurrency = max_concurrency or int(os.environ.get("LLM_MAX_CONCURRENCY", "2"))
+        self._timestamps: list[float] = []
+        self._semaphore = asyncio.Semaphore(self.max_concurrency)
+
+    def wait(self) -> None:
+        now = time.time()
+        self._timestamps = [t for t in self._timestamps if now - t < 60]
+        if len(self._timestamps) >= self.rpm:
+            sleep_for = self._timestamps[0] + 60 - now
+            if sleep_for > 0:
+                logger.debug("Rate limit: sleeping %.1fs", sleep_for)
+                time.sleep(sleep_for)
+        self._timestamps.append(time.time())
+
+    async def wait_async(self) -> None:
+        now = time.time()
+        self._timestamps = [t for t in self._timestamps if now - t < 60]
+        if len(self._timestamps) >= self.rpm:
+            sleep_for = self._timestamps[0] + 60 - now
+            if sleep_for > 0:
+                logger.debug("Rate limit: sleeping %.1fs", sleep_for)
+                await asyncio.sleep(sleep_for)
+        self._timestamps.append(time.time())
+
+
+def _is_transient(e: Exception) -> bool:
+    msg = str(e).lower()
+    if hasattr(e, "status_code"):
+        code = e.status_code
+        if code == 429 or (500 <= code < 600):
+            return True
+    if hasattr(e, "code"):
+        code = e.code
+        if code == 429 or (isinstance(code, int) and 500 <= code < 600):
+            return True
+    if "429" in msg or "too many requests" in msg:
+        return True
+    if "rate_limit" in msg or "rate limit" in msg:
+        return True
+    if isinstance(e, (TimeoutError, ConnectionError)):
+        return True
+    if "timeout" in msg or "connection refused" in msg or "connection reset" in msg:
+        return True
+    return False
+
+
+def call_with_retry(fn, max_retries: int | None = None, rl: RateLimiter | None = None):
+    if rl:
+        rl.wait()
+    max_retries = max_retries if max_retries is not None else int(os.environ.get("LLM_MAX_RETRIES", "5"))
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except Exception as e:
+            if not _is_transient(e):
+                raise
+            if attempt == max_retries - 1:
+                raise
+            wait = (2**attempt) + random.uniform(0, 1)
+            logger.warning(
+                "Transient error (%s) attempt %d/%d. Waiting %.1fs...",
+                type(e).__name__,
+                attempt + 1,
+                max_retries,
+                wait,
+            )
+            time.sleep(wait)
+    return None
+
+
+async def call_with_retry_async(fn, max_retries: int | None = None, rl: RateLimiter | None = None):
+    async with _global_llm_semaphore:
+        if rl:
+            async with rl._semaphore:
+                await rl.wait_async()
+                return await _call_with_retry_async_inner(fn, max_retries)
+        else:
+            return await _call_with_retry_async_inner(fn, max_retries)
+
+
+async def _call_with_retry_async_inner(fn, max_retries: int | None = None):
+    max_retries = max_retries if max_retries is not None else int(os.environ.get("LLM_MAX_RETRIES", "5"))
+    for attempt in range(max_retries):
+        try:
+            return await fn()
+        except Exception as e:
+            if not _is_transient(e):
+                raise
+            if attempt == max_retries - 1:
+                raise
+            wait = (2**attempt) + random.uniform(0, 1)
+            logger.warning(
+                "Transient error (%s) attempt %d/%d. Waiting %.1fs...",
+                type(e).__name__,
+                attempt + 1,
+                max_retries,
+                wait,
+            )
+            await asyncio.sleep(wait)
+    return None
 
 TokenUsage = dict
 
@@ -182,27 +296,28 @@ class OpenAICompatibleClient(ModelClient):
             return None, usage
 
 
-# ── Gemini ────────────────────────────────────────────────────────
+# ── Gemini (google.genai) ──────────────────────────────────────────
 
 class GeminiClient(ModelClient):
-    def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
+    def __init__(self, api_key: str, model: str = "gemini-2.5-flash", base_url: str | None = None):
+        from google import genai as _genai
+        http_options = {}
+        if base_url:
+            http_options["base_url"] = base_url
+        self._client = _genai.Client(api_key=api_key, http_options=http_options or None)
+        self._genai = _genai
         self.model_name = model
-        self._genai = genai
         self._rl = RateLimiter()
-
-    def _model(self):
-        return self._genai.GenerativeModel(self.model_name)
 
     @staticmethod
     def _extract_token_usage(response) -> TokenUsage:
         usage = {}
-        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+        metadata = getattr(response, "usage_metadata", None)
+        if metadata is not None:
             usage = {
-                "prompt_tokens": getattr(response.usage_metadata, 'prompt_token_count', 0) or 0,
-                "completion_tokens": getattr(response.usage_metadata, 'candidates_token_count', 0) or 0,
-                "total_tokens": getattr(response.usage_metadata, 'total_token_count', 0) or 0,
+                "prompt_tokens": getattr(metadata, "prompt_token_count", 0) or 0,
+                "completion_tokens": getattr(metadata, "response_token_count", 0) or 0,
+                "total_tokens": getattr(metadata, "total_token_count", 0) or 0,
             }
         return usage
 
@@ -210,37 +325,42 @@ class GeminiClient(ModelClient):
         from PIL import Image
 
         logger.info("Uploading PDF to Gemini...")
-        loop = asyncio.get_running_loop()
 
         try:
-            sample_file = await loop.run_in_executor(
-                None,
-                lambda: call_with_retry(
-                    lambda: self._genai.upload_file(path=pdf_path, mime_type="application/pdf"),
-                    rl=self._rl,
+            sample_file = await call_with_retry_async(
+                lambda: self._client.aio.files.upload(
+                    file=pdf_path,
+                    config={"mime_type": "application/pdf"},
                 ),
+                rl=self._rl,
             )
             logger.info("Uploaded: %s", sample_file.name)
-            response = await loop.run_in_executor(
-                None,
-                lambda: call_with_retry(
-                    lambda: self._model().generate_content([sample_file, prompt]),
-                    rl=self._rl,
+            response = await call_with_retry_async(
+                lambda: self._client.aio.models.generate_content(
+                    model=self.model_name,
+                    contents=[sample_file, prompt],
+                    config=self._genai.types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                    ),
                 ),
+                rl=self._rl,
             )
         except Exception as e:
             logger.warning("Gemini PDF upload failed (%s), falling back to page images", e)
             pages = sorted(page_images.keys())
-            content: list = [prompt]
+            contents: list = [prompt]
             for p in pages:
                 img = Image.open(page_images[p])
-                content.append(img)
-            response = await loop.run_in_executor(
-                None,
-                lambda: call_with_retry(
-                    lambda: self._model().generate_content(content),
-                    rl=self._rl,
+                contents.append(img)
+            response = await call_with_retry_async(
+                lambda: self._client.aio.models.generate_content(
+                    model=self.model_name,
+                    contents=contents,
+                    config=self._genai.types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                    ),
                 ),
+                rl=self._rl,
             )
 
         token_usage = self._extract_token_usage(response)
@@ -290,8 +410,8 @@ def get_model_client(role: str = "primary") -> ModelClient:
     base_url = os.environ.get(base_url_key) or _BASE_URLS.get(provider)
 
     if provider == "gemini":
-        logger.info("[%s] Using Gemini: %s", role, model)
-        return GeminiClient(api_key=api_key, model=model)
+        logger.info("[%s] Using Gemini: %s  base_url=%s", role, model, base_url)
+        return GeminiClient(api_key=api_key, model=model, base_url=base_url)
 
     logger.info("[%s] Using OpenAI-Compatible Client (%s): %s", role, provider, model)
     return OpenAICompatibleClient(api_key=api_key, model=model, base_url=base_url, provider=provider)

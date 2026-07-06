@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dataclasses import dataclass, field
 from rapidfuzz import fuzz
-from src.input_handler import detect_input_type, detect_item_type, is_image, is_pdf, is_zip, extract_zip, scan_folder, IMAGE_EXTENSIONS
+from src.server import detect_input_type, detect_item_type, is_image, is_pdf, is_zip, extract_zip, scan_folder, IMAGE_EXTENSIONS
 from src.page_classifier import PageClassifier, PageClassification
 
 

@@ -187,8 +187,7 @@ FIELD_TO_ZOHO: dict[str, str] = {
     "Co-Volunteer Name": "Co_Volunteer_Name",
     "Date of Visit": "Date_of_Visit",
     # Section 1 — Student Profile
-    # NOTE: "1.1 Application ID" → Application_ID is handled separately in
-    # _update_zoho_creator_fields (lookup field, only set when numeric ID available).
+    "1.1 Application ID": "Application_ID",
     "1.2 Student Full Name": "Student_Full_Name",
     "1.3 Gender": "Gender",
     # Section 2 — Family Background
@@ -228,6 +227,7 @@ FIELD_TO_ZOHO: dict[str, str] = {
 # Multi-select checkbox groups: prefix in label → Creator field + aggregation type
 # The OCR extracts each checkbox option as "{prefix} — {option}" with value "✓"/"✗"
 AGGREGATE_MAP: dict[str, dict[str, str]] = {
+    "2.4 Government ID Verified": {"target": "Government_ID_Verified_Ration_Card_Aadhaar_Driving_Licence_Voter_ID", "type": "stringlist"},
     "3.2 Type of Home": {"target": "Type_of_Home", "type": "text"},
     "3.3 Type of Ceiling": {"target": "Type_of_Ceiling", "type": "text"},
     "3.6 Kitchen Type": {"target": "Kitchen_Type", "type": "text"},
@@ -343,6 +343,7 @@ ZOHO_STRINGLIST_FIELDS: set[str] = {
 # Fields that accept only specific enum values — any other value is rejected to avoid Creator validation errors
 ZOHO_ENUM_FIELDS: dict[str, set[str]] = {
     "Gender": {"Male", "Female", "Others"},
+    "Will_you_recommend_this_student_for_this_scholarship": {"Yes", "No", "Not Sure"},
 }
 
 # Fields that expect Yes/No values — reject any non-boolean value to avoid Creator validation errors
@@ -351,11 +352,8 @@ ZOHO_BOOLEAN_FIELDS: set[str] = {
     "Apart_from_your_job_is_there_any_other_source_of_income",
     "Do_you_have_any_loans",
     "Does_the_student_have_any_health_issues",
-    "Will_you_study_college_for_three_years_without_any_obstacle",
     "If_we_have_a_training_program_within_15_km_from_your_home_can_you_come1",
     "Are_you_ready_to_send_your_son_daughter_to_weekly_skill_development_classes_on_Sundays1",
-    "Has_the_student_received_or_Applied_for_any_other_scholarships_for_their_UG_degree",
-    "Will_you_recommend_this_student_for_this_scholarship",
     "Do_you_own_any_other_assets_or_properties_in_the_name_of_grandparents_parent_or_student",
 }
 
@@ -599,16 +597,13 @@ def _query_numeric_app_id_from_creator(
     app_owner: str,
     app_link_name: str,
     report_link_name: str,
-    record_id: str,
+    zoho_record_id: str,
 ) -> str | None:
-    """Query Volunteer_Home_Visited_Form_Report to resolve the parent numeric Applications ID."""
+    """Fetch the volunteer record directly by ID to resolve the parent numeric Applications ID."""
     try:
-        import urllib.parse
-        criteria = f'(Applicant_ID_String == "{record_id}")'
-        encoded_criteria = urllib.parse.quote(criteria)
         url = (
             f"https://www.zohoapis.com/creator/v2.1/data/{app_owner}/{app_link_name}/"
-            f"report/{report_link_name}?criteria={encoded_criteria}"
+            f"report/{report_link_name}/{zoho_record_id}"
         )
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}",
@@ -617,15 +612,21 @@ def _query_numeric_app_id_from_creator(
         request = urllib.request.Request(url, headers=headers, method='GET')
         with _urlopen_with_retry(request, timeout=15) as resp:
             data = json.loads(resp.read().decode())
-            records = data.get("data", [])
-            if records:
-                app_id_obj = records[0].get("Applicant_ID") or {}
-                if isinstance(app_id_obj, dict):
-                    num_id = str(app_id_obj.get("ID") or "")
-                    if num_id.isdigit():
-                        return num_id
+            record = data.get("data") or {}
+            if record:
+                # The linking field may be named 'Application_ID' or 'Applicant_ID'
+                # depending on the Zoho Creator report configuration.
+                for key in ("Application_ID", "Applicant_ID"):
+                    app_id_obj = record.get(key) or {}
+                    if isinstance(app_id_obj, dict):
+                        num_id = str(app_id_obj.get("ID") or "")
+                        if num_id.isdigit():
+                            logger.info("Resolved Application_ID via field '%s': %s", key, num_id)
+                            return num_id
+                # Log what we actually got to help diagnose if neither key matches
+                logger.warning("Application_ID lookup: field not found; record keys=%s", list(record.keys())[:20])
     except Exception as e:
-        logger.warning("Failed to query numeric app ID for %s: %s", record_id, e)
+        logger.warning("Failed to query numeric app ID by record ID %s: %s", zoho_record_id, e)
     return None
 
 
@@ -640,16 +641,16 @@ def _update_zoho_creator_fields(
     # of the parent Applications record, NOT the display Applicant_ID string.
     # The lookup relationship is already established when the questionnaire
     # record was created — only re-set it when we have a numeric ID.
-    payload.pop("Application_ID", None)
-    app_id = req.application_id or result.get("application_id", "")
-    if app_id and not app_id.isdigit():
-        logger.info("Resolving numeric Application_ID for %s from Creator report...", app_id)
+    payload_app_id = payload.pop("Application_ID", None)
+    app_id = req.application_id or payload_app_id or result.get("application_id", "")
+    if not app_id or not app_id.isdigit():
+        logger.info("Resolving numeric Application_ID from Creator report using record ID %s...", req.zoho_record_id)
         resolved_id = _query_numeric_app_id_from_creator(
             access_token,
             req.zoho_app_owner,
             req.zoho_app_link_name,
             req.zoho_report_link_name,
-            app_id
+            req.zoho_record_id
         )
         if resolved_id:
             app_id = resolved_id
@@ -659,11 +660,9 @@ def _update_zoho_creator_fields(
         payload["Application_ID"] = app_id
         logger.info("Application_ID=%s set in Creator payload | record=%s",
                      app_id, req.record_id)
-    elif app_id:
-        logger.warning("Application_ID=%s is non-numeric (display name, not lookup ID) — omitted from payload | record=%s",
-                        app_id, req.record_id)
     else:
-        logger.warning("No application_id available (request or OCR) — Application_ID omitted | record=%s", req.record_id)
+        logger.warning("Application_ID=%s is non-numeric or empty — omitted from payload | record=%s",
+                        app_id or "(empty)", req.record_id)
     if not payload:
         print(f"\n{'='*80}")
         print(f"  ZOHO CREATOR UPDATE: No fields to write | record={req.record_id}")
@@ -710,6 +709,15 @@ def _update_zoho_creator_fields(
         len(payload), req.record_id,
     )
 
+    _post_creator_payload(access_token, req, payload)
+
+
+def _post_creator_payload(
+    access_token: str,
+    req: OcrExtractRequest,
+    payload: dict,
+) -> None:
+    """POST a pre-built payload dict to the Zoho Creator questionnaire form."""
     # Zoho Creator v2.1: POST to /form/{form_link_name} to add a record.
     # Using /report/ returns HTTP 405 — reports are read-only views.
     url = (f"https://www.zohoapis.com/creator/v2.1/data/{req.zoho_app_owner}/"
@@ -740,11 +748,30 @@ def _update_zoho_creator_fields(
                 logger.warning("Creator POST retry failed | record=%s | status=%s | body=%s",
                                req.record_id, e.code, _resp_body)
                 raise
-        result = json.loads(body)
-        code = result.get("code", 3000)
+        result_data = json.loads(body)
+        code = result_data.get("code", 3000)
         if code not in (2000, 3000):
-            err_msg = result.get("error", str(result))
-            err_full = result.get("message", "")
+            err_msg = result_data.get("error", str(result_data))
+            err_full = result_data.get("message", "")
+
+            # Self-healing fallback: prune fields with invalid values and retry once more
+            if code == 3001 and isinstance(err_msg, list):
+                import re
+                invalid_fields = []
+                for msg in err_msg:
+                    m = re.search(r"Invalid column value for (\w+)", str(msg))
+                    if m:
+                        invalid_fields.append(m.group(1))
+                if invalid_fields:
+                    logger.warning(
+                        "Creator rejected fields: %s. Pruning and retrying | record=%s",
+                        invalid_fields, req.record_id
+                    )
+                    print(f"  ⚠ Omitting invalid fields and retrying: {invalid_fields}")
+                    for f in invalid_fields:
+                        payload.pop(f, None)
+                    return _post_creator_payload(access_token, req, payload)
+
             # Build a field-level summary from the payload to help diagnose
             field_summary = ", ".join(
                 f"{k}={repr(v)[:80]}" for k, v in payload.items()
@@ -792,7 +819,7 @@ def _merge_to_pdf(file_paths: list[Path], output_path: Path) -> None:
     merged.close()
 
 
-async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest) -> str | None:
+async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest, output_name: str = "input.pdf") -> str | None:
     """Download, merge, and upload to Supabase.
 
     Returns the Zoho access token on success (for later use in
@@ -858,7 +885,7 @@ async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest) -> str | 
         logger.info("Merged PDF created (%d pages, %.0f KB from %d files)", _page_count, pdf_size / 1024, len(downloaded))
         await _set_status(job_dir, "converting", f"PDF created ({_page_count} pages, {pdf_size/1024:.0f} KB)")
 
-        input_pdf = job_dir / "input.pdf"
+        input_pdf = job_dir / output_name
         combined_pdf.rename(input_pdf)
         logger.info("Download-prepare done | record=%s%s", rid, aid)
         return access_token
@@ -1218,12 +1245,11 @@ async def process_pending_on_startup(base_dir: Path) -> None:
 
     # 4. Screen records for eligibility
     dl_sem = asyncio.Semaphore(max_concurrent)
-    pipe_sem = asyncio.Semaphore(max_concurrent)
     in_progress: set[str] = set()
-    tasks: list[asyncio.Task] = []
     skipped_no_id = 0
     skipped_no_file = 0
     skipped_dup = 0
+    eligible_requests = []
 
     seq = 0
     for rec in records:
@@ -1235,31 +1261,23 @@ async def process_pending_on_startup(base_dir: Path) -> None:
             skipped_dup += 1
             continue
 
-        # Applicant_ID is a lookup field object in Creator response
         app_id_obj = rec.get("Applicant_ID") or {}
         if isinstance(app_id_obj, str):
-            # Fallback if it is somehow a flat string
             record_id_raw = app_id_obj
             lookup_numeric_id = app_id_obj
         else:
             record_id_raw = str(app_id_obj.get("Applicant_ID") or "")
             lookup_numeric_id = str(app_id_obj.get("ID") or "")
 
-        record_id = (record_id_raw
-                     or rec.get("Student_Full_Name")
-                     or zoho_record_id)
-
+        record_id = (record_id_raw or rec.get("Student_Full_Name") or zoho_record_id)
         file_names = _extract_file_names(rec, file_field_link_name)
         if not file_names:
             print(f"  ⚠ SKIP  {record_id}  — no files in '{file_field_link_name}'")
-            logger.info("STARTUP: skip %s — no files in field '%s'",
-                        record_id, file_field_link_name)
+            logger.info("STARTUP: skip %s — no files in field '%s'", record_id, file_field_link_name)
             skipped_no_file += 1
             continue
 
-        seq += 1
         in_progress.add(zoho_record_id)
-
         req = OcrExtractRequest(
             record_id=str(record_id),
             zoho_app_owner=app_owner,
@@ -1270,68 +1288,9 @@ async def process_pending_on_startup(base_dir: Path) -> None:
             file_names=file_names,
             application_id=lookup_numeric_id,
         )
+        eligible_requests.append(req)
 
-        job_id = f"startup_{_uuid.uuid4().hex[:8]}"
-        job_dir = base_dir / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
-        (job_dir / "original_name.txt").write_text(str(record_id))
-        await _set_status(job_dir, "queued",
-                          f"Auto: {record_id} ({len(file_names)} files)")
-
-        app_str = f" [app={record_id_raw}]" if record_id_raw else ""
-        print(f"  [#{seq}] ▶ QUEUE {record_id}  ({zoho_record_id})  [{len(file_names)} file(s)]{app_str}")
-        logger.info("STARTUP: queued %s | zoho_id=%s | files=%d | job=%s%s",
-                    record_id, zoho_record_id, len(file_names), job_id, app_str)
-
-        async def _run_one(
-            _job_dir: Path,
-            _req: OcrExtractRequest,
-            _dl_sem: asyncio.Semaphore,
-            _pipe_sem: asyncio.Semaphore,
-            _seq: int,
-        ) -> None:
-            _rec_id = _req.record_id
-            _zoho_id = _req.zoho_record_id
-            _app_id = _req.application_id or ""
-            _aid_str = f" [app={_app_id}]" if _app_id else ""
-
-            if _zoho_id in _ACTIVE_ZOHO_RECORDS:
-                logger.info("Startup poller: skipping %s — already processing", _rec_id)
-                print(f"  [#{_seq}] ⚠ SKIP  {_rec_id}{_aid_str} (already processing)")
-                return
-
-            _ACTIVE_ZOHO_RECORDS.add(_zoho_id)
-            try:
-                print(f"\n{'─'*60}")
-                print(f"  [#{_seq}] START  {_rec_id}  ({len(_req.file_names)} files){_aid_str}")
-                print(f"{'─'*60}")
-                logger.info("STARTUP: processing %s (%d files)%s",
-                            _rec_id, len(_req.file_names), _aid_str)
-
-                # Phase 1 — download, merge, upload to Supabase (I/O bound)
-                async with _dl_sem:
-                    _token = await _download_and_prepare(_job_dir, _req)
-
-                # Phase 2 — extraction pipeline, Creator fields write (CPU/LLM)
-                if _token:
-                    async with _pipe_sem:
-                        _ok = await _run_pipeline_only(_job_dir, _req, _token)
-                    if _ok:
-                        print(f"  [#{_seq}] ✓ DONE  {_rec_id}{_aid_str}")
-                        logger.info("STARTUP: success — %s%s", _rec_id, _aid_str)
-                    else:
-                        print(f"  [#{_seq}] ✗ FAIL  {_rec_id}{_aid_str}")
-                        logger.warning("STARTUP: failed — %s%s", _rec_id, _aid_str)
-                else:
-                    print(f"  [#{_seq}] ✗ FAIL  {_rec_id}{_aid_str}  (download failed)")
-                    logger.warning("STARTUP: download failed — %s%s", _rec_id, _aid_str)
-            finally:
-                _ACTIVE_ZOHO_RECORDS.discard(_zoho_id)
-
-        tasks.append(asyncio.create_task(_run_one(job_dir, req, dl_sem, pipe_sem, seq)))
-
-    # 5. Print eligibility summary
-    total_eligible = len(tasks)
+    total_eligible = len(eligible_requests)
     print(f"\n{'='*70}")
     print(f"  ELIGIBILITY SUMMARY")
     print(f"{'─'*70}")
@@ -1340,25 +1299,144 @@ async def process_pending_on_startup(base_dir: Path) -> None:
     print(f"  Skipped (no ID):     {skipped_no_id}")
     print(f"  Skipped (no file):   {skipped_no_file}")
     print(f"  Skipped (duplicate): {skipped_dup}")
-    print(f"  → Eligible started:  {total_eligible}")
+    print(f"  → Eligible to process:  {total_eligible}")
     print(f"{'='*70}\n")
 
-    if not tasks:
+    if not eligible_requests:
         print(f"  Nothing to process.\n")
         return
 
-    # 6. Wait for all to finish
-    print(f"  Waiting for {len(tasks)} pipeline(s) to complete...\n")
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    succeeded = sum(1 for r in results if r is None)
-    failed = sum(1 for r in results if isinstance(r, Exception))
+    # Create a single batch job directory
+    from datetime import datetime
+    batch_job_id = f"startup_batch_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+    batch_job_dir = base_dir / batch_job_id
+    batch_job_dir.mkdir(parents=True, exist_ok=True)
+    (batch_job_dir / "original_name.txt").write_text(f"Startup Poll Batch ({total_eligible} records)")
+    await _set_status(batch_job_dir, "queued", f"Auto-processing {total_eligible} records...")
+
+    # Download in parallel
+    print(f"  Downloading files for {total_eligible} record(s) into one batch folder...\n")
+    
+    async def _dl_one(rec_req, seq_num):
+        output_name = f"{rec_req.record_id}.pdf"
+        async with dl_sem:
+            token = await _download_and_prepare(batch_job_dir, rec_req, output_name)
+        return rec_req, token
+
+    dl_tasks = [
+        asyncio.create_task(_dl_one(req, i + 1))
+        for i, req in enumerate(eligible_requests)
+    ]
+    dl_results = await asyncio.gather(*dl_tasks, return_exceptions=True)
+
+    pdfs_info = []
+    succeeded = 0
+    failed = 0
+    for r in dl_results:
+        if isinstance(r, tuple) and r[1] is not None:
+            rec_req, token = r
+            pdf_path = batch_job_dir / f"{rec_req.record_id}.pdf"
+            pdfs_info.append({
+                "path": str(pdf_path.resolve()),
+                "filename": f"{rec_req.record_id}.pdf",
+                "zoho_req": {
+                    "record_id": rec_req.record_id,
+                    "zoho_app_owner": rec_req.zoho_app_owner,
+                    "zoho_app_link_name": rec_req.zoho_app_link_name,
+                    "zoho_report_link_name": rec_req.zoho_report_link_name,
+                    "zoho_record_id": rec_req.zoho_record_id,
+                    "file_field_link_name": rec_req.file_field_link_name,
+                    "file_names": rec_req.file_names,
+                    "application_id": rec_req.application_id,
+                }
+            })
+            succeeded += 1
+        else:
+            failed += 1
+
+    print(f"  ✓ Downloads complete: {succeeded} succeeded, {failed} failed\n")
+    if not pdfs_info:
+        await _set_status(batch_job_dir, "error", "All record downloads failed.")
+        return
+
+    # Trigger batch pipeline
+    print(f"  Starting batch pipeline run for {len(pdfs_info)} record(s)...\n")
+    from src.pipeline_runner import run_batch_pdfs_pipeline
+    # Put it in a background task so it updates SSE and progress stores properly, but await it
+    await run_batch_pdfs_pipeline(batch_job_dir, pdfs_info)
 
     print(f"\n{'='*70}")
     print(f"  STARTUP AUTO-PROCESSOR — COMPLETE")
     print(f"{'─'*70}")
-    print(f"  Total eligible:   {total_eligible}")
-    print(f"  ✓ Succeeded:      {succeeded}")
-    print(f"  ✗ Failed:         {failed}")
+    print(f"  Single Batch Job ID: {batch_job_id}")
+    print(f"  Total processed:     {len(pdfs_info)}")
     print(f"{'='*70}\n")
-    logger.info("STARTUP: complete — %d succeeded, %d failed out of %d",
-                succeeded, failed, len(tasks))
+    logger.info("STARTUP: batch process complete | job=%s", batch_job_id)
+
+
+async def run_zoho_writeback_for_batch_item(job_dir: Path, pdf_path: Path, zoho_req_dict: dict, ocr_result: dict) -> None:
+    """Invoked inside the pipeline runner after each PDF in a startup batch completes extraction."""
+    import asyncio
+    req = OcrExtractRequest(
+        record_id=zoho_req_dict["record_id"],
+        zoho_app_owner=zoho_req_dict["zoho_app_owner"],
+        zoho_app_link_name=zoho_req_dict["zoho_app_link_name"],
+        zoho_report_link_name=zoho_req_dict["zoho_report_link_name"],
+        zoho_record_id=zoho_req_dict["zoho_record_id"],
+        file_field_link_name=zoho_req_dict["file_field_link_name"],
+        file_names=zoho_req_dict["file_names"],
+        application_id=zoho_req_dict.get("application_id"),
+    )
+
+    loop = asyncio.get_running_loop()
+    try:
+        access_token = await loop.run_in_executor(None, _get_zoho_access_token)
+    except Exception as e:
+        logger.error("Failed to obtain Zoho access token for batch item write-back: %s", e)
+        return
+
+    rid = req.record_id
+    app_id = req.application_id or ""
+    aid = f"  [app={app_id}]" if app_id else ""
+
+    extracted_app_id = ""
+    for f in ocr_result.get("fields", []):
+        if f.get("label") == "1.1 Application ID":
+            extracted_app_id = f.get("value", "")
+            break
+    ocr_result["application_id"] = req.application_id or extracted_app_id or ""
+    ocr_result["record_id"] = req.record_id
+
+    app_identifier = ocr_result.get("application_id") or rid
+
+    # 1. POST fields to Creator Home_Visit_Questionnaire
+    try:
+        await loop.run_in_executor(
+            None, _update_zoho_creator_fields, access_token, req, ocr_result,
+        )
+        logger.info("Batch item Zoho fields updated | record=%s%s", rid, aid)
+    except Exception as e:
+        logger.error("Failed to update Questionnaire for batch item | record=%s | error=%s%s", rid, e, aid)
+
+    # 2. Upload PDF to Supabase
+    try:
+        input_pdf_bytes = pdf_path.read_bytes()
+        safe_name = app_identifier.replace(" ", "").replace("(", "_").replace(")", "_")
+        supabase_path = f"{safe_name}/{safe_name}.pdf"
+        await loop.run_in_executor(
+            None, _upload_to_supabase, req.bucket, supabase_path,
+            input_pdf_bytes, "application/pdf",
+        )
+        logger.info("Batch item PDF uploaded to Supabase | record=%s%s", rid, aid)
+    except Exception as e:
+        logger.error("Failed to upload PDF to Supabase for batch item | record=%s | error=%s%s", rid, e, aid)
+
+    # 3. Update OCR_Status to yes in Creator report
+    try:
+        payload = {"OCR_Status": "yes"}
+        await loop.run_in_executor(
+            None, _update_zoho_creator_fields, access_token, req, payload,
+        )
+        logger.info("Batch item OCR_Status updated | record=%s%s", rid, aid)
+    except Exception as e:
+        logger.error("Failed to update OCR_Status for batch item | record=%s | error=%s%s", rid, e, aid)

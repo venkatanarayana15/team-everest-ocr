@@ -8,10 +8,77 @@ import cv2
 import numpy as np
 from rapidfuzz import fuzz
 
-from src.backends import WordBox, get_backend
-from src.config import Config
+import os
+from src.tesseract import WordBox, get_backend
 from src.model_client import ModelClient, get_model_client
-from src.preprocessing import deskew, denoise, to_grayscale
+
+@dataclass
+class Config:
+    render_dpi: int = 300
+    deskew_max_angle: int = 5
+    denoise_strength: int = 10
+    binarization_block_size: int = 15
+    binarization_c: int = 2
+    ocr_backend: str = "tesseract"
+    max_image_width: int = 1200
+    bbox_render_dpi: int = 150
+    tesseract_workers: int = 4
+    tesseract_timeout: int = 120
+    tesseract_enabled: bool = True
+
+    def __post_init__(self):
+        env_val = os.environ.get("TESSERACT_ENABLED")
+        if env_val is not None:
+            self.tesseract_enabled = env_val.lower() in ("1", "true", "yes")
+
+
+def to_grayscale(image: np.ndarray) -> np.ndarray:
+    if len(image.shape) == 3:
+        return cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    return image
+
+
+def deskew(image: np.ndarray, max_angle: int = 5) -> np.ndarray:
+    h, w = image.shape[:2]
+    scale = 500.0 / max(h, w)
+    small = cv2.resize(image, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+
+    edges = cv2.Canny(small, 50, 150, apertureSize=3)
+    coords = np.column_stack(np.where(edges > 0))
+    if len(coords) < 50:
+        return image
+    angle = cv2.minAreaRect(coords)[-1]
+    if angle < -45:
+        angle = 90 + angle
+    if abs(angle) > max_angle or abs(angle) < 0.5:
+        return image
+    
+    center = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    return cv2.warpAffine(
+        image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
+    )
+
+
+def denoise(image: np.ndarray, h: int = 10) -> np.ndarray:
+    return cv2.medianBlur(image, 3)
+
+
+def adaptive_threshold(image: np.ndarray, block_size: int = 15, c: int = 2) -> np.ndarray:
+    if block_size % 2 == 0:
+        block_size += 1
+    return cv2.adaptiveThreshold(
+        image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block_size, c
+    )
+
+
+def preprocess(image: np.ndarray, config: Config, is_digital: bool = False) -> np.ndarray:
+    gray = to_grayscale(image)
+    gray = deskew(gray, config.deskew_max_angle)
+    if not is_digital:
+        gray = denoise(gray, config.denoise_strength)
+    return adaptive_threshold(gray, config.binarization_block_size, config.binarization_c)
+
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +129,7 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "4.4 Apart from your job, is there any other source of income?", "section_number": 4, "page": 4},
     {"label": "4.5 Income Type", "section_number": 4, "page": 4},
     {"label": "4.6 Do you have any loans?", "section_number": 4, "page": 4},
-    {"label": "4.7 If you choose any college, how much is the college fee?", "section_number": 4, "page": 4},
+    {"label": "4.7 If you choose any college, how much is the college fee?", "section_number": 4, "page": 5},
     # ── Page 5 ──
     # Section 4 — Financial Background (Page 5: 4.8-4.9)
     {"label": "4.8 If the college fee is higher, how will you manage it?", "section_number": 4, "page": 5},
@@ -73,7 +140,7 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     # Section 6 — Student Commitment
     {"label": "6.1 Will you study college for three years without any obstacle?", "section_number": 6, "page": 5},
     {"label": "6.2 If we have a training program within 15 km from your home, can you come?", "section_number": 6, "page": 5},
-    {"label": "6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?", "section_number": 6, "page": 5},
+    {"label": "6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?", "section_number": 6, "page": 6},
     # ── Page 6 ──
     # Section 7 — Scholarship Information
     {"label": "7.1 Has the student received or applied for any other scholarships for their UG degree?", "section_number": 7, "page": 6},
@@ -262,79 +329,25 @@ class ExtractionPipeline:
     async def run_primary_extraction(self, pdf_path: str, page_images: dict[int, str]) -> tuple[dict | None, dict]:
         from src.prompt_templates import PRIMARY_EXTRACTION_PROMPT
 
-        if len(page_images) <= 1:
-            data, token_usage = await self.primary_client.extract_structured(
-                pdf_path, page_images, PRIMARY_EXTRACTION_PROMPT
-            )
-            token_usage["calls"] = 1
-            return data, token_usage
-
-        known_pages: dict[str, int] = {}
-        for tpl in KNOWN_TEMPLATE_FIELDS:
-            known_pages[tpl["label"]] = tpl["page"]
-
-        async def _extract_page(page_num: int, img_path: str) -> tuple[int, dict | None, dict]:
-            page_prompt = (
-                f"You are examining Page {page_num} of {len(page_images)}.\n\n"
-                f"RULES (these override any conflicting instructions below):\n"
-                f"1. You are seeing ONE page image — do not expect multiple pages.\n"
-                f"2. Output EVERY field whose page marker (← pg N) matches {page_num} or whose section spans this page.\n"
-                f"3. If a field IS VISIBLE in the image → extract its value from the image.\n"
-                f"4. If a field is NOT visible (cropped/blank/hidden) → output value=\"\" with low confidence.\n"
-                f"5. Set 'page' field to {page_num} for every extracted field.\n"
-                f"6. When uncertain which page a field belongs to, INCLUDE it anyway — extra fields are merged and deduplicated downstream.\n\n"
+        num_pages = len(page_images)
+        if num_pages > 1:
+            prompt = (
+                f"You are examining all {num_pages} pages of the Home Visit Questionnaire. "
+                f"Each image below is labeled with its page number.\n\n"
+                f"RULES:\n"
+                f"1. Extract ALL fields visible across ALL pages.\n"
+                f"2. Set the 'page' field to the page number where each field physically appears.\n"
+                f"3. If a field is NOT visible (cropped/blank/hidden), output value=\"\" with 0 confidence.\n\n"
                 f"{PRIMARY_EXTRACTION_PROMPT}"
             )
-            data, token_usage = await self.primary_client.extract_structured(
-                pdf_path, {page_num: img_path}, page_prompt
-            )
-            return page_num, data, token_usage
+        else:
+            prompt = PRIMARY_EXTRACTION_PROMPT
 
-        tasks = [_extract_page(p, page_images[p]) for p in sorted(page_images)]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        merged_usage: dict = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "calls": 0}
-        field_map: dict[str, dict] = {}
-        merged_sections: list[dict] = []
-        page_raws: dict[int, str] = {}
-        confidences: list[int] = []
-        page_errors: list[dict] = []
-
-        for r in results:
-            if isinstance(r, Exception):
-                logger.error("Page extraction failed: %s", r)
-                page_errors.append({"error": str(r)})
-                continue
-            pn, data, usage = r
-            if not data:
-                page_errors.append({"page": pn, "error": "No data returned from LLM"})
-                continue
-            for k in merged_usage:
-                merged_usage[k] += usage.get(k, 0) or 0
-            for f in data.get("fields", []):
-                label = f.get("label", "")
-                known_page = known_pages.get(label)
-                if known_page is not None and f.get("page", pn) != known_page:
-                    continue
-                if label not in field_map or f.get("confidence", 0) > field_map[label].get("confidence", 0):
-                    field_map[label] = f
-            for s in data.get("sections", []):
-                if s not in merged_sections:
-                    merged_sections.append(s)
-            confidences.append(data.get("overall_confidence", 0))
-            page_raws[pn] = data.get("raw_text", "")
-
-        merged: dict = {
-            "fields": list(field_map.values()),
-            "sections": merged_sections,
-            "overall_confidence": int(sum(confidences) / len(confidences)) if confidences else 0,
-            "raw_text": "\n\n".join(page_raws[p] for p in sorted(page_raws)),
-            "page_errors": page_errors,
-        }
-        merged["fields"].sort(key=lambda f: f.get("page", 1))
-        merged_usage["calls"] = len(page_images)
-
-        return merged, merged_usage
+        data, token_usage = await self.primary_client.extract_structured(
+            pdf_path, page_images, prompt
+        )
+        token_usage["calls"] = 1
+        return data, token_usage
 
     # ── Stage 3b: Merge (enhanced with position_hint + confidence weighting) ──
 

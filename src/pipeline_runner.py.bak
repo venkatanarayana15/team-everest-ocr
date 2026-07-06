@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import os
 import re
 import time
 from pathlib import Path
@@ -55,10 +54,9 @@ async def _set_batch_pdf_status(job_dir: Path, pdf_name: str, status: str, pct: 
     existing = {}
     if path.exists():
         try:
-            raw = path.read_text()
-            if raw.strip():
-                existing = json.loads(raw)
-        except (json.JSONDecodeError, OSError):
+            with open(path) as f:
+                existing = json.load(f)
+        except Exception:
             pass
 
     log = existing.get("log", [])
@@ -72,10 +70,8 @@ async def _set_batch_pdf_status(job_dir: Path, pdf_name: str, status: str, pct: 
         "log": log,
         "pages": existing.get("pages", 0),
     }
-    tmp = path.with_name(f".{path.name}.tmp")
-    with open(tmp, "w") as f:
+    with open(path, "w") as f:
         json.dump(data, f, indent=2)
-    tmp.replace(path)
 
     existing_progress = _progress_store.get(job_dir.name, {})
     start_time = existing_progress.get("start_time")
@@ -415,77 +411,53 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         await _set_status(job_dir, "preprocessing", f"Batch: processing {len(pdfs_info)} PDFs...")
 
         all_results: list[dict] = []
-        
-        queue = asyncio.Queue()
         for idx, pdf_info in enumerate(pdfs_info):
-            queue.put_nowait((idx, pdf_info))
+            pdf_name = Path(pdf_info["path"]).name
+            await _set_batch_pdf_status(job_dir, pdf_name, "processing", 0, f"Starting ({idx+1}/{len(pdfs_info)})")
 
-        async def batch_worker():
-            while True:
-                try:
-                    idx, pdf_info = queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
+            try:
+                valid, err = _validate_pdf(pdf_info["path"])
+                if not valid:
+                    await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, err)
+                    all_results.append({"name": pdf_name, "error": err})
+                    continue
 
-                pdf_name = Path(pdf_info["path"]).name
-                # Use a unique sub-directory for each PDF so they don't overwrite each other's images/tesseract data
-                pdf_job_dir = job_dir / str(idx)
-                pdf_job_dir.mkdir(parents=True, exist_ok=True)
+                pipeline.preprocess(pdf_info["path"], str(job_dir))
+                await _set_batch_pdf_status(job_dir, pdf_name, "preprocessing", 20, f"Preprocessed ({idx+1}/{len(pdfs_info)})")
 
-                await _set_batch_pdf_status(job_dir, pdf_name, "processing", 0, f"Starting ({idx+1}/{len(pdfs_info)})")
+                processed_images = _ensure_page_images(job_dir / "pages")
 
-                try:
-                    valid, err = _validate_pdf(pdf_info["path"])
-                    if not valid:
-                        await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, err)
-                        all_results.append({"name": pdf_name, "error": err})
-                        queue.task_done()
-                        continue
+                async def batch_status_func(stage, msg):
+                    pct = 40 if stage == "primary_extraction" else (70 if stage == "secondary_verification" else 85)
+                    await _set_batch_pdf_status(job_dir, pdf_name, stage, pct, f"{msg} ({idx+1}/{len(pdfs_info)})")
 
-                    pipeline.preprocess(pdf_info["path"], str(pdf_job_dir))
-                    await _set_batch_pdf_status(job_dir, pdf_name, "preprocessing", 20, f"Preprocessed ({idx+1}/{len(pdfs_info)})")
+                res = await _run_core_extraction(
+                    job_dir=job_dir,
+                    pdf_path=pdf_info["path"],
+                    processed_images=processed_images,
+                    pipeline=pipeline,
+                    primary_name=primary_name,
+                    status_func=batch_status_func,
+                    use_cache=False,
+                    tesseract_enabled=config.tesseract_enabled,
+                )
+                res["pdf_name"] = pdf_name
+                res["input_type"] = "batch_pdf"
+                res["processing_time"] = round(time.time() - t0, 2)
 
-                    processed_images = _ensure_page_images(pdf_job_dir / "pages")
+                if "zoho_req" in pdf_info:
+                    from src.zoho_integration import run_zoho_writeback_for_batch_item
+                    await run_zoho_writeback_for_batch_item(job_dir, Path(pdf_info["path"]), pdf_info["zoho_req"], res)
 
-                    async def batch_status_func(stage, msg, _pdf_name=pdf_name, _idx=idx):
-                        pct = 40 if stage == "primary_extraction" else (70 if stage == "secondary_verification" else 85)
-                        await _set_batch_pdf_status(job_dir, _pdf_name, stage, pct, f"{msg} ({_idx+1}/{len(pdfs_info)})")
+                _print_field_report(job_dir, res, pdf_name)
 
-                    res = await _run_core_extraction(
-                        job_dir=pdf_job_dir,
-                        pdf_path=pdf_info["path"],
-                        processed_images=processed_images,
-                        pipeline=pipeline,
-                        primary_name=primary_name,
-                        status_func=batch_status_func,
-                        use_cache=False,
-                        tesseract_enabled=config.tesseract_enabled,
-                    )
-                    res["pdf_name"] = pdf_name
-                    res["input_type"] = "batch_pdf"
-                    res["processing_time"] = round(time.time() - t0, 2)
-
-                    if "zoho_req" in pdf_info:
-                        from src.zoho_integration import run_zoho_writeback_for_batch_item
-                        await run_zoho_writeback_for_batch_item(job_dir, Path(pdf_info["path"]), pdf_info["zoho_req"], res)
-
-                    _print_field_report(pdf_job_dir, res, pdf_name)
-
-                    all_results.append(res)
-                    await _set_batch_pdf_status(job_dir, pdf_name, "done", 100, f"Done ({idx+1}/{len(pdfs_info)})")
-                except Exception as e:
-                    _stage = _progress_store.get(job_dir.name, {}).get("status", "unknown")
-                    logger.exception("Batch item failed at stage=%s | pdf=%s", _stage, pdf_name)
-                    await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, str(e))
-                    all_results.append({"name": pdf_name, "error": f"[stage={_stage}] {e}"})
-
-                queue.task_done()
-
-        # Run up to N PDFs concurrently (configurable, default 5)
-        max_batch_conc = int(os.environ.get("BATCH_MAX_CONCURRENCY", "5"))
-        num_workers = min(max_batch_conc, len(pdfs_info))
-        workers = [asyncio.create_task(batch_worker()) for _ in range(num_workers)]
-        await asyncio.gather(*workers)
+                all_results.append(res)
+                await _set_batch_pdf_status(job_dir, pdf_name, "done", 100, f"Done ({idx+1}/{len(pdfs_info)})")
+            except Exception as e:
+                _stage = _progress_store.get(job_dir.name, {}).get("status", "unknown")
+                logger.exception("Batch item failed at stage=%s | pdf=%s", _stage, pdf_name)
+                await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, str(e))
+                all_results.append({"name": pdf_name, "error": f"[stage={_stage}] {e}"})
 
         await _set_status(job_dir, "saving_results", "Saving batch results...")
         combined = {
