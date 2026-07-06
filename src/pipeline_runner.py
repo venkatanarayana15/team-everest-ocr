@@ -698,26 +698,23 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     name_path = job_dir / "original_name.txt"
     display_name = pdf_name or (name_path.read_text().strip() if name_path.exists() else job_dir.name)
     fields = res.get("fields", [])
-    status_str = "\033[92m\033[1mDONE\033[0m" if "error" not in res else "\033[91m\033[1mFAILED\033[0m"
-    
-    # Format confidence score color
+    status_bad = "error" in res
+    status_str = "\033[91m\033[1mFAILED\033[0m" if status_bad else "\033[92m\033[1mDONE\033[0m"
+
     raw_conf = res.get("overall_confidence", "?")
     try:
         conf_val = float(raw_conf)
-        if conf_val >= 85:
-            conf_str = f"\033[92m{raw_conf}%\033[0m"
-        elif conf_val >= 70:
-            conf_str = f"\033[93m{raw_conf}%\033[0m"
-        else:
-            conf_str = f"\033[91m{raw_conf}%\033[0m"
+        conf_str = (
+            f"\033[92m{raw_conf}%\033[0m" if conf_val >= 85 else
+            f"\033[93m{raw_conf}%\033[0m" if conf_val >= 70 else
+            f"\033[91m{raw_conf}%\033[0m"
+        )
     except (ValueError, TypeError):
         conf_str = f"\033[93m{raw_conf}%\033[0m"
 
     elapsed = res.get("processing_time", "?")
-    sections = res.get("sections", [])
-
     sec_names: dict[int, str] = {}
-    for s in sections:
+    for s in res.get("sections", []):
         sec_names[s["number"]] = s["name"]
 
     known_labels: set[str] = {t["label"] for t in KNOWN_TEMPLATE_FIELDS}
@@ -727,13 +724,23 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
         pages.setdefault(f["page"], []).append(f)
 
     total_review = sum(1 for f in fields if f.get("needs_clarification"))
-    review_summary = f"\033[91m\033[1m{total_review} need review\033[0m" if total_review > 0 else "\033[92m0 need review\033[0m"
+    review_str = f"\033[91m\033[1m{total_review} need review\033[0m" if total_review > 0 else "\033[92m0 need review\033[0m"
 
-    print(f"\n\033[1m{'='*80}\033[0m")
-    print(f"  \033[1mFILE:\033[0m {display_name}")
-    print(f"  \033[1mSTATUS:\033[0m {status_str}  |  \033[1mConfidence:\033[0m {conf_str}  |  \033[1mTime:\033[0m {elapsed}s")
-    print(f"  \033[1mFIELDS:\033[0m {len(fields)} total  |  {review_summary}  |  \033[1mPages:\033[0m {len(pages)}")
-    print(f"\033[90m{'─'*80}\033[0m")
+    W = 80
+    print(f"\n\033[94m┌{'─'*(W-2)}┐\033[0m")
+    print(f"\033[94m│\033[0m  \033[1m📄 {display_name:<{W-7}}\033[0m\033[94m│\033[0m")
+    
+    status_clean = "FAILED" if status_bad else "DONE"
+    conf_clean = f"Confidence: {raw_conf}%"
+    elapsed_clean = f"{elapsed}s"
+    fields_clean = f"{len(fields)} fields"
+    review_clean = f"{total_review} need review"
+    summary_text = f"{status_clean}  •  {conf_clean}  •  {elapsed_clean}  •  {fields_clean}  •  {review_clean}"
+    
+    summary_colored = f"{status_str}  \033[90m•\033[0m  Confidence: {conf_str}  \033[90m•\033[0m  {elapsed}s  \033[90m•\033[0m  {len(fields)} fields  \033[90m•\033[0m  {review_str}"
+    pad_len = W - 5 - len(summary_text)
+    print(f"\033[94m│\033[0m  {summary_colored}{' '*max(0, pad_len)} \033[94m│\033[0m")
+    print(f"\033[94m└{'─'*(W-2)}┘\033[0m")
 
     re_row = __import__('re').compile(r'^(.+?) — Row (\d+) — (.+)$')
     re_check = __import__('re').compile(r'^(.+?) — (.+)$')
@@ -742,7 +749,16 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
         page_fields = pages[page_num]
         needs_review = sum(1 for f in page_fields if f.get("needs_clarification"))
 
-        # Group fields by section
+        if needs_review:
+            page_tag = f" \033[1;41;37m PAGE {page_num} \033[0m \033[91m⚠ {needs_review} review needed\033[0m "
+            page_clean = f"  PAGE {page_num}  ⚠ {needs_review} review needed "
+        else:
+            page_tag = f" \033[1;42;30m PAGE {page_num} \033[0m \033[92m✓ Clean\033[0m "
+            page_clean = f"  PAGE {page_num}  ✓ Clean "
+            
+        pad = W - len(page_clean) - 4
+        print(f"\n\033[90m┯━\033[0m{page_tag}\033[90m{'━'*max(0, pad)}\033[0m")
+
         by_sec: dict[int | None | str, list[dict]] = {}
         for f in page_fields:
             sec = f.get("section_number")
@@ -754,20 +770,10 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
         )
         ordered = (["header"] if "header" in by_sec else []) + sec_keys
 
-        review_suffix = f"  \033[91m\033[1m⚠ {needs_review} flag(s)\033[0m" if needs_review else "  \033[92m✓ Clear\033[0m"
-        print(f"\n  ── \033[1mPage {page_num}\033[0m {review_suffix} ──────────────────────────────────────────────────────────")
-
         for sec_key in ordered:
             sec_fields = by_sec[sec_key]
-
-            if sec_key == "header":
-                sec_title = "Header"
-            else:
-                sec_name = sec_names.get(sec_key, "")
-                sec_title = f"Section {sec_key}" + (f" — {sec_name}" if sec_name else "")
-            
-            print(f"\n    \033[1m\033[36m{sec_title}\033[0m")
-            print(f"    \033[90m{'─' * 50}\033[0m")
+            sec_title = "Header" if sec_key == "header" else f"Section {sec_key}" + (f" — {sec_names.get(sec_key, '').rstrip('*').strip()}" if sec_names.get(sec_key) else "")
+            print(f"  \033[1;36m┠─ {sec_title}\033[0m")
 
             tables: dict[str, dict[int, dict[str, str]]] = {}
             checklists: dict[str, list[tuple[str, str]]] = {}
@@ -775,7 +781,8 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
 
             for f in sec_fields:
                 label = f.get("label", "?")
-                value = f.get("value") or "—"
+                value_raw = f.get("value") or ""
+                value = value_raw or "—"
 
                 m = re_row.match(label)
                 if m:
@@ -794,30 +801,43 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
 
                 simple.append(f)
 
+            agg_labels = {g for g in checklists if any("[✓]" in _checkbox_bracket(v) for _, v in checklists[g])}
+
             for f in simple:
                 label = f.get("label", "?")
                 val = f.get("value") or "—"
-                
-                # Highlight fields needing review
-                if f.get("needs_clarification"):
+
+                if val == "—" and label in agg_labels:
+                    checked = sum(1 for _, v in checklists[label] if "[✓]" in _checkbox_bracket(v))
+                    val_display = f"\033[92m({checked} selected)\033[0m"
+                elif val == "—":
+                    val_display = f"\033[90m—\033[0m"
+                elif f.get("needs_clarification"):
                     val_display = f"\033[93m{val} (needs review)\033[0m"
                 else:
                     val_display = val
-                
-                print(f"      {label:<54} {val_display}")
+
+                print(f"  \033[90m┃\033[0m   \033[90m{label:<45}\033[0m {val_display}")
 
             for group_name, options in checklists.items():
-                if options:
-                    max_opt = max(len(opt) for opt, _ in options)
-                    print(f"      {group_name}")
+                if not options:
+                    continue
+                max_opt = max(len(opt) for opt, _ in options)
+                checked_count = sum(1 for _, v in options if "[✓]" in _checkbox_bracket(v))
+
+                if sum(len(opt) for opt, _ in options) < 36:
+                    parts = []
                     for option, value in options:
                         bracket = _checkbox_bracket(value)
-                        # Highlight active checkbox options
-                        if "[✓]" in bracket:
-                            bracket_display = f"\033[92m{bracket}\033[0m"
-                        else:
-                            bracket_display = bracket
-                        print(f"        {option:{max_opt}}  {bracket_display}")
+                        sym = f"\033[92m✓\033[0m" if "[✓]" in bracket else f"\033[90m✗\033[0m"
+                        parts.append(f"{option} {sym}")
+                    print(f"  \033[90m┃\033[0m   \033[1;33m{group_name:<45}\033[0m {'  '.join(parts)}")
+                else:
+                    print(f"  \033[90m┃\033[0m   \033[1;33m{group_name:<45}\033[0m \033[90m({checked_count} checked)\033[0m")
+                    for option, value in options:
+                        bracket = _checkbox_bracket(value)
+                        bracket_display = f"\033[92m{bracket}\033[0m" if "[✓]" in bracket else bracket
+                        print(f"  \033[90m┃\033[0m     \033[90m{option:<43}\033[0m {bracket_display}")
 
             for table_name, rows in tables.items():
                 col_order: list[str] = []
@@ -829,25 +849,35 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
                 for c in col_order:
                     max_val = max(len(rows[rn].get(c, "")) for rn in rows)
                     col_widths.append(max(len(c), max_val, 8))
-                
-                header = "  |  ".join(f"\033[1m{c.ljust(col_widths[i])}\033[0m" for i, c in enumerate(col_order))
-                sep = "—+—".join("—" * w for w in col_widths)
-                print(f"\n      \033[4m{table_name}\033[0m")
-                print(f"        {header}")
-                print(f"        \033[90m{sep}\033[0m")
-                for rn in sorted(rows):
-                    vals = [rows[rn].get(c, "—").ljust(col_widths[i]) for i, c in enumerate(col_order)]
-                    print(f"        {'  |  '.join(vals)}")
 
-        print()
+                print(f"  \033[90m┃\033[0m")
+                print(f"  \033[90m┃\033[0m   \033[1;4;35mTable: {table_name}\033[0m \033[90m({len(rows)} rows)\033[0m")
+                
+                header = " │ ".join(f"\033[1;37m{c.center(col_widths[i])}\033[0m" for i, c in enumerate(col_order))
+                sep = "━╋━".join("━" * w for w in col_widths)
+                
+                total_w = sum(col_widths) + 3 * len(col_order) - 3
+                print(f"  \033[90m┃\033[0m     \033[90m┏━\033[0m{'━'*total_w}\033[90m━┓\033[0m")
+                print(f"  \033[90m┃\033[0m     \033[90m┃\033[0m {header} \033[90m┃\033[0m")
+                print(f"  \033[90m┃\033[0m     \033[90m┣━{sep}━┫\033[0m")
+                for rn in sorted(rows):
+                    vals = [rows[rn].get(c, "—").center(col_widths[i]) for i, c in enumerate(col_order)]
+                    print(f"  \033[90m┃\033[0m     \033[90m┃\033[0m {' │ '.join(vals)} \033[90m┃\033[0m")
+                print(f"  \033[90m┃\033[0m     \033[90m┗━\033[0m{'━'*total_w}\033[90m━┛\033[0m")
+
+        print("  \033[90m┃\033[0m")
         high_conf = sum(1 for f in page_fields if f.get("confidence", 0) >= 90)
         low_conf = sum(1 for f in page_fields if f.get("confidence", 0) < 70)
-        
-        # Color coding stats footer
-        high_str = f"\033[92m{high_conf}\033[0m"
-        low_str = f"\033[91m{low_conf}\033[0m" if low_conf > 0 else "0"
-        
-        print(f"  Page {page_num}: {len(page_fields)} fields  |  High Confidence: {high_str}  |  Low Confidence: {low_str}")
-        print(f"  \033[90m{'─' * 76}\033[0m")
 
-    print(f"\033[1m{'='*80}\033[0m\n")
+        page_details = f"Page {page_num} • {len(page_fields)} fields"
+        if high_conf:
+            page_details += f" • \033[92m{high_conf} high\033[0m"
+        if low_conf:
+            page_details += f" • \033[91m{low_conf} low\033[0m"
+        else:
+            page_details += f" • 0 low"
+
+        clean_w = len(f"Page {page_num} • {len(page_fields)} fields • {high_conf} high • {low_conf} low")
+        remaining = max(W - clean_w - 7, 4)
+        print(f"  \033[90m┗━━ {page_details} {'━' * remaining}\033[0m")
+    print(f"\033[94m└{'─'*(W-2)}┘\n")

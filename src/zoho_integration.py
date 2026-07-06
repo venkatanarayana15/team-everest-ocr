@@ -546,18 +546,40 @@ def _update_zoho_creator_fields(
     table_items = [(k, len(v)) for k, v in payload.items() if isinstance(v, list) and v and isinstance(v[0], dict)]
     multi_items = [(k, v) for k, v in payload.items() if isinstance(v, list) and (not v or not isinstance(v[0], dict))]
 
-    print(f"\n{'='*80}")
-    print(f"  ZOHO CREATOR UPDATE | record={req.record_id}")
-    print(f"  Target: {req.questionnaire_report_link_name}  |  {len(payload)} fields  |  {simple_count} simple + {subform_count} subform")
-    print(f"{'─'*80}")
+    import textwrap
+    W = 80
+    print(f"\n\033[95m\033[1m┌{'─'*(W-2)}┐\033[0m")
+    
+    title_clean = f"  ZOHO CREATOR UPDATE  •  record={req.record_id}"
+    pad = W - 4 - len(title_clean)
+    print(f"\033[95m\033[1m│\033[0m  \033[1mZOHO CREATOR UPDATE\033[0m  •  record={req.record_id}{' '*max(0, pad)} \033[95m\033[1m│\033[0m")
+    
+    target_clean = f"  Target: {req.questionnaire_report_link_name}  •  {len(payload)} fields ({simple_count} simple, {subform_count} subform)"
+    pad = W - 4 - len(target_clean)
+    print(f"\033[95m\033[1m│\033[0m  Target: \033[1m{req.questionnaire_report_link_name}\033[0m  •  {len(payload)} fields ({simple_count} simple, {subform_count} subform){' '*max(0, pad)} \033[95m\033[1m│\033[0m")
+    
+    print(f"\033[95m\033[1m├{'─'*(W-2)}┤\033[0m")
     if simple_keys:
-        print(f"  Simple: {', '.join(simple_keys)}")
+        fields_str = ", ".join(simple_keys)
+        wrapped_lines = textwrap.wrap(fields_str, width=56)
+        for i, line in enumerate(wrapped_lines):
+            prefix = "  \033[1mSimple fields:\033[0m " if i == 0 else "                 "
+            line_clean = f"  Simple fields: {line}" if i == 0 else f"                 {line}"
+            pad = W - 4 - len(line_clean)
+            print(f"\033[95m\033[1m│\033[0m{prefix}{line}{' '*max(0, pad)} \033[95m\033[1m│\033[0m")
+            
     for name, count in table_items:
-        print(f"  Table:  {name} ({count} rows)")
+        line_clean = f"  Table subform: {name} ({count} rows)"
+        pad = W - 4 - len(line_clean)
+        print(f"\033[95m\033[1m│\033[0m  \033[1mTable subform:\033[0m {name} ({count} rows){' '*max(0, pad)} \033[95m\033[1m│\033[0m")
+        
     for name, vals in multi_items:
         display = ", ".join(str(x) for x in vals) if vals else "(empty)"
-        print(f"  List:   {name}: [{display}]")
-    print(f"{'─'*80}")
+        line_clean = f"  Multi-select list: {name} -> [{display}]"
+        pad = W - 4 - len(line_clean)
+        print(f"\033[95m\033[1m│\033[0m  \033[1mMulti-select list:\033[0m {name} -> \033[92m[{display}]\033[0m{' '*max(0, pad)} \033[95m\033[1m│\033[0m")
+        
+    print(f"\033[95m\033[1m└{'─'*(W-2)}┘\033[0m")
 
     logger.info(
         "Writing %d fields to Home_Visit_Questionnaire | record=%s",
