@@ -314,7 +314,7 @@ async def _save_to_db(job_dir: Path) -> bool:
             low_conf, needs_review,
             result_data.get("processing_time", 0),
         )
-        await upsert_ocr_document(
+        doc_id = await upsert_ocr_document(
             job_id=job_dir.name,
             file_name=orig_name,
             status="done",
@@ -323,7 +323,10 @@ async def _save_to_db(job_dir: Path) -> bool:
             num_pdfs=result_data.get("num_pdfs"),
             result_json=result_data,
         )
-        logger.info("Auto-save to DB succeeded for job %s", job_dir.name)
+        if not doc_id:
+            logger.warning("Auto-save to DB failed (upsert returned empty id) for job %s", job_dir.name)
+            return False
+        logger.info("Auto-save to DB succeeded for job %s → row id=%s", job_dir.name, doc_id)
         return True
     except Exception as e:
         _hint = "check DATABASE_URL in .env and verify Supabase DB is accessible"
@@ -531,6 +534,10 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         results_dir.mkdir(exist_ok=True)
         with open(results_dir / "result.json", "w") as f:
             json.dump(combined, f, indent=2)
+
+        _db_ok = await _save_to_db(job_dir)
+        if not _db_ok:
+            logger.error("Batch DB save failed | job=%s", job_dir.name)
 
         _progress_store.pop(job_dir.name, None)
         success = sum(1 for r in all_results if 'error' not in r)

@@ -209,190 +209,190 @@ def _update_zoho_creator(access_token: str, req: OcrExtractRequest, status: str 
 
 # ── Field mapping: extracted label → Zoho Creator field link name ──────────
 
-FIELD_TO_ZOHO: dict[str, str] = {
-    # Header
-    "Volunteer Name": "Volunteer_Name",
-    "Co-Volunteer Name": "Co_Volunteer_Name",
-    "Date of Visit": "Date_of_Visit",
-    # Section 1 — Student Profile
-    "1.1 Application ID": "Application_ID",
-    "1.2 Student Full Name": "Student_Full_Name",
-    "1.3 Gender": "Gender",
-    # Section 2 — Family Background
-    "2.1 Family Status": "Family_Status",
-    "2.3 Is Father/Mother photograph kept at home?": "Is_Father_Mother_photograph_kept_at_home",
-    "2.4 Government ID Verified": "Government_ID_Verified_Ration_Card_Aadhaar_Driving_Licence_Voter_ID",
-    # Section 3 — Housing Condition
-    "3.1 House Ownership": "House_Ownership",
-    "3.1.1 If rented, what is the rent amount?": "If_rented_what_is_the_rent_amount",
-    "3.4 Number of Bedrooms": "Number_of_Bedrooms",
-    "3.4.1 Type of Bedroom": "Type_of_Bedroom",
-    "3.5 Bathroom": "Bathroom",
-    # Section 4 — Financial Background
-    "4.2 Amount of Last Electricity Bill": "Amount_of_Last_Electricity_Bill",
-    "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?": "Do_you_own_any_other_assets_or_properties_in_the_name_of_grandparents_parent_or_student",
-    "4.4 Apart from your job, is there any other source of income?": "Apart_from_your_job_is_there_any_other_source_of_income",
-    "4.5 Income Type": "Income_Type",
-    "4.6 Do you have any loans?": "Do_you_have_any_loans",
-    "4.7 If you choose any college, how much is the college fee?": "If_you_choose_any_college_how_much_is_the_college_fee",
-    "4.8 If the college fee is higher, how will you manage it?": "If_the_college_fee_is_higher_how_will_you_manage_it",
-    "4.9 If you do not receive this scholarship, how will you pay the fees?": "If_you_do_not_receive_this_scholarship_how_will_you_pay_the_fees",
-    # Section 5 — Health Information
-    "5.1 Does the student have any health issues?": "Does_the_student_have_any_health_issues",
-    "5.2 If yes, list the health issues": "If_yes_list_the_health_issues",
-    # Section 6 — Student Commitment
-    "6.1 Will you study college for three years without any obstacle?": "Will_you_study_college_for_three_years_without_any_obstacle",
-    "6.2 If we have a training program within 15 km from your home, can you come?": "If_we_have_a_training_program_within_15_km_from_your_home_can_you_come1",
-    "6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?": "Are_you_ready_to_send_your_son_daughter_to_weekly_skill_development_classes_on_Sundays1",
-    # Section 7 — Scholarship Information
-    "7.1 Has the student received or applied for any other scholarships for their UG degree?": "Has_the_student_received_or_Applied_for_any_other_scholarships_for_their_UG_degree",
-    # Section 8 — Volunteer Observation
-    "8.1 What is your opinion about the student, their family members, and their living condition?": "What_is_your_opinion_about_the_student_their_family_members_and_their_living_condition",
-    "8.2 Will you recommend this student for this scholarship?": "Will_you_recommend_this_student_for_this_scholarship",
-    "8.3 Any other comments you want to share?": "Any_other_comments_that_you_want_to_share",
-}
+# FIELD_TO_ZOHO: dict[str, str] = {
+#     # Header
+#     "Volunteer Name": "Volunteer_Name",
+#     "Co-Volunteer Name": "Co_Volunteer_Name",
+#     "Date of Visit": "Date_of_Visit",
+#     # Section 1 — Student Profile
+#     "1.1 Application ID": "Application_ID",
+#     "1.2 Student Full Name": "Student_Full_Name",
+#     "1.3 Gender": "Gender",
+#     # Section 2 — Family Background
+#     "2.1 Family Status": "Family_Status",
+#     "2.3 Is Father/Mother photograph kept at home?": "Is_Father_Mother_photograph_kept_at_home",
+#     "2.4 Government ID Verified": "Government_ID_Verified_Ration_Card_Aadhaar_Driving_Licence_Voter_ID",
+#     # Section 3 — Housing Condition
+#     "3.1 House Ownership": "House_Ownership",
+#     "3.1.1 If rented, what is the rent amount?": "If_rented_what_is_the_rent_amount",
+#     "3.4 Number of Bedrooms": "Number_of_Bedrooms",
+#     "3.4.1 Type of Bedroom": "Type_of_Bedroom",
+#     "3.5 Bathroom": "Bathroom",
+#     # Section 4 — Financial Background
+#     "4.2 Amount of Last Electricity Bill": "Amount_of_Last_Electricity_Bill",
+#     "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?": "Do_you_own_any_other_assets_or_properties_in_the_name_of_grandparents_parent_or_student",
+#     "4.4 Apart from your job, is there any other source of income?": "Apart_from_your_job_is_there_any_other_source_of_income",
+#     "4.5 Income Type": "Income_Type",
+#     "4.6 Do you have any loans?": "Do_you_have_any_loans",
+#     "4.7 If you choose any college, how much is the college fee?": "If_you_choose_any_college_how_much_is_the_college_fee",
+#     "4.8 If the college fee is higher, how will you manage it?": "If_the_college_fee_is_higher_how_will_you_manage_it",
+#     "4.9 If you do not receive this scholarship, how will you pay the fees?": "If_you_do_not_receive_this_scholarship_how_will_you_pay_the_fees",
+#     # Section 5 — Health Information
+#     "5.1 Does the student have any health issues?": "Does_the_student_have_any_health_issues",
+#     "5.2 If yes, list the health issues": "If_yes_list_the_health_issues",
+#     # Section 6 — Student Commitment
+#     "6.1 Will you study college for three years without any obstacle?": "Will_you_study_college_for_three_years_without_any_obstacle",
+#     "6.2 If we have a training program within 15 km from your home, can you come?": "If_we_have_a_training_program_within_15_km_from_your_home_can_you_come1",
+#     "6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?": "Are_you_ready_to_send_your_son_daughter_to_weekly_skill_development_classes_on_Sundays1",
+#     # Section 7 — Scholarship Information
+#     "7.1 Has the student received or applied for any other scholarships for their UG degree?": "Has_the_student_received_or_Applied_for_any_other_scholarships_for_their_UG_degree",
+#     # Section 8 — Volunteer Observation
+#     "8.1 What is your opinion about the student, their family members, and their living condition?": "What_is_your_opinion_about_the_student_their_family_members_and_their_living_condition",
+#     "8.2 Will you recommend this student for this scholarship?": "Will_you_recommend_this_student_for_this_scholarship",
+#     "8.3 Any other comments you want to share?": "Any_other_comments_that_you_want_to_share",
+# }
 
-# Multi-select checkbox groups: prefix in label → Creator field + aggregation type
-# The OCR extracts each checkbox option as "{prefix} — {option}" with value "✓"/"✗"
-AGGREGATE_MAP: dict[str, dict[str, str]] = {
-    "2.4 Government ID Verified": {"target": "Government_ID_Verified_Ration_Card_Aadhaar_Driving_Licence_Voter_ID", "type": "stringlist"},
-    "3.2 Type of Home": {"target": "Type_of_Home", "type": "text"},
-    "3.3 Type of Ceiling": {"target": "Type_of_Ceiling", "type": "text"},
-    "3.6 Kitchen Type": {"target": "Kitchen_Type", "type": "text"},
-    "4.1 Assets at Home": {"target": "Assets_at_Home_tick_all_that_apply", "type": "stringlist"},
-}
+# # Multi-select checkbox groups: prefix in label → Creator field + aggregation type
+# # The OCR extracts each checkbox option as "{prefix} — {option}" with value "✓"/"✗"
+# AGGREGATE_MAP: dict[str, dict[str, str]] = {
+#     "2.4 Government ID Verified": {"target": "Government_ID_Verified_Ration_Card_Aadhaar_Driving_Licence_Voter_ID", "type": "stringlist"},
+#     "3.2 Type of Home": {"target": "Type_of_Home", "type": "text"},
+#     "3.3 Type of Ceiling": {"target": "Type_of_Ceiling", "type": "text"},
+#     "3.6 Kitchen Type": {"target": "Kitchen_Type", "type": "text"},
+#     "4.1 Assets at Home": {"target": "Assets_at_Home_tick_all_that_apply", "type": "stringlist"},
+# }
 
-# Map extracted option names to exact values expected by Zoho Creator
-# LLM may extract checkbox option text with variations (e.g. "Asbestos / Sheet" vs "Asbestos")
-OPTION_VALUE_REPLACEMENTS: dict[str, str] = {
-    # Type of Ceiling — Zoho options: Roof (Kurai), Tiled, Asbestos, Concrete
-    "Roof": "Roof (Kurai)",
-    "Asbestos / Sheet": "Asbestos",
-    "Asbestos sheet": "Asbestos",
-    "Asbestos Sheet": "Asbestos",
-    "Asbestos ": "Asbestos",
-    # Type of Home — Zoho options: Individual, Private Apartment, Housing Board, Line House, Others
-    # Kitchen Type — Zoho options: Separate Kitchen, Hall with Kitchen
-    # Assets at Home — no mapping needed (stringlist, all options valid)
-}
+# # Map extracted option names to exact values expected by Zoho Creator
+# # LLM may extract checkbox option text with variations (e.g. "Asbestos / Sheet" vs "Asbestos")
+# OPTION_VALUE_REPLACEMENTS: dict[str, str] = {
+#     # Type of Ceiling — Zoho options: Roof (Kurai), Tiled, Asbestos, Concrete
+#     "Roof": "Roof (Kurai)",
+#     "Asbestos / Sheet": "Asbestos",
+#     "Asbestos sheet": "Asbestos",
+#     "Asbestos Sheet": "Asbestos",
+#     "Asbestos ": "Asbestos",
+#     # Type of Home — Zoho options: Individual, Private Apartment, Housing Board, Line House, Others
+#     # Kitchen Type — Zoho options: Separate Kitchen, Hall with Kitchen
+#     # Assets at Home — no mapping needed (stringlist, all options valid)
+# }
 
-# Table rows: OCR produces "{table_name} — Row {n} — {column}"
-TABLE_TO_SUBFORM: dict[str, dict[str, Any]] = {
-    "2.5 Family Members": {
-        "subform": "Family_Members_Table",
-        "columns": {
-            "Name": "Name",
-            "Age": "Age",
-            "Education": "Education",
-            "Occupation": "Occupation",
-            "Annual Income": "Annual_Income",
-        },
-    },
-    "4.3.1": {
-        "subform": "If_yes_list_their_properties_share",
-        "columns": {
-            "Property Description": "Property_Description",
-            "Owner Name": "Owner_Name",
-            "Approximate Value": "Approximate_Value",
-        },
-    },
-    "4.3.1 If yes, list their properties": {
-        "subform": "If_yes_list_their_properties_share",
-        "columns": {
-            "Property Description": "Property_Description",
-            "Owner Name": "Owner_Name",
-            "Approximate Value": "Approximate_Value",
-        },
-    },
-    "4.4.1": {
-        "subform": "If_yes_list_other_sources_of_income",
-        "columns": {
-            "Source of Income": "Source_of_Income",
-            "Amount": "Amount",
-        },
-    },
-    "4.4.1 If yes, list other sources of income": {
-        "subform": "If_yes_list_other_sources_of_income",
-        "columns": {
-            "Source of Income": "Source_of_Income",
-            "Amount": "Amount",
-        },
-    },
-    "4.6.1": {
-        "subform": "If_yes_share_the_Loan_Purpose_Amount_Taken_and_Pending_Loan_Amount",
-        "columns": {
-            "Loan Purpose": "Loan_Purpose",
-            "Loan Amount Taken": "Loan_Amount_Taken",
-            "Pending Loan Amount": "Pending_Loan_Amount",
-            "Sr. No.": "Sr_No",
-        },
-    },
-    "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount": {
-        "subform": "If_yes_share_the_Loan_Purpose_Amount_Taken_and_Pending_Loan_Amount",
-        "columns": {
-            "Loan Purpose": "Loan_Purpose",
-            "Loan Amount Taken": "Loan_Amount_Taken",
-            "Pending Loan Amount": "Pending_Loan_Amount",
-            "Sr. No.": "Sr_No",
-        },
-    },
-}
+# # Table rows: OCR produces "{table_name} — Row {n} — {column}"
+# TABLE_TO_SUBFORM: dict[str, dict[str, Any]] = {
+#     "2.5 Family Members": {
+#         "subform": "Family_Members_Table",
+#         "columns": {
+#             "Name": "Name",
+#             "Age": "Age",
+#             "Education": "Education",
+#             "Occupation": "Occupation",
+#             "Annual Income": "Annual_Income",
+#         },
+#     },
+#     "4.3.1": {
+#         "subform": "If_yes_list_their_properties_share",
+#         "columns": {
+#             "Property Description": "Property_Description",
+#             "Owner Name": "Owner_Name",
+#             "Approximate Value": "Approximate_Value",
+#         },
+#     },
+#     "4.3.1 If yes, list their properties": {
+#         "subform": "If_yes_list_their_properties_share",
+#         "columns": {
+#             "Property Description": "Property_Description",
+#             "Owner Name": "Owner_Name",
+#             "Approximate Value": "Approximate_Value",
+#         },
+#     },
+#     "4.4.1": {
+#         "subform": "If_yes_list_other_sources_of_income",
+#         "columns": {
+#             "Source of Income": "Source_of_Income",
+#             "Amount": "Amount",
+#         },
+#     },
+#     "4.4.1 If yes, list other sources of income": {
+#         "subform": "If_yes_list_other_sources_of_income",
+#         "columns": {
+#             "Source of Income": "Source_of_Income",
+#             "Amount": "Amount",
+#         },
+#     },
+#     "4.6.1": {
+#         "subform": "If_yes_share_the_Loan_Purpose_Amount_Taken_and_Pending_Loan_Amount",
+#         "columns": {
+#             "Loan Purpose": "Loan_Purpose",
+#             "Loan Amount Taken": "Loan_Amount_Taken",
+#             "Pending Loan Amount": "Pending_Loan_Amount",
+#             "Sr. No.": "Sr_No",
+#         },
+#     },
+#     "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount": {
+#         "subform": "If_yes_share_the_Loan_Purpose_Amount_Taken_and_Pending_Loan_Amount",
+#         "columns": {
+#             "Loan Purpose": "Loan_Purpose",
+#             "Loan Amount Taken": "Loan_Amount_Taken",
+#             "Pending Loan Amount": "Pending_Loan_Amount",
+#             "Sr. No.": "Sr_No",
+#         },
+#     },
+# }
 
-# Flat OCR fields that should become subform rows in Creator
-#   e.g. "2.2 Relationship Details — Year of Death / Separation" → Family_Background_Relationship subform
-FLAT_TO_SUBFORM_MAP: dict[str, dict[str, Any]] = {
-    "2.2 Relationship Details": {
-        "subform": "Family_Background_Relationship",
-        "columns": {
-            "Year of Death / Separation": "Year_of_Death_Separation",
-            "Reason for Death / Separation": "Reason_for_Death_Separation",
-        },
-    },
-}
+# # Flat OCR fields that should become subform rows in Creator
+# #   e.g. "2.2 Relationship Details — Year of Death / Separation" → Family_Background_Relationship subform
+# FLAT_TO_SUBFORM_MAP: dict[str, dict[str, Any]] = {
+#     "2.2 Relationship Details": {
+#         "subform": "Family_Background_Relationship",
+#         "columns": {
+#             "Year of Death / Separation": "Year_of_Death_Separation",
+#             "Reason for Death / Separation": "Reason_for_Death_Separation",
+#         },
+#     },
+# }
 
-# Type maps for numeric coercion
-ZOHO_NUMERIC_FIELDS: set[str] = {
-    "Number_of_Bedrooms",
-    "Year_of_Death_Separation",
-    "Age",
-    "Sr_No",
-}
+# # Type maps for numeric coercion
+# ZOHO_NUMERIC_FIELDS: set[str] = {
+#     "Number_of_Bedrooms",
+#     "Year_of_Death_Separation",
+#     "Age",
+#     "Sr_No",
+# }
 
-ZOHO_DECIMAL_FIELDS: set[str] = {
-    "Amount_of_Last_Electricity_Bill",
-    "Amount",
-}
+# ZOHO_DECIMAL_FIELDS: set[str] = {
+#     "Amount_of_Last_Electricity_Bill",
+#     "Amount",
+# }
 
-ZOHO_STRINGLIST_FIELDS: set[str] = {
-    "Assets_at_Home_tick_all_that_apply",
-    "Government_ID_Verified_Ration_Card_Aadhaar_Driving_Licence_Voter_ID",
-}
+# ZOHO_STRINGLIST_FIELDS: set[str] = {
+#     "Assets_at_Home_tick_all_that_apply",
+#     "Government_ID_Verified_Ration_Card_Aadhaar_Driving_Licence_Voter_ID",
+# }
 
-# Fields that accept only specific enum values — any other value is rejected to avoid Creator validation errors
-ZOHO_ENUM_FIELDS: dict[str, set[str]] = {
-    "Gender": {"Male", "Female", "Others"},
-    "Will_you_recommend_this_student_for_this_scholarship": {"Yes", "No", "Not Sure"},
-}
+# # Fields that accept only specific enum values — any other value is rejected to avoid Creator validation errors
+# ZOHO_ENUM_FIELDS: dict[str, set[str]] = {
+#     "Gender": {"Male", "Female", "Others"},
+#     "Will_you_recommend_this_student_for_this_scholarship": {"Yes", "No", "Not Sure"},
+# }
 
-# Fields that expect Yes/No values — reject any non-boolean value to avoid Creator validation errors
-ZOHO_BOOLEAN_FIELDS: set[str] = {
-    "Is_Father_Mother_photograph_kept_at_home",
-    "Apart_from_your_job_is_there_any_other_source_of_income",
-    "Do_you_have_any_loans",
-    "Does_the_student_have_any_health_issues",
-    "If_we_have_a_training_program_within_15_km_from_your_home_can_you_come1",
-    "Are_you_ready_to_send_your_son_daughter_to_weekly_skill_development_classes_on_Sundays1",
-    "Do_you_own_any_other_assets_or_properties_in_the_name_of_grandparents_parent_or_student",
-}
+# # Fields that expect Yes/No values — reject any non-boolean value to avoid Creator validation errors
+# ZOHO_BOOLEAN_FIELDS: set[str] = {
+#     "Is_Father_Mother_photograph_kept_at_home",
+#     "Apart_from_your_job_is_there_any_other_source_of_income",
+#     "Do_you_have_any_loans",
+#     "Does_the_student_have_any_health_issues",
+#     "If_we_have_a_training_program_within_15_km_from_your_home_can_you_come1",
+#     "Are_you_ready_to_send_your_son_daughter_to_weekly_skill_development_classes_on_Sundays1",
+#     "Do_you_own_any_other_assets_or_properties_in_the_name_of_grandparents_parent_or_student",
+# }
 
-# Subform rows lacking these columns are dropped (Creator rejects them)
-SUBFORM_REQUIRED_COLUMNS: dict[str, set[str]] = {
-    "Family_Members_Table": {"Name", "Age"},
-    "If_yes_list_their_properties_share": {"Property_Description"},
-    "If_yes_list_other_sources_of_income": {"Source_of_Income"},
-    "If_yes_share_the_Loan_Purpose_Amount_Taken_and_Pending_Loan_Amount": {"Loan_Purpose"},
-    "Family_Background_Relationship": {"Year_of_Death_Separation"},
-}
+# # Subform rows lacking these columns are dropped (Creator rejects them)
+# SUBFORM_REQUIRED_COLUMNS: dict[str, set[str]] = {
+#     "Family_Members_Table": {"Name", "Age"},
+#     "If_yes_list_their_properties_share": {"Property_Description"},
+#     "If_yes_list_other_sources_of_income": {"Source_of_Income"},
+#     "If_yes_share_the_Loan_Purpose_Amount_Taken_and_Pending_Loan_Amount": {"Loan_Purpose"},
+#     "Family_Background_Relationship": {"Year_of_Death_Separation"},
+# }
 
 _SUBROW_RE = re.compile(r'^(.+?) — Row (\d+) — (.+)$')
 _FLAT_TABLE_RE = re.compile(r'^(.+?) — (.+)$')  # "Table — Column" without Row N
@@ -644,7 +644,7 @@ def _query_numeric_app_id_from_creator(
             if record:
                 # The linking field may be named 'Application_ID' or 'Applicant_ID'
                 # depending on the Zoho Creator report configuration.
-                for key in ("Application_ID", "Applicant_ID"):
+                for key in ("Appllication_ID", "Appllicant_ID"):
                     app_id_obj = record.get(key) or {}
                     if isinstance(app_id_obj, dict):
                         num_id = str(app_id_obj.get("ID") or "")
@@ -973,9 +973,9 @@ async def _run_ocr_extract_pipeline(job_dir: Path, req: OcrExtractRequest) -> bo
     if rid in _ACTIVE_ZOHO_RECORDS:
         logger.info("Record %s is already processing (duplicate request ignored)", rid)
         return False
-    if rid in _COMPLETED_ZOHO_RECORDS:
-        logger.info("Record %s was already processed (persisted completion)", rid)
-        return False
+    # if rid in _COMPLETED_ZOHO_RECORDS:
+    #     logger.info("Record %s was already processed (persisted completion)", rid)
+    #     return False
     _ACTIVE_ZOHO_RECORDS.add(rid)
     try:
         token, input_info = await _download_and_prepare(job_dir, req)

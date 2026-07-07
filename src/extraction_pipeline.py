@@ -101,6 +101,11 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     # Section 2 — Family Background (Page 2: 2.3-2.5)
     {"label": "2.3 Is Father/Mother photograph kept at home?", "section_number": 2, "page": 2},
     {"label": "2.4 Government ID Verified", "section_number": 2, "page": 2},
+    {"label": "2.5 Family Members — Row 1 — Name", "section_number": 2, "page": 2},
+    {"label": "2.5 Family Members — Row 1 — Age", "section_number": 2, "page": 2},
+    {"label": "2.5 Family Members — Row 1 — Education", "section_number": 2, "page": 2},
+    {"label": "2.5 Family Members — Row 1 — Occupation", "section_number": 2, "page": 2},
+    {"label": "2.5 Family Members — Row 1 — AnnualIncome", "section_number": 2, "page": 2},
     # Section 3 — Housing Condition (Page 2: 3.1-3.2)
     {"label": "3.1 House Ownership", "section_number": 3, "page": 2},
     {"label": "3.1.1 If rented, what is the rent amount?", "section_number": 3, "page": 2},
@@ -111,27 +116,47 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "3.2 Type of Home — Others", "section_number": 3, "page": 2},
     # ── Page 3 ──
     # Section 3 — Housing Condition (Page 3: 3.3-3.6)
-    {"label": "3.3 Type of Ceiling — Roof", "section_number": 3, "page": 3},
+    {"label": "3.3 Type of Ceiling — Roof(kurai)", "section_number": 3, "page": 3},
     {"label": "3.3 Type of Ceiling — Tiled", "section_number": 3, "page": 3},
-    {"label": "3.3 Type of Ceiling — Asbestos", "section_number": 3, "page": 3},
+    {"label": "3.3 Type of Ceiling — Asbestos/sheet", "section_number": 3, "page": 3},
     {"label": "3.3 Type of Ceiling — Concrete", "section_number": 3, "page": 3},
     {"label": "3.4 Number of Bedrooms", "section_number": 3, "page": 3},
-    {"label": "3.4.1 Type of Bedroom", "section_number": 3, "page": 3},
-    {"label": "3.5 Bathroom", "section_number": 3, "page": 3},
+    {"label": "3.4.1 Type of Bedroom - Separate Bedroom", "section_number": 3, "page": 3},
+    {"label": "3.4.1 Type of Bedroom - No Separate Bedroom", "section_number": 3, "page": 3},
+    {"label": "3.5 Bathroom - Separate", "section_number": 3, "page": 3},
+    {"label": "3.5 Bathroom - Common for Apartment", "section_number": 3, "page": 3},
     {"label": "3.6 Kitchen Type — Separate Kitchen", "section_number": 3, "page": 3},
     {"label": "3.6 Kitchen Type — Hall with Kitchen", "section_number": 3, "page": 3},
     # Section 4 — Financial Background (Page 3: 4.1-4.3)
-    {"label": "4.1 Assets at Home", "section_number": 4, "page": 3},
+    {"label": "4.1 Assets at Home(tick all that apply) - Washing Machine", "section_number": 4, "page": 3},
+    {"label": "4.1 Assets at Home(tick all that apply) - Fridge", "section_number": 4, "page": 3},
+    {"label": "4.1 Assets at Home(tick all that apply) - AC", "section_number": 4, "page": 3},
+    {"label": "4.1 Assets at Home(tick all that apply) - LED TV", "section_number": 4, "page": 3},
+    {"label": "4.1 Assets at Home(tick all that apply) - Two-Wheeler", "section_number": 4, "page": 3},
+    {"label": "4.1 Assets at Home(tick all that apply) - Car", "section_number": 4, "page": 3},
+    {"label": "4.1 Assets at Home(tick all that apply) - Smartphone", "section_number": 4, "page": 3},
+    {"label": "4.1 Assets at Home(tick all that apply) - Separate Wi-Fi", "section_number": 4, "page": 3},
+    {"label": "4.1 Assets at Home(tick all that apply) - Others:", "section_number": 4, "page": 3},
     {"label": "4.2 Amount of Last Electricity Bill", "section_number": 4, "page": 3},
     {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?", "section_number": 4, "page": 3},
     # ── Page 4 ──
     # Section 4 — Financial Background (Page 4: 4.4-4.7)
+    {"label": "4.3.1 If Yes, list their properties: - Property Description", "section_number": 4, "page": 4},
+     {"label": "4.3.1 If Yes, list their properties: - Owner Name", "section_number": 4, "page": 4},
+      {"label": "4.3.1 If Yes, list their properties: - Approximate Value", "section_number": 4, "page": 4},
     {"label": "4.4 Apart from your job, is there any other source of income?", "section_number": 4, "page": 4},
+     {"label": "4.4.1 If Yes, list other sources of income: - Source of Income", "section_number": 4, "page": 4},
+          {"label": "4.4.1 If Yes, list other sources of income: - Amount", "section_number": 4, "page": 4},
     {"label": "4.5 Income Type", "section_number": 4, "page": 4},
     {"label": "4.6 Do you have any loans?", "section_number": 4, "page": 4},
-    {"label": "4.7 If you choose any college, how much is the college fee?", "section_number": 4, "page": 5},
+         {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Sr.No.", "section_number": 4, "page": 4},
+         {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Loan Purpose", "section_number": 4, "page": 4},
+         {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Loan Amount Taken", "section_number": 4, "page": 4},
+         {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Pending Loan Amount", "section_number": 4, "page": 4},
+    
     # ── Page 5 ──
-    # Section 4 — Financial Background (Page 5: 4.8-4.9)
+    # Section 4 — Financial Background (Page 5: 4.7-4.9)
+    {"label": "4.7 If you choose any college, how much is the college fee?", "section_number": 4, "page": 5},
     {"label": "4.8 If the college fee is higher, how will you manage it?", "section_number": 4, "page": 5},
     {"label": "4.9 If you do not receive this scholarship, how will you pay the fees?", "section_number": 4, "page": 5},
     # Section 5 — Health Information
@@ -140,8 +165,9 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     # Section 6 — Student Commitment
     {"label": "6.1 Will you study college for three years without any obstacle?", "section_number": 6, "page": 5},
     {"label": "6.2 If we have a training program within 15 km from your home, can you come?", "section_number": 6, "page": 5},
-    {"label": "6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?", "section_number": 6, "page": 6},
+    
     # ── Page 6 ──
+    {"label": "6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?", "section_number": 6, "page": 6},
     # Section 7 — Scholarship Information
     {"label": "7.1 Has the student received or applied for any other scholarships for their UG degree?", "section_number": 7, "page": 6},
     # Section 8 — Volunteer Observation

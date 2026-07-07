@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS ocr_documents (
     relationship_death_year     TEXT,
     relationship_death_reason   TEXT,
     photograph_kept_at_home     BOOLEAN,
-    government_id_verified      TEXT,
+    government_id_verified      JSONB,
     family_members              JSONB,
 
     -- ── Section 3: Housing Condition ──

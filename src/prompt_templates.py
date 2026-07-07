@@ -148,9 +148,9 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
   4.4 Apart from your job, is there any other source of income? [radio → Yes | No]  ← pg 4
     4.4.1                             [table — columns: Source of Income, Amount]
   4.5 Income Type                         [radio → Monthly | Daily | Weekly | Ad-Hoc]  ← pg 4
-  4.6 Do you have any loans?              [radio → Yes | No]                           ← pg 5
-    4.6.1                             [table — columns: Loan Purpose, Loan Amount Taken, Pending Loan Amount]
-  4.7 If you choose any college, how much is the college fee? [text]                   ← pg 5
+   4.6 Do you have any loans?              [radio → Yes | No]                           ← pg 4
+     4.6.1                             [table — columns: Loan Purpose, Loan Amount Taken, Pending Loan Amount]    ← pg 4
+   4.7 If you choose any college, how much is the college fee? [text]                   ← pg 5
   4.8 If the college fee is higher, how will you manage it? [text]
   4.9 If you do not receive this scholarship, how will you pay the fees? [text]
 
@@ -160,8 +160,8 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
 
 --- Section 6 — Student Commitment (Pages 5-6) — 3 fields ---
   6.1 Will you study college for three years without any obstacle? [text]               ← pg 5
-  6.2 If we have a training program within 15 km from your home, can you come?          ← pg 6
-      [radio → Yes | No | Maybe]
+   6.2 If we have a training program within 15 km from your home, can you come?          ← pg 5
+       [radio → Yes | No | Maybe]
   6.3 Are you ready to send your son/daughter to weekly skill development classes
       on Sundays (16 classes a year)? [radio → Yes | No]          ← pg 6
 
@@ -369,10 +369,10 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   4.4.1                             [table — columns: Source of Income, Amount]
   4.5 Income Type                         [radio → Monthly | Daily | Weekly | Ad-Hoc]
   4.6 Do you have any loans?              [radio → Yes | No]
-""",
-    5: """
---- Section 4 — Financial Background (Page 5) — 3 fields + one table ---
   4.6.1                             [table — columns: Loan Purpose, Loan Amount Taken, Pending Loan Amount]
+""",
+     5: """
+--- Section 4 — Financial Background (Page 5) — 3 fields ---
   4.7 If you choose any college, how much is the college fee? [text]
   4.8 If the college fee is higher, how will you manage it? [text]
   4.9 If you do not receive this scholarship, how will you pay the fees? [text]
@@ -381,12 +381,12 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   5.1 Does the student have any health issues? [radio → Yes | No]
   5.2 If yes, list the health issues        [text]
 
---- Section 6 — Student Commitment (Page 5) — 1 field ---
+--- Section 6 — Student Commitment (Page 5) — 2 fields ---
   6.1 Will you study college for three years without any obstacle? [text]
-""",
-    6: """
---- Section 6 — Student Commitment (Page 6) — 2 fields ---
   6.2 If we have a training program within 15 km from your home, can you come? [radio → Yes | No | Maybe]
+""",
+     6: """
+--- Section 6 — Student Commitment (Page 6) — 1 field ---
   6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)? [radio → Yes | No]
 
 --- Section 7 — Scholarship Information (Page 6) — 1 field ---

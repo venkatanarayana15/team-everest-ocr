@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import asyncpg
@@ -42,12 +43,12 @@ FIELD_TO_COLUMN: dict[str, str] = {
     "4.1 Assets at Home": "assets_at_home",
     "4.2 Amount of Last Electricity Bill": "last_electricity_bill_amount",
     "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?": "owns_other_assets",
-    "4.3.1 If yes, list their properties": "other_assets_details",
+    "4.3.1": "other_assets_details",
     "4.4 Apart from your job, is there any other source of income?": "has_other_income",
-    "4.4.1 If yes, list other sources of income": "other_income_sources",
+    "4.4.1": "other_income_sources",
     "4.5 Income Type": "income_type",
     "4.6 Do you have any loans?": "has_loans",
-    "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount": "loan_details",
+    "4.6.1": "loan_details",
     "4.7 If you choose any college, how much is the college fee?": "college_fee",
     "4.8 If the college fee is higher, how will you manage it?": "manage_higher_fee",
     "4.9 If you do not receive this scholarship, how will you pay the fees?": "manage_without_scholarship",
@@ -76,13 +77,14 @@ JSONB_ARRAY_COLUMNS: set[str] = {
     "type_of_ceiling",
     "kitchen_type",
     "assets_at_home",
+    "government_id_verified",
 }
 
 TABLE_PARENT_COLUMNS: dict[str, str] = {
     "2.5 Family Members": "family_members",
-    "4.3.1 If yes, list their properties": "other_assets_details",
-    "4.4.1 If yes, list other sources of income": "other_income_sources",
-    "4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount": "loan_details",
+    "4.3.1": "other_assets_details",
+    "4.4.1": "other_income_sources",
+    "4.6.1": "loan_details",
 }
 
 _ROW_RE = re.compile(r"^(.*?)\s*—\s*Row\s+\d+\s*—\s*(.*)$")
@@ -229,6 +231,8 @@ async def upsert_ocr_document(
         "file_name": file_name,
         "status": status,
     }
+
+    data["processed_at"] = datetime.now(timezone.utc)
 
     if processing_time is not None:
         data["processing_time"] = processing_time
