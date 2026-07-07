@@ -1044,23 +1044,28 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
         if ocr_result:
             app_identifier = ocr_result.get("application_id") or rid
 
-            # ── Step 1: POST fields to Creator questionnaire ──
-            creator_fields_ok = False
-            await _set_status(job_dir, "zoho_fields", "Writing fields to Home_Visit_Questionnaire...")
-            try:
-                await loop.run_in_executor(
-                    None, _update_zoho_creator_fields, access_token, req, ocr_result,
-                )
+            skip_creator = os.environ.get("SKIP_ZOHO_CREATOR", "").strip().lower() in ("1", "true", "yes")
+
+            if not skip_creator:
+                # ── Step 1: POST fields to Creator questionnaire ──
+                creator_fields_ok = False
+                await _set_status(job_dir, "zoho_fields", "Writing fields to Home_Visit_Questionnaire...")
+                try:
+                    await loop.run_in_executor(
+                        None, _update_zoho_creator_fields, access_token, req, ocr_result,
+                    )
+                    creator_fields_ok = True
+                    logger.info("Home_Visit_Questionnaire fields updated | record=%s%s", rid, aid)
+                    print(f"  ✓ Creator form updated for {rid}{aid}")
+                except Exception as e:
+                    logger.error("Failed to update Questionnaire_Report | record=%s | error=%s%s",
+                        rid, e, aid)
+                    print(f"  ⚠ Creator form update failed for {rid}{aid}: {e}")
+                    if "Invalid column value" in str(e):
+                        print(f"    └─ Hint: check extracted field values match Zoho field types "
+                              f"(enum, numeric, boolean). See PAYLOAD log above for field details.")
+            else:
                 creator_fields_ok = True
-                logger.info("Home_Visit_Questionnaire fields updated | record=%s%s", rid, aid)
-                print(f"  ✓ Creator form updated for {rid}{aid}")
-            except Exception as e:
-                logger.error("Failed to update Questionnaire_Report | record=%s | error=%s%s",
-                    rid, e, aid)
-                print(f"  ⚠ Creator form update failed for {rid}{aid}: {e}")
-                if "Invalid column value" in str(e):
-                    print(f"    └─ Hint: check extracted field values match Zoho field types "
-                          f"(enum, numeric, boolean). See PAYLOAD log above for field details.")
 
             # ── Step 2: Upload original files to Supabase (independent of Step 1) ──
             supabase_ok = True
@@ -1091,32 +1096,35 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
             else:
                 print(f"  ⚠ Some Supabase uploads failed | bucket={req.bucket} | record={rid}")
 
-            # ── Step 3: Update OCR_Status based on combined outcome ──
-            status_to_set = "updated"
-            status_msg = "OCR complete — Zoho record updated"
-            if not creator_fields_ok and not supabase_ok:
-                status_to_set = "null"
-                status_msg = "OCR complete but both Creator and Supabase writes failed"
-            elif not creator_fields_ok:
-                status_msg = "OCR complete — PDF on Supabase, Creator fields POST failed"
-            elif not supabase_ok:
-                status_msg = "OCR complete — Creator fields written, Supabase upload failed"
+            if not skip_creator:
+                # ── Step 3: Update OCR_Status based on combined outcome ──
+                status_to_set = "updated"
+                status_msg = "OCR complete — Zoho record updated"
+                if not creator_fields_ok and not supabase_ok:
+                    status_to_set = "null"
+                    status_msg = "OCR complete but both Creator and Supabase writes failed"
+                elif not creator_fields_ok:
+                    status_msg = "OCR complete — PDF on Supabase, Creator fields POST failed"
+                elif not supabase_ok:
+                    status_msg = "OCR complete — Creator fields written, Supabase upload failed"
 
-            await _set_status(job_dir, "zoho_update", f"Setting OCR_Status={status_to_set}...")
-            try:
-                await loop.run_in_executor(
-                    None, _update_zoho_creator, access_token, req, status_to_set,
-                )
-                logger.info("Zoho Creator OCR_Status=%s | record=%s%s",
-                    status_to_set, rid, aid)
-                print(f"  ✓ OCR_Status set to '{status_to_set}' for {rid}{aid}")
-                await _set_status(job_dir, "done", status_msg)
-            except Exception as zoho_err:
-                logger.error("Zoho Creator OCR_Status update failed | record=%s | error=%s%s",
-                    rid, zoho_err, aid)
-                print(f"  ⚠ OCR_Status update failed for {rid}{aid}: {zoho_err}")
-                await _set_status(job_dir, "done",
-                    f"Pipeline done but OCR_Status update failed: {zoho_err}")
+                await _set_status(job_dir, "zoho_update", f"Setting OCR_Status={status_to_set}...")
+                try:
+                    await loop.run_in_executor(
+                        None, _update_zoho_creator, access_token, req, status_to_set,
+                    )
+                    logger.info("Zoho Creator OCR_Status=%s | record=%s%s",
+                        status_to_set, rid, aid)
+                    print(f"  ✓ OCR_Status set to '{status_to_set}' for {rid}{aid}")
+                    await _set_status(job_dir, "done", status_msg)
+                except Exception as zoho_err:
+                    logger.error("Zoho Creator OCR_Status update failed | record=%s | error=%s%s",
+                        rid, zoho_err, aid)
+                    print(f"  ⚠ OCR_Status update failed for {rid}{aid}: {zoho_err}")
+                    await _set_status(job_dir, "done",
+                        f"Pipeline done but OCR_Status update failed: {zoho_err}")
+            else:
+                await _set_status(job_dir, "done", "OCR complete — Supabase upload only (Creator writes skipped)")
         else:
             await _set_status(job_dir, "zoho_update", "Marking record as failed...")
             try:
@@ -1502,15 +1510,18 @@ async def run_zoho_writeback_for_batch_item(job_dir: Path, pdf_path: Path, zoho_
     app_identifier = ocr_result.get("application_id") or rid
     all_ok = True
 
-    # 1. POST fields to Creator Home_Visit_Questionnaire
-    try:
-        await loop.run_in_executor(
-            None, _update_zoho_creator_fields, access_token, req, ocr_result,
-        )
-        logger.info("Batch item Zoho fields updated | record=%s%s", rid, aid)
-    except Exception as e:
-        all_ok = False
-        logger.error("Failed to update Questionnaire for batch item | record=%s | error=%s%s", rid, e, aid)
+    skip_creator = os.environ.get("SKIP_ZOHO_CREATOR", "").strip().lower() in ("1", "true", "yes")
+
+    if not skip_creator:
+        # 1. POST fields to Creator Home_Visit_Questionnaire
+        try:
+            await loop.run_in_executor(
+                None, _update_zoho_creator_fields, access_token, req, ocr_result,
+            )
+            logger.info("Batch item Zoho fields updated | record=%s%s", rid, aid)
+        except Exception as e:
+            all_ok = False
+            logger.error("Failed to update Questionnaire for batch item | record=%s | error=%s%s", rid, e, aid)
 
     # 2. Upload original files to Supabase
     safe_name = app_identifier.replace(" ", "").replace("(", "_").replace(")", "_")
@@ -1548,16 +1559,17 @@ async def run_zoho_writeback_for_batch_item(job_dir: Path, pdf_path: Path, zoho_
                 all_ok = False
                 logger.error("Supabase upload failed | path=%s | record=%s | error=%s", supabase_path, rid, e)
 
-    # 3. Update OCR_Status to yes in Creator report
-    try:
-        payload = {"OCR_Status": "yes"}
-        await loop.run_in_executor(
-            None, _update_zoho_creator_fields, access_token, req, payload,
-        )
-        logger.info("Batch item OCR_Status updated | record=%s%s", rid, aid)
-    except Exception as e:
-        all_ok = False
-        logger.error("Failed to update OCR_Status for batch item | record=%s | error=%s%s", rid, e, aid)
+    if not skip_creator:
+        # 3. Update OCR_Status to yes in Creator report
+        try:
+            payload = {"OCR_Status": "yes"}
+            await loop.run_in_executor(
+                None, _update_zoho_creator_fields, access_token, req, payload,
+            )
+            logger.info("Batch item OCR_Status updated | record=%s%s", rid, aid)
+        except Exception as e:
+            all_ok = False
+            logger.error("Failed to update OCR_Status for batch item | record=%s | error=%s%s", rid, e, aid)
 
     if all_ok:
         _COMPLETED_ZOHO_RECORDS.add(req.zoho_record_id)
