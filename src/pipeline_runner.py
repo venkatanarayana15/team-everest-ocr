@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -355,11 +356,17 @@ async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
 
         checkpoint = _load_checkpoint(job_dir)
         if not checkpoint:
-            await _set_status(job_dir, "preprocessing", f"Preprocessing PDF ({pdf_name})...")
-            pipeline.preprocess(pdf_path, str(job_dir))
-            await _set_status(job_dir, "preprocessing", "Preprocessing done.", pages=6)
-
-        processed_images = _ensure_page_images(job_dir / "pages")
+            if pipeline.primary_client.needs_images:
+                await _set_status(job_dir, "preprocessing", f"Preprocessing PDF ({pdf_name})...")
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, pipeline.preprocess, pdf_path, str(job_dir))
+                await _set_status(job_dir, "preprocessing", "Preprocessing done.", pages=6)
+                processed_images = _ensure_page_images(job_dir / "pages")
+            else:
+                await _set_status(job_dir, "preprocessing", "Skipping page rendering (Chandra OCR).")
+                processed_images = {}
+        else:
+            processed_images = _ensure_page_images(job_dir / "pages")
 
         async def status_func(stage, msg):
             await _set_status(job_dir, stage, msg)
@@ -435,17 +442,42 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 await _set_batch_pdf_status(job_dir, pdf_name, "processing", 0, f"Starting ({idx+1}/{len(pdfs_info)})")
 
                 try:
-                    valid, err = _validate_pdf(pdf_info["path"])
-                    if not valid:
-                        await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, err)
-                        all_results.append({"name": pdf_name, "error": err})
-                        queue.task_done()
-                        continue
+                    input_type = pdf_info.get("input_type", "pdf")
+                    input_info = pdf_info.get("input_info", {})
 
-                    pipeline.preprocess(pdf_info["path"], str(pdf_job_dir))
-                    await _set_batch_pdf_status(job_dir, pdf_name, "preprocessing", 20, f"Preprocessed ({idx+1}/{len(pdfs_info)})")
+                    if input_type == "images":
+                        # Image input: copy images to subdir, use preprocess_images
+                        image_paths = input_info.get("image_paths", {})
+                        if not image_paths:
+                            raise RuntimeError("Images input type but no image_paths in input_info")
+                        pages_dir = pdf_job_dir / "pages"
+                        pages_dir.mkdir(parents=True, exist_ok=True)
+                        # Copy images to pages dir with expected naming
+                        for p_num, src_path in image_paths.items():
+                            dest = pages_dir / f"page_{p_num}.png"
+                            shutil.copy2(src_path, str(dest))
+                        await _set_batch_pdf_status(job_dir, pdf_name, "preprocessing", 20, f"Images ready ({idx+1}/{len(pdfs_info)})")
+                        processed_images = {p_num: str(pages_dir / f"page_{p_num}.png") for p_num in image_paths}
+                        # Need to run preprocess_images for deskew/denoise
+                        processed = pipeline.preprocess_images(image_paths, str(pdf_job_dir))
+                        processed_images = _ensure_page_images(pdf_job_dir / "pages")
+                        pdf_path_for_extraction = ""
+                    else:
+                        valid, err = _validate_pdf(pdf_info["path"])
+                        if not valid:
+                            await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, err)
+                            all_results.append({"name": pdf_name, "error": err})
+                            queue.task_done()
+                            continue
 
-                    processed_images = _ensure_page_images(pdf_job_dir / "pages")
+                        if pipeline.primary_client.needs_images:
+                            await asyncio.to_thread(pipeline.preprocess, pdf_info["path"], str(pdf_job_dir))
+                            await _set_batch_pdf_status(job_dir, pdf_name, "preprocessing", 20, f"Preprocessed ({idx+1}/{len(pdfs_info)})")
+                            processed_images = _ensure_page_images(pdf_job_dir / "pages")
+                        else:
+                            await _set_batch_pdf_status(job_dir, pdf_name, "preprocessing", 20, f"Ready ({idx+1}/{len(pdfs_info)})")
+                            processed_images = {}
+                        pdf_path_for_extraction = pdf_info["path"]
 
                     async def batch_status_func(stage, msg, _pdf_name=pdf_name, _idx=idx):
                         pct = 40 if stage == "primary_extraction" else (70 if stage == "secondary_verification" else 85)
@@ -453,7 +485,7 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
 
                     res = await _run_core_extraction(
                         job_dir=pdf_job_dir,
-                        pdf_path=pdf_info["path"],
+                        pdf_path=pdf_path_for_extraction,
                         processed_images=processed_images,
                         pipeline=pipeline,
                         primary_name=primary_name,
@@ -462,12 +494,12 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                         tesseract_enabled=config.tesseract_enabled,
                     )
                     res["pdf_name"] = pdf_name
-                    res["input_type"] = "batch_pdf"
+                    res["input_type"] = "batch_" + input_type
                     res["processing_time"] = round(time.time() - t0, 2)
 
                     if "zoho_req" in pdf_info:
                         from src.zoho_integration import run_zoho_writeback_for_batch_item
-                        await run_zoho_writeback_for_batch_item(job_dir, Path(pdf_info["path"]), pdf_info["zoho_req"], res)
+                        await run_zoho_writeback_for_batch_item(job_dir, Path(pdf_info["path"]), pdf_info["zoho_req"], res, input_info)
 
                     _print_field_report(pdf_job_dir, res, pdf_name)
 
@@ -692,6 +724,40 @@ def _checkbox_bracket(value: str) -> str:
     return f"[{value[:3]}…]"
 
 
+import re
+ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*[mK]')
+
+def visible_len(s: str) -> int:
+    clean = ANSI_ESCAPE.sub('', s.replace('\033', '\x1b'))
+    return len(clean)
+
+def pad_line(content: str, width: int) -> str:
+    vis_w = visible_len(content)
+    if vis_w >= width:
+        res = []
+        cur_len = 0
+        in_esc = False
+        for char in content:
+            if char == '\033' or char == '\x1b':
+                in_esc = True
+                res.append(char)
+                continue
+            if in_esc:
+                res.append(char)
+                if char == 'm':
+                    in_esc = False
+                continue
+            if cur_len < width - 1:
+                res.append(char)
+                cur_len += 1
+            elif cur_len == width - 1:
+                res.append('…')
+                cur_len += 1
+        res.append('\033[0m')
+        return "".join(res)
+    return content + " " * (width - vis_w)
+
+
 def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -> None:
     name_path = job_dir / "original_name.txt"
     display_name = pdf_name or (name_path.read_text().strip() if name_path.exists() else job_dir.name)
@@ -724,11 +790,14 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     total_review = sum(1 for f in fields if f.get("needs_clarification"))
     review_str = f"\033[91m\033[1m{total_review} need review\033[0m" if total_review > 0 else "\033[92m0 need review\033[0m"
 
-    W = 80
-    print(f"\n\033[1m{'='*W}\033[0m")
-    print(f"  \033[1m📄 {display_name}\033[0m")
-    print(f"  {status_str}  ·  Confidence: {conf_str}  ·  {elapsed}s  ·  {len(fields)} fields  ·  {review_str}")
-    print(f"\033[90m{'─'*W}\033[0m")
+    W = 86
+    C_WIDTH = W - 4
+
+    report_lines = []
+    report_lines.append("")
+    report_lines.append(f"  \033[1m📄 {display_name}\033[0m")
+    report_lines.append(f"  {status_str}  ·  Confidence: {conf_str}  ·  {elapsed}s  ·  {len(fields)} fields  ·  {review_str}")
+    report_lines.append(f"\033[90m{'─'*C_WIDTH}\033[0m")
 
     re_row = __import__('re').compile(r'^(.+?) — Row (\d+) — (.+)$')
     re_check = __import__('re').compile(r'^(.+?) — (.+)$')
@@ -748,23 +817,25 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
         )
         ordered = (["header"] if "header" in by_sec else []) + sec_keys
 
-        # Dynamic-width page header — fill remaining space with ─
+        # Clean, aligned page header
         if needs_review:
-            suffix_colored = f"  \033[91m\033[1m⚠ {needs_review}\033[0m"
-            suffix_clean = f"  ⚠ {needs_review}"
+            suffix_colored = f" \033[91m\033[1m[⚠ {needs_review}]\033[0m"
+            suffix_clean = f" [⚠ {needs_review}]"
         else:
-            suffix_colored = "  \033[92m✓\033[0m"
-            suffix_clean = "  ✓"
-        prefix = f"  \033[1mPage {page_num}\033[0m"
-        prefix_clean = f"  Page {page_num}"
-        pad = W - 1 - len(prefix_clean) - len(suffix_clean)
-        print(f"\n  {'─' * 2} {prefix}{suffix_colored} {'─' * pad}")
+            suffix_colored = " \033[92m[✓]\033[0m"
+            suffix_clean = " [✓]"
+        prefix = f" \033[1mPage {page_num}\033[0m"
+        prefix_clean = f" Page {page_num}"
+        pad = C_WIDTH - 6 - len(prefix_clean) - len(suffix_clean)
+        report_lines.append(f" \033[90m──\033[0m{prefix}{suffix_colored} \033[90m{'─' * pad}\033[0m")
 
         for sec_key in ordered:
             sec_fields = by_sec[sec_key]
             sec_title = "Header" if sec_key == "header" else f"Section {sec_key}" + (f" — {sec_names.get(sec_key, '').rstrip('*').strip()}" if sec_names.get(sec_key) else "")
-            sep_len = min(W - 4 - len(sec_title), 60)
-            print(f"\n    \033[1m\033[36m{'─' * 2} {sec_title} {'─' * sep_len}\033[0m")
+            
+            # Clean section header line
+            pad_sec = C_WIDTH - 6 - len(sec_title)
+            report_lines.append(f"    \033[1m\033[36m{sec_title}\033[0m \033[90m{'─' * max(pad_sec, 4)}\033[0m")
 
             tables: dict[str, dict[int, dict[str, str]]] = {}
             checklists: dict[str, list[tuple[str, str]]] = {}
@@ -792,14 +863,13 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
 
                 simple.append(f)
 
-            # Identify aggregate parents that have checklist items
-            agg_labels = {g for g in checklists if any("[✓]" in _checkbox_bracket(v) for _, v in checklists[g])}
+            # Suppress all checklist parents from simple list
+            agg_labels = set(checklists.keys())
 
             for f in simple:
                 label = f.get("label", "?")
                 val = f.get("value") or "—"
 
-                # Suppress aggregate parent labels — they're shown in the checklist block
                 if label in agg_labels:
                     continue
 
@@ -810,28 +880,49 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
                 else:
                     val_display = val
 
-                print(f"      {label:<50} {val_display}")
+                # Handle multi-line layouts nicely
+                if len(label) > 40 and len(str(val)) > 15:
+                    report_lines.append(f"      {label}")
+                    lines = str(val_display).split('\n')
+                    for line in lines:
+                        report_lines.append(f"        {line}")
+                else:
+                    lines = str(val_display).split('\n')
+                    report_lines.append(f"      {label:<40} {lines[0]}")
+                    for extra_line in lines[1:]:
+                        report_lines.append(f"{' ' * 47}{extra_line}")
 
             for group_name, options in checklists.items():
                 if not options:
                     continue
                 max_opt = max(len(opt) for opt, _ in options)
+                
+                # Check status counting
                 checked_count = sum(1 for _, v in options if "[✓]" in _checkbox_bracket(v))
 
-                # Compact single-line display if option names are short
-                if sum(len(opt) for opt, _ in options) < 36:
+                if sum(len(opt) for opt, _ in options) < 30:
                     parts = []
                     for option, value in options:
                         bracket = _checkbox_bracket(value)
-                        sym = f"\033[92m✓\033[0m" if "[✓]" in bracket else f"\033[90m✗\033[0m"
+                        if "[✓]" in bracket:
+                            sym = f"\033[92m✓\033[0m"
+                        elif "[✗]" in bracket:
+                            sym = f"\033[91m✗\033[0m"
+                        else:
+                            sym = f"\033[90m·\033[0m"
                         parts.append(f"{option} {sym}")
-                    print(f"      {group_name}  \033[90m({checked_count} checked)\033[0m  {'  '.join(parts)}")
+                    report_lines.append(f"      {group_name}  \033[90m({checked_count} checked)\033[0m  {'  '.join(parts)}")
                 else:
-                    print(f"      {group_name}  \033[90m({checked_count} checked)\033[0m")
+                    report_lines.append(f"      {group_name}  \033[90m({checked_count} checked)\033[0m")
                     for option, value in options:
                         bracket = _checkbox_bracket(value)
-                        bracket_display = f"\033[92m{bracket}\033[0m" if "[✓]" in bracket else bracket
-                        print(f"        {option:{max_opt}}  {bracket_display}")
+                        if "[✓]" in bracket:
+                            bracket_display = f"\033[92m[✓]\033[0m"
+                        elif "[✗]" in bracket:
+                            bracket_display = f"\033[91m[✗]\033[0m"
+                        else:
+                            bracket_display = f"\033[90m{bracket}\033[0m"
+                        report_lines.append(f"        {option:{max_opt}}  {bracket_display}")
 
             for table_name, rows in tables.items():
                 col_order: list[str] = []
@@ -839,33 +930,41 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
                     for c in rows[rn]:
                         if c not in col_order:
                             col_order.append(c)
-                # Add auto-numbered Sr. No. as first column
+                
                 sr_col = "Sr. No."
                 col_order = [sr_col] + col_order
                 col_widths = []
                 for c in col_order:
                     if c == sr_col:
                         max_val = max(len(str(rn)) for rn in rows) if rows else 3
-                        col_widths.append(max(len(c), max_val, 4))
+                        col_widths.append(max(len(c), max_val))
                     else:
-                        max_val = max(len(rows[rn].get(c, "")) for rn in rows)
-                        col_widths.append(max(len(c), max_val, 8))
+                        max_val = max(len(str(rows[rn].get(c, "")).replace("\r", "").replace("\n", " ")) for rn in rows) if rows else 0
+                        col_widths.append(max(len(c), max_val))
 
-                header = "  │  ".join(f"\033[1m{c.ljust(col_widths[i])}\033[0m" for i, c in enumerate(col_order))
-                sep = "—┼—".join("—" * w for w in col_widths)
-                print(f"\n      \033[4m{table_name}\033[0m  \033[90m({len(rows)} rows)\033[0m")
-                print(f"        {header}")
-                print(f"        \033[90m{sep}\033[0m")
+                report_lines.append("")
+                report_lines.append(f"      \033[4m{table_name}\033[0m  \033[90m({len(rows)} rows)\033[0m")
+                
+                # Unicode box-drawing aligned table layout
+                top_border = "\033[90m┌" + "┬".join("─" * (w + 2) for w in col_widths) + "┐\033[0m"
+                header_row = "\033[90m│\033[0m" + "│".join(f" \033[1m{c.ljust(col_widths[i])}\033[0m " for i, c in enumerate(col_order)) + "\033[90m│\033[0m"
+                mid_border = "\033[90m├" + "┼".join("─" * (w + 2) for w in col_widths) + "┤\033[0m"
+                bottom_border = "\033[90m└" + "┴".join("─" * (w + 2) for w in col_widths) + "┘\033[0m"
+
+                report_lines.append(f"        {top_border}")
+                report_lines.append(f"        {header_row}")
+                report_lines.append(f"        {mid_border}")
                 for rn in sorted(rows):
-                    vals = []
+                    row_cells = []
                     for i, c in enumerate(col_order):
-                        if c == sr_col:
-                            vals.append(str(rn).ljust(col_widths[i]))
-                        else:
-                            vals.append(rows[rn].get(c, "—").ljust(col_widths[i]))
-                    print(f"        {'  │  '.join(vals)}")
+                        val = str(rn) if c == sr_col else str(rows[rn].get(c, "—"))
+                        val_clean = val.replace("\r", "").replace("\n", " ")
+                        row_cells.append(f" {val_clean.ljust(col_widths[i])} ")
+                    row_str = "\033[90m│\033[0m" + "\033[90m│\033[0m".join(row_cells) + "\033[90m│\033[0m"
+                    report_lines.append(f"        {row_str}")
+                report_lines.append(f"        {bottom_border}")
 
-        print()
+        report_lines.append("")
         high_conf = sum(1 for f in page_fields if f.get("confidence", 0) >= 90)
         low_conf = sum(1 for f in page_fields if f.get("confidence", 0) < 70)
 
@@ -877,7 +976,14 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
         else:
             page_details += f" · 0 low"
 
-        remaining = max(W - 1 - len(f"  {page_details} "), 4)
-        print(f"  {page_details}  \033[90m{'─' * remaining}\033[0m")
+        remaining = max(C_WIDTH - 4 - visible_len(page_details), 4)
+        report_lines.append(f"  {page_details} \033[90m{'─' * remaining}\033[0m")
 
-    print(f"\033[1m{'='*W}\033[0m\n")
+    # Print the border container layout
+    top_box = "\033[90m┌" + "─" * (W - 2) + "┐\033[0m"
+    bottom_box = "\033[90m└" + "─" * (W - 2) + "┘\033[0m"
+    
+    print(f"\n{top_box}")
+    for line in report_lines:
+        print(f"\033[90m│\033[0m {pad_line(line, C_WIDTH)} \033[90m│\033[0m")
+    print(f"{bottom_box}\n")

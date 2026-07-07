@@ -7,9 +7,22 @@ import sys
 import threading
 import time
 import uuid
+import signal
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+
+def _suppress_interrupt_signals():
+    def handler(sig, frame):
+        print("\nINFO:     Server stopped gracefully.")
+        sys.exit(0)
+    try:
+        signal.signal(signal.SIGINT, handler)
+        signal.signal(signal.SIGTERM, handler)
+    except ValueError:
+        pass
+
+_suppress_interrupt_signals()
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware

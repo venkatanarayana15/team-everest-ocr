@@ -7,6 +7,8 @@ from abc import ABC, abstractmethod
 import time
 import random
 
+
+
 logger = logging.getLogger(__name__)
 
 # Global semaphore that caps total concurrent LLM calls across ALL pipelines.
@@ -129,15 +131,14 @@ def _load_dotenv(path: str = None) -> None:
     if path is None:
         from pathlib import Path
         path = str(Path(__file__).resolve().parent.parent / ".env")
-    if not os.environ.get("DOTENV_LOADED") and os.path.exists(path):
+    if os.path.exists(path):
         with open(path) as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 k, _, v = line.partition("=")
-                os.environ.setdefault(k.strip(), v.strip())
-        os.environ["DOTENV_LOADED"] = "1"
+                os.environ[k.strip()] = v.strip()
 
 
 def _strip_json_fence(text: str) -> str:
@@ -174,6 +175,10 @@ def _extract_usage(response) -> TokenUsage:
 
 
 class ModelClient(ABC):
+    @property
+    def needs_images(self) -> bool:
+        return True
+
     @abstractmethod
     async def extract_structured(self, pdf_path: str, page_images: dict[int, str], prompt: str) -> tuple[dict | None, TokenUsage]:
         ...
@@ -408,6 +413,10 @@ def get_model_client(role: str = "primary") -> ModelClient:
             )
 
     base_url = os.environ.get(base_url_key) or _BASE_URLS.get(provider)
+
+    if provider == "chandra-2":
+        from src.chandra_client import ChandraOcrClient
+        return ChandraOcrClient(api_key=api_key, base_url=base_url)
 
     if provider == "gemini":
         logger.info("[%s] Using Gemini: %s  base_url=%s", role, model, base_url)

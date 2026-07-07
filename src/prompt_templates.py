@@ -299,3 +299,102 @@ RULES
 Existing fields (low-confidence only — high-confidence fields were already auto-accepted):
 {fields_json}
 '''
+
+
+PAGE_FIELD_MAPPINGS: dict[int, str] = {
+    1: """
+--- Header (Page 1, section=null) — 3 fields ---
+  Volunteer Name        [text]
+  Co-Volunteer Name     [text]
+  Date of Visit         [text]
+
+--- Section 1 — Student Profile (Page 1) — 3 fields ---
+  1.1 Application ID                      [text]
+  1.2 Student Full Name                   [text]
+  1.3 Gender                              [radio → Male | Female | Others]
+
+--- Section 2 — Family Background (Page 1) — 3 fields ---
+  2.1 Family Status                                    [radio → Single Parent | Parentless | Having both parents]
+  2.2 Relationship Details — Year of Death / Separation [text]
+  2.2 Relationship Details — Reason for Death / Separation [text]
+""",
+    2: """
+--- Section 2 — Family Background (Page 2) — 2 fields + (5 × N) table ---
+  2.3 Is Father/Mother photograph kept at home?         [radio → Yes | No]
+  2.4 Government ID Verified — Aadhaar Card      [checkbox]
+  2.4 Government ID Verified — Ration Card       [checkbox]
+  2.4 Government ID Verified — Driving Licence   [checkbox]
+  2.4 Government ID Verified — Voter ID          [checkbox]
+  2.4 Government ID Verified — Other              [checkbox]
+  2.5 Family Members                                    [table — columns: Name, Age, Education, Occupation, Annual Income]
+
+--- Section 3 — Housing Condition (Page 2) — 7 fields ---
+  3.1 House Ownership                     [radio → Own | Rented]
+  3.1.1 If rented, what is the rent amount? [text]
+  3.2 Type of Home — Individual           [checkbox]
+  3.2 Type of Home — Private Apartment    [checkbox]
+  3.2 Type of Home — Housing Board        [checkbox]
+  3.2 Type of Home — Line House           [checkbox]
+  3.2 Type of Home — Others               [checkbox]
+""",
+    3: """
+--- Section 3 — Housing Condition (Page 3) — 9 fields ---
+  3.3 Type of Ceiling — Roof              [checkbox]
+  3.3 Type of Ceiling — Tiled             [checkbox]
+  3.3 Type of Ceiling — Asbestos          [checkbox]
+  3.3 Type of Ceiling — Concrete          [checkbox]
+  3.4 Number of Bedrooms                  [text]
+  3.4.1 Type of Bedroom                   [radio → Separate Bedroom | No Separate Bedroom]
+  3.5 Bathroom                            [radio → Separate | Common for Apartment]
+  3.6 Kitchen Type — Separate Kitchen     [checkbox]
+  3.6 Kitchen Type — Hall with Kitchen    [checkbox]
+
+--- Section 4 — Financial Background (Page 3) — 11 fields ---
+  4.1 Assets at Home — Washing Machine    [checkbox]
+  4.1 Assets at Home — Fridge             [checkbox]
+  4.1 Assets at Home — AC                 [checkbox]
+  4.1 Assets at Home — LED TV             [checkbox]
+  4.1 Assets at Home — Two-Wheeler        [checkbox]
+  4.1 Assets at Home — Car                [checkbox]
+  4.1 Assets at Home — Smartphone         [checkbox]
+  4.1 Assets at Home — Separate Wi-Fi     [checkbox]
+  4.1 Assets at Home — Others             [checkbox]
+  4.2 Amount of Last Electricity Bill     [text — numbers only, no ₹, no commas]
+  4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? [radio → Yes | No]
+""",
+    4: """
+--- Section 4 — Financial Background (Page 4) — 3 fields + two tables ---
+  4.3.1                             [table — columns: Property Description, Owner Name, Approximate Value]
+  4.4 Apart from your job, is there any other source of income? [radio → Yes | No]
+  4.4.1                             [table — columns: Source of Income, Amount]
+  4.5 Income Type                         [radio → Monthly | Daily | Weekly | Ad-Hoc]
+  4.6 Do you have any loans?              [radio → Yes | No]
+""",
+    5: """
+--- Section 4 — Financial Background (Page 5) — 3 fields + one table ---
+  4.6.1                             [table — columns: Loan Purpose, Loan Amount Taken, Pending Loan Amount]
+  4.7 If you choose any college, how much is the college fee? [text]
+  4.8 If the college fee is higher, how will you manage it? [text]
+  4.9 If you do not receive this scholarship, how will you pay the fees? [text]
+
+--- Section 5 — Health Information (Page 5) — 2 fields ---
+  5.1 Does the student have any health issues? [radio → Yes | No]
+  5.2 If yes, list the health issues        [text]
+
+--- Section 6 — Student Commitment (Page 5) — 1 field ---
+  6.1 Will you study college for three years without any obstacle? [text]
+""",
+    6: """
+--- Section 6 — Student Commitment (Page 6) — 2 fields ---
+  6.2 If we have a training program within 15 km from your home, can you come? [radio → Yes | No | Maybe]
+  6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)? [radio → Yes | No]
+
+--- Section 7 — Scholarship Information (Page 6) — 1 field ---
+  7.1 Has the student received or applied for any other scholarships for their UG degree? [text]
+
+--- Section 8 — Volunteer Observation (Page 6) — 3 fields ---
+  8.1 What is your opinion about the student, their family members, and their living condition? [text — preserve complete answer, preserve newlines within answer]
+  8.2 Will you recommend this student for this scholarship? [radio → Yes | No | Not Sure]
+  8.3 Any other comments you want to share? [text]
+"""
+}

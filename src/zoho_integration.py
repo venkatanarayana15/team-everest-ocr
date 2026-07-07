@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 import time
 from typing import Any
@@ -38,7 +39,34 @@ SUPABASE_SERVICE_ROLE_KEY = get_required_env("SUPABASE_SERVICE_ROLE_KEY")
 
 _TOKEN_CACHE: dict = {"token": None, "expires_at": 0.0}
 _ACTIVE_ZOHO_RECORDS: set[str] = set()
+_COMPLETED_ZOHO_RECORDS: set[str] = set()
 _TOKEN_LOCK = threading.Lock()
+_PROCESSED_RECORDS_LOCK = threading.Lock()
+_PROCESSED_RECORDS_PATH = Path(__file__).resolve().parent.parent / ".processed_records.json"
+
+
+def _load_completed_records() -> set[str]:
+    try:
+        if _PROCESSED_RECORDS_PATH.exists():
+            data = json.loads(_PROCESSED_RECORDS_PATH.read_text())
+            if isinstance(data, list):
+                return set(data)
+    except Exception as e:
+        logger.warning("Failed to load processed records from %s: %s", _PROCESSED_RECORDS_PATH, e)
+    return set()
+
+
+def _save_completed_records() -> None:
+    try:
+        with _PROCESSED_RECORDS_LOCK:
+            _PROCESSED_RECORDS_PATH.write_text(json.dumps(list(_COMPLETED_ZOHO_RECORDS)))
+    except Exception as e:
+        logger.warning("Failed to save processed records: %s", e)
+
+
+_COMPLETED_ZOHO_RECORDS = _load_completed_records()
+if _COMPLETED_ZOHO_RECORDS:
+    logger.info("Loaded %d completed records from persistent store", len(_COMPLETED_ZOHO_RECORDS))
 
 # ── Retry helper for transient Zoho API failures ────────────────
 
@@ -819,11 +847,18 @@ def _merge_to_pdf(file_paths: list[Path], output_path: Path) -> None:
     merged.close()
 
 
-async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest, output_name: str = "input.pdf") -> str | None:
-    """Download, merge, and upload to Supabase.
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif', '.tiff', '.tif'}
 
-    Returns the Zoho access token on success (for later use in
-    ``_run_pipeline_only``), or ``None`` on failure.
+
+async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest, output_name: str = "input") -> tuple[str | None, dict]:
+    """Download files from Zoho.
+
+    Returns (access_token, input_info) where input_info has:
+        input_type: "pdf" | "images"
+        pdf_path: str — path to PDF file (direct copy for single PDF, merged for images)
+        image_paths: dict[int, str] | None — page→path for images input
+        downloaded: list[str] — paths to original downloaded files
+    On failure returns (None, {}).
     """
     rid = req.record_id
     app_id = req.application_id or ""
@@ -868,27 +903,55 @@ async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest, output_na
                     )
                     logger.error(msg)
                     await _set_status(job_dir, "error", msg)
-                    return None
+                    return None, {}
         downloaded = [results_map[i] for i in sorted(results_map)]
 
         logger.info("All %d files downloaded", len(downloaded))
         await _set_status(job_dir, "downloading", f"Downloaded {len(downloaded)} files")
 
-        combined_pdf = job_dir / "combined.pdf"
-        await _set_status(job_dir, "converting", "Converting to single PDF...")
-        await loop.run_in_executor(None, _merge_to_pdf, downloaded, combined_pdf)
-        pdf_size = combined_pdf.stat().st_size
-        import fitz as _fitz
-        _page_count = _fitz.open(str(combined_pdf)).page_count
-        if _page_count == 0:
-            raise RuntimeError(f"Merged PDF has 0 pages — all input files may be unsupported or corrupt")
-        logger.info("Merged PDF created (%d pages, %.0f KB from %d files)", _page_count, pdf_size / 1024, len(downloaded))
-        await _set_status(job_dir, "converting", f"PDF created ({_page_count} pages, {pdf_size/1024:.0f} KB)")
+        # Classify downloaded files
+        pdf_files = [f for f in downloaded if f.suffix.lower() == '.pdf']
+        image_files = [f for f in downloaded if f.suffix.lower() in IMAGE_EXTENSIONS]
 
-        input_pdf = job_dir / output_name
-        combined_pdf.rename(input_pdf)
-        logger.info("Download-prepare done | record=%s%s", rid, aid)
-        return access_token
+        output_pdf = job_dir / f"{output_name}.pdf"
+
+        if len(pdf_files) == 1 and not image_files:
+            # Single PDF — use directly, no merge
+            src = pdf_files[0]
+            shutil.copy2(str(src), str(output_pdf))
+            input_info = {
+                "input_type": "pdf",
+                "pdf_path": str(output_pdf),
+                "image_paths": None,
+                "downloaded": [str(p) for p in downloaded],
+            }
+            logger.info("Single PDF input | record=%s | pdf=%s", rid, src.name)
+        else:
+            # Images (or mixed) — still merge to PDF for pipeline compatibility
+            combined_pdf = job_dir / f".{output_name}.tmp"
+            await _set_status(job_dir, "converting", "Converting to single PDF...")
+            await loop.run_in_executor(None, _merge_to_pdf, downloaded, combined_pdf)
+            pdf_size = combined_pdf.stat().st_size
+            import fitz as _fitz
+            _page_count = _fitz.open(str(combined_pdf)).page_count
+            if _page_count == 0:
+                raise RuntimeError(f"Merged PDF has 0 pages — all input files may be unsupported or corrupt")
+            logger.info("Merged PDF created (%d pages, %.0f KB from %d files)", _page_count, pdf_size / 1024, len(downloaded))
+            await _set_status(job_dir, "converting", f"PDF created ({_page_count} pages, {pdf_size/1024:.0f} KB)")
+            combined_pdf.rename(output_pdf)
+
+            image_paths = {i+1: str(p) for i, p in enumerate(image_files)} if image_files else None
+            input_info = {
+                "input_type": "images",
+                "pdf_path": str(output_pdf),
+                "image_paths": image_paths,
+                "downloaded": [str(p) for p in downloaded],
+            }
+
+        await _set_status(job_dir, "ready", f"Ready: {input_info['input_type']} ({len(downloaded)} file(s))")
+        logger.info("Download-prepare done | record=%s | type=%s | files=%d%s",
+                    rid, input_info["input_type"], len(downloaded), aid)
+        return access_token, input_info
 
     except Exception as e:
         logger.exception("Download-prepare failed | record=%s | app=%s | files=%d%s",
@@ -897,7 +960,7 @@ async def _download_and_prepare(job_dir: Path, req: OcrExtractRequest, output_na
         print(f"  ✗ Download-prepare failed for {rid}"
               f"{' (app=' + req.application_id + ')' if req.application_id else ''}: "
               f"could not fetch {len(req.file_names)} file(s) from Zoho — {e}")
-        return None
+        return None, {}
 
 
 async def _run_ocr_extract_pipeline(job_dir: Path, req: OcrExtractRequest) -> bool:
@@ -910,18 +973,28 @@ async def _run_ocr_extract_pipeline(job_dir: Path, req: OcrExtractRequest) -> bo
     if rid in _ACTIVE_ZOHO_RECORDS:
         logger.info("Record %s is already processing (duplicate request ignored)", rid)
         return False
+    if rid in _COMPLETED_ZOHO_RECORDS:
+        logger.info("Record %s was already processed (persisted completion)", rid)
+        return False
     _ACTIVE_ZOHO_RECORDS.add(rid)
     try:
-        token = await _download_and_prepare(job_dir, req)
+        token, input_info = await _download_and_prepare(job_dir, req)
         if token:
-            return await _run_pipeline_only(job_dir, req, token)
+            success = await _run_pipeline_only(job_dir, req, token, input_info)
+            if success:
+                _COMPLETED_ZOHO_RECORDS.add(rid)
+                _save_completed_records()
+            return success
         return False
     finally:
         _ACTIVE_ZOHO_RECORDS.discard(rid)
 
 
-async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token: str) -> bool:
-    """Run extraction pipeline from existing ``input.pdf``, write to Creator.
+async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token: str, input_info: dict) -> bool:
+    """Run extraction pipeline from downloaded files, write to Creator.
+
+    Handles both PDF and image inputs. Uploads original downloaded files
+    to Supabase (not the merged PDF).
 
     Returns ``True`` if the pipeline completed with extraction results,
     ``False`` otherwise.  On failure ``OCR_Status`` in Creator is set to
@@ -931,18 +1004,24 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
     rid = req.record_id
     app_id = req.application_id or ""
     aid = f"  [app={app_id}]" if app_id else ""
-    logger.info("Pipeline-only started | record=%s%s", rid, aid)
+    logger.info("Pipeline-only started | record=%s | type=%s%s", rid, input_info.get("input_type", "?"), aid)
 
     try:
         loop = asyncio.get_running_loop()
-        input_pdf = job_dir / "input.pdf"
-        if not input_pdf.exists():
-            logger.error("input.pdf missing | record=%s%s", rid, aid)
+        pdf_path = input_info.get("pdf_path", "")
+        if not pdf_path or not Path(pdf_path).exists():
+            logger.error("Input PDF missing at %s | record=%s%s", pdf_path, rid, aid)
             return False
 
-        await _set_status(job_dir, "pipeline_start", "Starting extraction pipeline...")
-        logger.info("Starting extraction pipeline...")
-        await run_pipeline(job_dir, str(input_pdf))
+        input_type = input_info.get("input_type", "pdf")
+        await _set_status(job_dir, "pipeline_start", f"Starting extraction pipeline ({input_type})...")
+        logger.info("Starting extraction pipeline | record=%s | type=%s%s", rid, input_type, aid)
+
+        if input_type == "images" and input_info.get("image_paths"):
+            from src.pipeline_runner import run_image_pipeline
+            await run_image_pipeline(job_dir, input_info["image_paths"])
+        else:
+            await run_pipeline(job_dir, pdf_path)
 
         result_path = job_dir / "results" / "result.json"
         ocr_result = None
@@ -983,24 +1062,34 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
                     print(f"    └─ Hint: check extracted field values match Zoho field types "
                           f"(enum, numeric, boolean). See PAYLOAD log above for field details.")
 
-            # ── Step 2: Upload PDF to Supabase (independent of Step 1) ──
-            supabase_ok = False
-            await _set_status(job_dir, "supabase_upload", "Uploading PDF to Supabase Storage...")
-            try:
-                input_pdf_bytes = input_pdf.read_bytes()
-                safe_name = app_identifier.replace(" ", "").replace("(", "_").replace(")", "_")
-                supabase_path = f"{safe_name}/{safe_name}.pdf"
-                await loop.run_in_executor(
-                    None, _upload_to_supabase, req.bucket, supabase_path,
-                    input_pdf_bytes, "application/pdf",
-                )
-                supabase_ok = True
-                logger.info("Supabase upload complete | record=%s | app=%s%s", rid, app_identifier, aid)
-                print(f"  ✓ PDF uploaded to Supabase | bucket={req.bucket} | path={supabase_path}")
-            except Exception as sb_err:
-                logger.error("Supabase upload failed | record=%s | bucket=%s | path=%s | size=%d bytes | error=%s%s",
-                    rid, req.bucket, supabase_path, len(input_pdf_bytes), sb_err, aid)
-                print(f"  ⚠ Supabase upload failed | bucket={req.bucket} | path={supabase_path} | error={sb_err}")
+            # ── Step 2: Upload original files to Supabase (independent of Step 1) ──
+            supabase_ok = True
+            safe_name = app_identifier.replace(" ", "").replace("(", "_").replace(")", "_")
+            for i, orig_path_str in enumerate(input_info.get("downloaded", []), 1):
+                orig_path = Path(orig_path_str)
+                if not orig_path.exists():
+                    logger.warning("Supabase upload: file missing | path=%s", orig_path_str)
+                    supabase_ok = False
+                    continue
+                is_pdf = orig_path.suffix.lower() == '.pdf'
+                suffix = ".pdf" if is_pdf else f".img_{i}"
+                content_type = "application/pdf" if is_pdf else "image/jpeg"
+                supabase_path = f"{safe_name}/{safe_name}{suffix}"
+                await _set_status(job_dir, "supabase_upload", f"Uploading {orig_path.name}...")
+                try:
+                    await loop.run_in_executor(
+                        None, _upload_to_supabase, req.bucket, supabase_path,
+                        orig_path.read_bytes(), content_type,
+                    )
+                    logger.info("Supabase upload: %s | record=%s", supabase_path, rid)
+                except Exception as sb_err:
+                    supabase_ok = False
+                    logger.error("Supabase upload failed | path=%s | record=%s | error=%s",
+                        supabase_path, rid, sb_err)
+            if supabase_ok:
+                print(f"  ✓ All files uploaded to Supabase | bucket={req.bucket} | record={rid}")
+            else:
+                print(f"  ⚠ Some Supabase uploads failed | bucket={req.bucket} | record={rid}")
 
             # ── Step 3: Update OCR_Status based on combined outcome ──
             status_to_set = "updated"
@@ -1318,10 +1407,10 @@ async def process_pending_on_startup(base_dir: Path) -> None:
     print(f"  Downloading files for {total_eligible} record(s) into one batch folder...\n")
     
     async def _dl_one(rec_req, seq_num):
-        output_name = f"{rec_req.record_id}.pdf"
+        output_name = f"{rec_req.record_id}"
         async with dl_sem:
-            token = await _download_and_prepare(batch_job_dir, rec_req, output_name)
-        return rec_req, token
+            token, input_info = await _download_and_prepare(batch_job_dir, rec_req, output_name)
+        return rec_req, token, input_info
 
     dl_tasks = [
         asyncio.create_task(_dl_one(req, i + 1))
@@ -1333,12 +1422,15 @@ async def process_pending_on_startup(base_dir: Path) -> None:
     succeeded = 0
     failed = 0
     for r in dl_results:
-        if isinstance(r, tuple) and r[1] is not None:
-            rec_req, token = r
-            pdf_path = batch_job_dir / f"{rec_req.record_id}.pdf"
+        if isinstance(r, tuple) and len(r) >= 2 and r[1] is not None:
+            rec_req, token, input_info = r
+            output_name = f"{rec_req.record_id}"
+            pdf_path = batch_job_dir / f"{output_name}.pdf"
             pdfs_info.append({
                 "path": str(pdf_path.resolve()),
-                "filename": f"{rec_req.record_id}.pdf",
+                "filename": f"{output_name}.pdf",
+                "input_type": input_info.get("input_type", "pdf"),
+                "input_info": input_info,
                 "zoho_req": {
                     "record_id": rec_req.record_id,
                     "zoho_app_owner": rec_req.zoho_app_owner,
@@ -1374,7 +1466,7 @@ async def process_pending_on_startup(base_dir: Path) -> None:
     logger.info("STARTUP: batch process complete | job=%s", batch_job_id)
 
 
-async def run_zoho_writeback_for_batch_item(job_dir: Path, pdf_path: Path, zoho_req_dict: dict, ocr_result: dict) -> None:
+async def run_zoho_writeback_for_batch_item(job_dir: Path, pdf_path: Path, zoho_req_dict: dict, ocr_result: dict, input_info: dict | None = None) -> None:
     """Invoked inside the pipeline runner after each PDF in a startup batch completes extraction."""
     import asyncio
     req = OcrExtractRequest(
@@ -1408,6 +1500,7 @@ async def run_zoho_writeback_for_batch_item(job_dir: Path, pdf_path: Path, zoho_
     ocr_result["record_id"] = req.record_id
 
     app_identifier = ocr_result.get("application_id") or rid
+    all_ok = True
 
     # 1. POST fields to Creator Home_Visit_Questionnaire
     try:
@@ -1416,20 +1509,44 @@ async def run_zoho_writeback_for_batch_item(job_dir: Path, pdf_path: Path, zoho_
         )
         logger.info("Batch item Zoho fields updated | record=%s%s", rid, aid)
     except Exception as e:
+        all_ok = False
         logger.error("Failed to update Questionnaire for batch item | record=%s | error=%s%s", rid, e, aid)
 
-    # 2. Upload PDF to Supabase
-    try:
-        input_pdf_bytes = pdf_path.read_bytes()
-        safe_name = app_identifier.replace(" ", "").replace("(", "_").replace(")", "_")
-        supabase_path = f"{safe_name}/{safe_name}.pdf"
-        await loop.run_in_executor(
-            None, _upload_to_supabase, req.bucket, supabase_path,
-            input_pdf_bytes, "application/pdf",
-        )
-        logger.info("Batch item PDF uploaded to Supabase | record=%s%s", rid, aid)
-    except Exception as e:
-        logger.error("Failed to upload PDF to Supabase for batch item | record=%s | error=%s%s", rid, e, aid)
+    # 2. Upload original files to Supabase
+    safe_name = app_identifier.replace(" ", "").replace("(", "_").replace(")", "_")
+    downloaded = (input_info or {}).get("downloaded", [])
+    if not downloaded:
+        # Fallback: upload the pipeline PDF as before
+        try:
+            supabase_path = f"{safe_name}/{safe_name}.pdf"
+            await loop.run_in_executor(
+                None, _upload_to_supabase, req.bucket, supabase_path,
+                pdf_path.read_bytes(), "application/pdf",
+            )
+            logger.info("Batch item PDF uploaded to Supabase | record=%s%s", rid, aid)
+        except Exception as e:
+            all_ok = False
+            logger.error("Failed to upload PDF to Supabase for batch item | record=%s | error=%s%s", rid, e, aid)
+    else:
+        for i, orig_path_str in enumerate(downloaded, 1):
+            orig_path = Path(orig_path_str)
+            if not orig_path.exists():
+                logger.warning("Supabase upload: file missing | path=%s", orig_path_str)
+                all_ok = False
+                continue
+            is_pdf = orig_path.suffix.lower() == '.pdf'
+            suffix = ".pdf" if is_pdf else f".img_{i}"
+            content_type = "application/pdf" if is_pdf else "image/jpeg"
+            supabase_path = f"{safe_name}/{safe_name}{suffix}"
+            try:
+                await loop.run_in_executor(
+                    None, _upload_to_supabase, req.bucket, supabase_path,
+                    orig_path.read_bytes(), content_type,
+                )
+                logger.info("Batch item uploaded: %s | record=%s", supabase_path, rid)
+            except Exception as e:
+                all_ok = False
+                logger.error("Supabase upload failed | path=%s | record=%s | error=%s", supabase_path, rid, e)
 
     # 3. Update OCR_Status to yes in Creator report
     try:
@@ -1439,4 +1556,9 @@ async def run_zoho_writeback_for_batch_item(job_dir: Path, pdf_path: Path, zoho_
         )
         logger.info("Batch item OCR_Status updated | record=%s%s", rid, aid)
     except Exception as e:
+        all_ok = False
         logger.error("Failed to update OCR_Status for batch item | record=%s | error=%s%s", rid, e, aid)
+
+    if all_ok:
+        _COMPLETED_ZOHO_RECORDS.add(req.zoho_record_id)
+        _save_completed_records()

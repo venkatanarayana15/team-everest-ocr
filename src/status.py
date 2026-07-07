@@ -1,14 +1,21 @@
 import asyncio
 import json
 import logging
-import time
+import os
 import re
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
 from src.extraction_pipeline import StructuredField
 
 logger = logging.getLogger(__name__)
+
+# Per-file locks to serialize concurrent status.json writes from concurrent
+# download workers (startup batch) or any other concurrent pipeline runners.
+_status_locks: dict[str, threading.Lock] = {}
+_status_locks_lock = threading.Lock()
 
 # ─── Status & Progress Tracking ───────────────────────────────────
 
@@ -69,29 +76,34 @@ async def _set_status(job_dir: Path, status: str, message: str = "", pages: int 
     loop = asyncio.get_running_loop()
 
     def _write_status() -> dict:
-        existing = {"log": []}
-        if path.exists():
-            try:
-                raw = path.read_text()
-                if raw.strip():
-                    existing = json.loads(raw)
-            except (json.JSONDecodeError, OSError):
-                existing = {"log": []}
+        path_str = str(path.resolve())
+        with _status_locks_lock:
+            lock = _status_locks.setdefault(path_str, threading.Lock())
 
-        log = existing.get("log", [])
-        if message:
-            log.append({"t": datetime.now().strftime("%H:%M:%S"), "msg": message})
+        with lock:
+            existing = {"log": []}
+            if path.exists():
+                try:
+                    raw = path.read_text()
+                    if raw.strip():
+                        existing = json.loads(raw)
+                except (json.JSONDecodeError, OSError):
+                    existing = {"log": []}
 
-        data = {
-            "status": status,
-            "message": message or existing.get("message", ""),
-            "log": log,
-            "pages": pages or existing.get("pages", 0),
-        }
-        tmp = path.with_name(f".{path.name}.tmp")
-        with open(tmp, "w") as f:
-            json.dump(data, f, indent=2)
-        tmp.replace(path)
+            log = existing.get("log", [])
+            if message:
+                log.append({"t": datetime.now().strftime("%H:%M:%S"), "msg": message})
+
+            data = {
+                "status": status,
+                "message": message or existing.get("message", ""),
+                "log": log,
+                "pages": pages or existing.get("pages", 0),
+            }
+            tmp = path.with_name(f".{path.name}.tmp")
+            with open(tmp, "w") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp, path)
         return data
 
     data = await loop.run_in_executor(None, _write_status)
