@@ -1,7 +1,19 @@
 """JSON schema + response mapper for Datalab /api/v1/extract."""
 
 import json
+import re
 from dataclasses import dataclass
+
+_CHECKBOX_SYMBOLS = re.compile(r"[\u2713\u2714\u2717\u2718\u271A\u2611\u2612\u274C\u274E\u2705\u2716\u00D7\u2A09\u2A02\u2A2F]")
+_TICK_SYMBOLS = re.compile(r"[\u2713\u2714\u2611\u2705]")
+_CROSS_SYMBOLS = re.compile(r"[\u2717\u2718\u2612\u274C\u2716\u00D7]")
+
+def sanitize_checkbox_text(value: str) -> tuple[str, bool, bool]:
+    """Strip checkbox symbols; return (clean_text, had_tick, had_cross)."""
+    had_tick = bool(_TICK_SYMBOLS.search(value))
+    had_cross = bool(_CROSS_SYMBOLS.search(value))
+    clean = _CHECKBOX_SYMBOLS.sub("", value).strip()
+    return clean, had_tick, had_cross
 
 
 @dataclass
@@ -49,7 +61,7 @@ EXTRACT_SCHEMA: dict = {
     "home_type_private_apartment": {"type": "boolean", "description": "3.2 Type of Home — Private Apartment"},
     "home_type_housing_board": {"type": "boolean", "description": "3.2 Type of Home — Housing Board"},
     "home_type_line_house": {"type": "boolean", "description": "3.2 Type of Home — Line House"},
-    "home_type_others": {"type": "string", "description": "3.2 Type of Home — Others (capture full text if user wrote something, e.g. 'Others: living with grand parents')"},
+    "home_type_others": {"type": "string", "description": "3.2 Type of Home — Others (return the full text including 'Others:' prefix, e.g. 'Others: living with grand parents' or 'Others: They are staying in grandmother' own house')"},
     "ceiling_roof": {"type": "boolean", "description": "3.3 Type of Ceiling — Roof (Kurai)"},
     "ceiling_tiled": {"type": "boolean", "description": "3.3 Type of Ceiling — Tiled"},
     "ceiling_asbestos": {"type": "boolean", "description": "3.3 Type of Ceiling — Asbestos / Sheet"},
@@ -236,9 +248,20 @@ def convert_extract_response(response: dict) -> dict:
         if raw_value is None:
             continue
         if isinstance(raw_value, bool):
-            value = "✓" if raw_value else "✗"
+            value = "\u2713" if raw_value else "\u2717"
         else:
             value = str(raw_value).strip()
+            clean, had_tick, had_cross = sanitize_checkbox_text(value)
+            if had_tick and not had_cross:
+                value = clean if clean else "\u2713"
+            elif had_tick and had_cross:
+                continue
+            elif clean != value:
+                continue
+        if key == "home_type_others" and value and value not in ("\u2713", "\u2717", ""):
+            if not value.lower().startswith("others"):
+                value = f"Others: {value}"
+
         fields.append({
             "label": meta["label"],
             "value": value,
