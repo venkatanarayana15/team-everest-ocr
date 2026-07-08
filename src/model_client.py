@@ -1,9 +1,10 @@
+import asyncio
 import base64
 import json
 import logging
 import os
 from abc import ABC, abstractmethod
-from src.ratelimit import RateLimiter, call_with_retry
+from src.ratelimit import RateLimiter, call_with_retry, call_with_retry_async
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,18 @@ def _strip_json_fence(text: str) -> str:
     return text
 
 
-def _encode_image(path: str) -> str:
+def _encode_image(path: str, max_dim: int = 1024) -> str:
+    import cv2
+    img = cv2.imread(path)
+    if img is not None:
+        h, w = img.shape[:2]
+        if max(h, w) > max_dim:
+            scale = max_dim / max(h, w)
+            new_w, new_h = int(w * scale), int(h * scale)
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        success, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+        if success:
+            return base64.b64encode(buf.tobytes()).decode("utf-8")
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
 
@@ -49,7 +61,7 @@ def _extract_usage(response) -> TokenUsage:
 
 class ModelClient(ABC):
     @abstractmethod
-    def extract_structured(self, pdf_path: str, page_images: dict[int, str], prompt: str) -> tuple[dict | None, TokenUsage]:
+    async def extract_structured(self, pdf_path: str, page_images: dict[int, str], prompt: str) -> tuple[dict | None, TokenUsage]:
         ...
 
 
@@ -57,8 +69,8 @@ class ModelClient(ABC):
 
 class OpenAICompatibleClient(ModelClient):
     def __init__(self, api_key: str, model: str, base_url: str, provider: str = ""):
-        from openai import OpenAI
-        self._client = OpenAI(api_key=api_key, base_url=base_url)
+        from openai import AsyncOpenAI
+        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.model_name = model
         self.provider = provider.lower().strip()
         self._rl = RateLimiter()
@@ -87,11 +99,11 @@ class OpenAICompatibleClient(ModelClient):
             content.append({"type": "text", "text": f"\n[Page {page_num}:]"})
             content.append({
                 "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{b64}", "detail": "high"},
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "low"},
             })
         return content
 
-    def _call_stream(self, content: list[dict] | str) -> str:
+    async def _call_stream(self, content: list[dict] | str) -> str:
         extra_body = {}
         if self.provider == "nvidia" and "nemotron" in self.model_name.lower():
             extra_body = {
@@ -99,7 +111,7 @@ class OpenAICompatibleClient(ModelClient):
                 "reasoning_budget": 16384
             }
 
-        response_stream = self._client.chat.completions.create(
+        response_stream = await self._client.chat.completions.create(
             model=self.model_name,
             messages=[{"role": "user", "content": content}],
             temperature=1,
@@ -110,7 +122,7 @@ class OpenAICompatibleClient(ModelClient):
         )
 
         full_content = []
-        for chunk in response_stream:
+        async for chunk in response_stream:
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -124,12 +136,16 @@ class OpenAICompatibleClient(ModelClient):
         print()
         return "".join(full_content)
 
-    def extract_structured(self, pdf_path: str, page_images: dict[int, str], prompt: str) -> tuple[dict | None, TokenUsage]:
+    async def extract_structured(self, pdf_path: str, page_images: dict[int, str], prompt: str) -> tuple[dict | None, TokenUsage]:
         content = self._build_content(prompt, page_images)
 
         if self.provider == "nvidia" and "nemotron" in self.model_name.lower():
             logger.info("Calling NVIDIA NIM API (%s) stream...", self.model_name)
-            text = call_with_retry(lambda: self._call_stream(content), rl=self._rl)
+            loop = asyncio.get_running_loop()
+            text = await loop.run_in_executor(
+                None,
+                lambda: call_with_retry(lambda: asyncio.run(self._call_stream(content)), rl=self._rl),
+            )
             text = _strip_json_fence(text)
             try:
                 data = json.loads(text)
@@ -150,7 +166,7 @@ class OpenAICompatibleClient(ModelClient):
         if headers:
             kwargs["extra_headers"] = headers
 
-        response = call_with_retry(
+        response = await call_with_retry_async(
             lambda: self._client.chat.completions.create(**kwargs),
             rl=self._rl,
         )
@@ -190,16 +206,27 @@ class GeminiClient(ModelClient):
             }
         return usage
 
-    def extract_structured(self, pdf_path: str, page_images: dict[int, str], prompt: str) -> tuple[dict | None, TokenUsage]:
+    async def extract_structured(self, pdf_path: str, page_images: dict[int, str], prompt: str) -> tuple[dict | None, TokenUsage]:
         from PIL import Image
 
         logger.info("Uploading PDF to Gemini...")
+        loop = asyncio.get_running_loop()
+
         try:
-            sample_file = self._genai.upload_file(path=pdf_path, mime_type="application/pdf")
+            sample_file = await loop.run_in_executor(
+                None,
+                lambda: call_with_retry(
+                    lambda: self._genai.upload_file(path=pdf_path, mime_type="application/pdf"),
+                    rl=self._rl,
+                ),
+            )
             logger.info("Uploaded: %s", sample_file.name)
-            response = call_with_retry(
-                lambda: self._model().generate_content([sample_file, prompt]),
-                rl=self._rl,
+            response = await loop.run_in_executor(
+                None,
+                lambda: call_with_retry(
+                    lambda: self._model().generate_content([sample_file, prompt]),
+                    rl=self._rl,
+                ),
             )
         except Exception as e:
             logger.warning("Gemini PDF upload failed (%s), falling back to page images", e)
@@ -208,9 +235,12 @@ class GeminiClient(ModelClient):
             for p in pages:
                 img = Image.open(page_images[p])
                 content.append(img)
-            response = call_with_retry(
-                lambda: self._model().generate_content(content),
-                rl=self._rl,
+            response = await loop.run_in_executor(
+                None,
+                lambda: call_with_retry(
+                    lambda: self._model().generate_content(content),
+                    rl=self._rl,
+                ),
             )
 
         token_usage = self._extract_token_usage(response)

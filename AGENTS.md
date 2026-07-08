@@ -30,6 +30,7 @@ This repository contains a production-oriented OCR extraction pipeline for a fix
 - `src/prompt_templates.py`: LLM prompts and questionnaire template grounding
 - `src/database.py`: PostgreSQL schema and CRUD logic for `pdfs`, `extraction_results`, `extracted_fields`, `corrections_log`
 - `src/backends.py`: OCR backend integration (TesseractBackend), static Tesseract path handling
+- `src/chandra_client.py`: Datalab-based Chandra-2 OCR backend (async, httpx), page-by-page or full-PDF processing with polling
 - `src/input_handler.py`: input-type detection, ZIP extraction, folder scanning, mixed-batch routing
 - `src/page_classifier.py`: 6-page content-based page classification and ordering
 - `src/config.py`: configuration model (8 active fields)

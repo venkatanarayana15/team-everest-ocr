@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -119,7 +120,12 @@ class ExtractionPipeline:
     ):
         self.config = config or Config()
         self.primary_client = primary_client or get_model_client("primary")
-        self.secondary_client = secondary_client or get_model_client("secondary")
+        self.secondary_client = secondary_client
+        if self.secondary_client is None:
+            try:
+                self.secondary_client = get_model_client("secondary")
+            except ValueError:
+                self.secondary_client = None
 
     @staticmethod
     def _parse_confidence(field_dict: dict) -> int:
@@ -253,11 +259,82 @@ class ExtractionPipeline:
 
     # ── Stage 3a: Primary model extraction ───────────────────────
 
-    def run_primary_extraction(self, pdf_path: str, page_images: dict[int, str]) -> tuple[dict | None, dict]:
+    async def run_primary_extraction(self, pdf_path: str, page_images: dict[int, str]) -> tuple[dict | None, dict]:
         from src.prompt_templates import PRIMARY_EXTRACTION_PROMPT
 
-        data, token_usage = self.primary_client.extract_structured(pdf_path, page_images, PRIMARY_EXTRACTION_PROMPT)
-        return data, token_usage
+        if len(page_images) <= 1:
+            data, token_usage = await self.primary_client.extract_structured(
+                pdf_path, page_images, PRIMARY_EXTRACTION_PROMPT
+            )
+            token_usage["calls"] = 1
+            return data, token_usage
+
+        known_pages: dict[str, int] = {}
+        for tpl in KNOWN_TEMPLATE_FIELDS:
+            known_pages[tpl["label"]] = tpl["page"]
+
+        async def _extract_page(page_num: int, img_path: str) -> tuple[int, dict | None, dict]:
+            page_prompt = (
+                f"You are examining Page {page_num} of {len(page_images)}.\n\n"
+                f"RULES (these override any conflicting instructions below):\n"
+                f"1. You are seeing ONE page image — do not expect multiple pages.\n"
+                f"2. Only extract fields whose labels are VISIBLE in this image.\n"
+                f"3. Do NOT extract fields that appear on other pages.\n"
+                f"4. Set 'page' field to {page_num} for every extracted field.\n"
+                f"5. Use the field template below only to know the expected schema — "
+                f"NOT to decide what fields to include.\n\n"
+                f"{PRIMARY_EXTRACTION_PROMPT}"
+            )
+            data, token_usage = await self.primary_client.extract_structured(
+                pdf_path, {page_num: img_path}, page_prompt
+            )
+            return page_num, data, token_usage
+
+        tasks = [_extract_page(p, page_images[p]) for p in sorted(page_images)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        merged_usage: dict = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "calls": 0}
+        field_map: dict[str, dict] = {}
+        merged_sections: list[dict] = []
+        page_raws: dict[int, str] = {}
+        confidences: list[int] = []
+        page_errors: list[dict] = []
+
+        for r in results:
+            if isinstance(r, Exception):
+                logger.error("Page extraction failed: %s", r)
+                page_errors.append({"error": str(r)})
+                continue
+            pn, data, usage = r
+            if not data:
+                page_errors.append({"page": pn, "error": "No data returned from LLM"})
+                continue
+            for k in merged_usage:
+                merged_usage[k] += usage.get(k, 0) or 0
+            for f in data.get("fields", []):
+                label = f.get("label", "")
+                known_page = known_pages.get(label)
+                if known_page is not None and f.get("page", pn) != known_page:
+                    continue
+                if label not in field_map or f.get("confidence", 0) > field_map[label].get("confidence", 0):
+                    field_map[label] = f
+            for s in data.get("sections", []):
+                if s not in merged_sections:
+                    merged_sections.append(s)
+            confidences.append(data.get("overall_confidence", 0))
+            page_raws[pn] = data.get("raw_text", "")
+
+        merged: dict = {
+            "fields": list(field_map.values()),
+            "sections": merged_sections,
+            "overall_confidence": int(sum(confidences) / len(confidences)) if confidences else 0,
+            "raw_text": "\n\n".join(page_raws[p] for p in sorted(page_raws)),
+            "page_errors": page_errors,
+        }
+        merged["fields"].sort(key=lambda f: f.get("page", 1))
+        merged_usage["calls"] = len(page_images)
+
+        return merged, merged_usage
 
     # ── Stage 3b: Merge (enhanced with position_hint + confidence weighting) ──
 
@@ -513,7 +590,7 @@ class ExtractionPipeline:
 
     # ── Stage 4: Secondary model verification ───────────────────────
 
-    def verify_secondary(
+    async def verify_secondary(
         self,
         fields: list[StructuredField],
         word_boxes: list[WordBox],
@@ -522,8 +599,29 @@ class ExtractionPipeline:
     ) -> tuple[list[StructuredField], dict]:
         from src.prompt_templates import SECONDARY_VERIFICATION_PROMPT
 
+        if self.secondary_client is None:
+            logger.info("No secondary model configured — auto-accepting all fields")
+            for f in fields:
+                f.is_verified = True
+                f.verified_by = prefix or None
+            return fields, {}
+
+        # Only send low-confidence fields to secondary — skip high-confidence ones
+        low_conf = [f for f in fields if f.confidence < 90 or f.needs_clarification]
+        high_conf = [f for f in fields if f.confidence >= 90 and not f.needs_clarification]
+
+        for f in high_conf:
+            f.is_verified = True
+            f.verifier_confidence = f.confidence
+            f.verification_note = "High confidence, auto-accepted"
+            f.verified_by = prefix or None
+
+        if not low_conf:
+            logger.info("All %d fields have high confidence — skipping secondary verification", len(fields))
+            return fields, {}
+
         pages_dir = Path(output_dir) / "pages"
-        affected_pages = sorted(set(f.page for f in fields))
+        affected_pages = sorted(set(f.page for f in low_conf))
         page_images: dict[int, str] = {}
         for p in affected_pages:
             img_path = str(pages_dir / f"page_{p}.png")
@@ -532,7 +630,7 @@ class ExtractionPipeline:
 
         if not page_images:
             logger.warning("No page images found for secondary verification")
-            for f in fields:
+            for f in low_conf:
                 f.is_verified = True
                 f.verified_by = prefix or None
             return fields, {}
@@ -546,18 +644,21 @@ class ExtractionPipeline:
                 "reason": f.reason,
                 "position_hint": None,
             }
-            for f in fields
+            for f in low_conf
         ]
 
         prompt = SECONDARY_VERIFICATION_PROMPT.replace(
             "{fields_json}", json.dumps(fields_json, indent=2)
         )
 
-        raw_result, secondary_token_usage = self.secondary_client.extract_structured("", page_images, prompt)
+        # Secondary verification is text-only: it verifies field labels/values
+        # and finds gaps in the extraction. It does not need to re-read the
+        # document images (which would cost ~225k tokens and ~90s latency).
+        raw_result, secondary_token_usage = await self.secondary_client.extract_structured("", {}, prompt)
 
         if raw_result is None:
             logger.warning("Secondary verification failed — keeping primary results")
-            for f in fields:
+            for f in low_conf:
                 f.is_verified = True
                 f.verified_by = prefix or None
             return fields, secondary_token_usage
@@ -568,7 +669,7 @@ class ExtractionPipeline:
             if isinstance(v, dict):
                 verif_map[v.get("label", "")] = v
 
-        for f in fields:
+        for f in low_conf:
             v = verif_map.get(f.label, {})
             is_correct = v.get("is_correct", True)
             v_conf = v.get("verifier_confidence")

@@ -1,6 +1,7 @@
+import asyncio
+import hashlib
 import json
 import logging
-import pickle
 import re
 import time
 from pathlib import Path
@@ -8,17 +9,51 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from src.backends import WordBox
 from src.config import Config
-from src.extraction_pipeline import ExtractionPipeline, StructuredField
+from src.extraction_pipeline import ExtractionPipeline, KNOWN_TEMPLATE_FIELDS, StructuredField
 from src.model_client import get_model_client
 from src.page_classifier import PageClassifier
 from src.renderers import _render_markdown, _format_job_datetime
 from src.status import (
     _set_status, _save_checkpoint, _load_checkpoint, _cleanup_intermediate,
-    _get_status, _progress_store, _progress_lock,
+    _get_status, _progress_store,
 )
 
 logger = logging.getLogger(__name__)
+
+_BBOX_CACHE_KEY: str | None = None
+
+
+def _get_bbox_cache_key() -> str:
+    global _BBOX_CACHE_KEY
+    if _BBOX_CACHE_KEY is not None:
+        return _BBOX_CACHE_KEY
+    data_path = Path("bin/eng.traineddata")
+    if data_path.exists():
+        _BBOX_CACHE_KEY = hashlib.md5(data_path.read_bytes()).hexdigest()
+    else:
+        _BBOX_CACHE_KEY = ""
+    return _BBOX_CACHE_KEY
+
+
+def _load_bbox_cache(cache_path: Path, key: str) -> list[WordBox] | None:
+    try:
+        with open(cache_path) as f:
+            cache = json.load(f)
+        if cache.get("key") == key:
+            return [WordBox(**wb) for wb in cache["data"]]
+    except Exception:
+        pass
+    return None
+
+
+def _save_bbox_cache(cache_path: Path, key: str, data: list[WordBox]) -> None:
+    try:
+        with open(cache_path, "w") as f:
+            json.dump({"key": key, "data": [wb.__dict__ for wb in data]}, f)
+    except Exception as e:
+        logger.warning("Failed to save bbox cache: %s", e)
 
 
 def _validate_pdf(path: str) -> tuple[bool, str]:
@@ -66,7 +101,7 @@ def _validate_images(image_paths: list[str]) -> tuple[bool, str]:
     return True, ""
 
 
-def _set_batch_pdf_status(job_dir: Path, pdf_name: str, status: str, pct: int, message: str = "") -> None:
+async def _set_batch_pdf_status(job_dir: Path, pdf_name: str, status: str, pct: int, message: str = "") -> None:
     path = job_dir / "status.json"
     existing = {}
     if path.exists():
@@ -90,37 +125,38 @@ def _set_batch_pdf_status(job_dir: Path, pdf_name: str, status: str, pct: int, m
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
-    with _progress_lock:
-        existing_progress = _progress_store.get(job_dir.name, {})
-        start_time = existing_progress.get("start_time")
-        if not start_time:
-            start_time = time.time()
-        elapsed = round(time.time() - start_time, 1)
+    existing_progress = _progress_store.get(job_dir.name, {})
+    start_time = existing_progress.get("start_time")
+    if not start_time:
+        start_time = time.time()
+    elapsed = round(time.time() - start_time, 1)
 
-        pdfs_map = existing_progress.get("pdfs", {})
-        pdfs_map[pdf_name] = {"progress": pct, "stage": status, "elapsed": elapsed}
+    pdfs_map = existing_progress.get("pdfs", {})
+    pdfs_map[pdf_name] = {"progress": pct, "stage": status, "elapsed": elapsed}
 
-        total_pct = sum(item["progress"] for item in pdfs_map.values())
-        overall_pct = round(total_pct / len(pdfs_map)) if pdfs_map else 0
+    total_pct = sum(item["progress"] for item in pdfs_map.values())
+    overall_pct = round(total_pct / len(pdfs_map)) if pdfs_map else 0
 
-        _progress_store[job_dir.name] = {
-            "overall": overall_pct,
-            "pdfs": pdfs_map,
-            "start_time": start_time,
-            "elapsed": elapsed,
-        }
+    _progress_store[job_dir.name] = {
+        "overall": overall_pct,
+        "pdfs": pdfs_map,
+        "start_time": start_time,
+        "elapsed": elapsed,
+    }
 
 
-def _wait_for_memory(job_dir: Path, min_free_mem_mb: int = 512, timeout: int = 3600) -> bool:
+async def _wait_for_memory(job_dir: Path, min_free_mem_mb: int = 512, timeout: int = 3600) -> bool:
     import psutil
     start = time.time()
+    wait = 1.0
     while time.time() - start < timeout:
         free = psutil.virtual_memory().available / (1024 * 1024)
         if free >= min_free_mem_mb:
             return True
         logger.warning("Low memory: %.0f MB free (need %d MB). Delaying job...", free, min_free_mem_mb)
-        time.sleep(5)
-    _set_status(job_dir, "error",
+        await asyncio.sleep(wait)
+        wait = min(wait * 2, 60.0)
+    await _set_status(job_dir, "error",
         f"Timed out waiting for memory (>{timeout}s, "
         f"free={free:.0f} MB < {min_free_mem_mb} MB). Try again later.")
     return False
@@ -204,48 +240,45 @@ def _save_results(job_dir: Path, result_dict: dict, job_id: str) -> None:
         cp.unlink()
 
 
-def _run_core_extraction(
+async def _run_core_extraction(
     job_dir: Path,
     pdf_path: str,
     processed_images: dict[int, str],
     pipeline: ExtractionPipeline,
     primary_name: str,
-    secondary_name: str,
     status_func,
     use_cache: bool = False,
-    checkpoint = None,
+    checkpoint=None,
 ) -> dict:
-    # 1. Primary Extraction & OCR (Tesseract)
     if checkpoint:
         step, fields, overall_confidence, raw_text, sections_data = checkpoint
         word_boxes = []
         primary_token_usage = {}
     else:
-        status_func("primary_extraction", f"Running Tesseract + primary extraction ({primary_name})...")
-        results: dict = {}
-        
-        def _run_tesseract():
-            bbox_cache = job_dir / "bbox_cache.pkl"
-            if use_cache and bbox_cache.exists():
-                with open(bbox_cache, "rb") as f:
-                    results["word_boxes"] = pickle.load(f)
-            else:
-                results["word_boxes"] = pipeline.run_bbox_images(processed_images)
-                if use_cache:
-                    with open(bbox_cache, "wb") as f:
-                        pickle.dump(results["word_boxes"], f)
+        await status_func("primary_extraction", f"Running Tesseract + primary extraction ({primary_name})...")
 
-        def _run_llm():
-            results["model_data"], results["primary_token_usage"] = pipeline.run_primary_extraction(pdf_path, processed_images)
+        loop = asyncio.get_running_loop()
 
-        from concurrent.futures import ThreadPoolExecutor as _TempPool
-        with _TempPool(max_workers=2) as pool:
-            pool.submit(_run_tesseract).result()
-            pool.submit(_run_llm).result()
+        async def _run_tesseract():
+            bbox_cache = job_dir / "bbox_cache.json"
+            cache_key = _get_bbox_cache_key()
+            if use_cache and bbox_cache.exists() and cache_key:
+                cached = _load_bbox_cache(bbox_cache, cache_key)
+                if cached is not None:
+                    return cached
+            wb = await loop.run_in_executor(None, pipeline.run_bbox_images, processed_images)
+            if use_cache and cache_key:
+                _save_bbox_cache(bbox_cache, cache_key, wb)
+            return wb
 
-        word_boxes = results.get("word_boxes", [])
-        model_data = results.get("model_data")
-        primary_token_usage = results.get("primary_token_usage", {})
+        tesseract_task = asyncio.create_task(_run_tesseract())
+        llm_task = asyncio.create_task(pipeline.run_primary_extraction(pdf_path, processed_images))
+
+        word_boxes = await tesseract_task
+        if not word_boxes:
+            logger.warning("Tesseract returned no word boxes — LLM extraction may produce degraded results")
+        model_data, primary_token_usage = await llm_task
+
         _save_tesseract_data(job_dir, word_boxes)
 
         if model_data:
@@ -253,9 +286,9 @@ def _run_core_extraction(
             raw_text = model_data.get("raw_text", "")
             raw_text = _insert_page_markers(raw_text, model_data.get("fields", []))
             fields = pipeline.merge_fields(model_data, word_boxes, prefix=primary_name)
-            status_func("field_mapping", f"Merged {len(fields)} fields.")
+            await status_func("field_mapping", f"Merged {len(fields)} fields.")
         else:
-            status_func("field_mapping", "Primary extraction failed — using Tesseract words.")
+            await status_func("field_mapping", "Primary extraction failed — using Tesseract words.")
             fields = [
                 StructuredField(label=wb.text, value=wb.text, confidence=int(wb.confidence),
                                 page=wb.page_num, bbox=wb.bbox, extracted_by=primary_name)
@@ -272,29 +305,16 @@ def _run_core_extraction(
 
         _save_checkpoint(job_dir, "mapped", fields, overall_confidence, raw_text, sections=sections_data)
 
-    # 2. Secondary Verification
-    skip_secondary = False
-    if overall_confidence is not None and overall_confidence >= 95:
-        if not any(getattr(f, 'needs_clarification', False) for f in fields):
-            skip_secondary = True
-
-    if not skip_secondary:
-        status_func("secondary_verification", f"Running secondary verification ({secondary_name})...")
-        fields, secondary_token_usage = pipeline.verify_secondary(fields, word_boxes, str(job_dir), prefix=secondary_name)
-    else:
-        secondary_token_usage = {}
-
     token_usage = {
         "primary": primary_token_usage,
-        "secondary": secondary_token_usage,
         "total": {
-            "prompt_tokens": (primary_token_usage.get("prompt_tokens", 0) or 0) + (secondary_token_usage.get("prompt_tokens", 0) or 0),
-            "completion_tokens": (primary_token_usage.get("completion_tokens", 0) or 0) + (secondary_token_usage.get("completion_tokens", 0) or 0),
-            "total_tokens": (primary_token_usage.get("total_tokens", 0) or 0) + (secondary_token_usage.get("total_tokens", 0) or 0),
+            "prompt_tokens": primary_token_usage.get("prompt_tokens", 0) or 0,
+            "completion_tokens": primary_token_usage.get("completion_tokens", 0) or 0,
+            "total_tokens": primary_token_usage.get("total_tokens", 0) or 0,
         },
     }
 
-    status_func("template_fill", "Filling missing template fields...")
+    await status_func("template_fill", "Filling missing template fields...")
     fields = ExtractionPipeline.fill_missing_template_fields(fields)
     sections_data = _derive_sections(fields, raw_text or "")
 
@@ -303,26 +323,23 @@ def _run_core_extraction(
         "num_pages": len(processed_images),
         "raw_text": raw_text or "",
         "primary_model": primary_name,
-        "secondary_model": secondary_name,
         "token_usage": token_usage,
+        "llm_calls": primary_token_usage.get("calls", 0),
         "sections": sections_data or [],
         "fields": _fields_to_dict(fields),
     }
 
 
-def _save_to_db(job_dir: Path) -> None:
+async def _save_to_db(job_dir: Path) -> bool:
     results_path = job_dir / "results" / "result.json"
     if not results_path.exists():
-        return
+        return True
     try:
         from src.database import upsert_ocr_document
     except ImportError:
-        logger = logging.getLogger(__name__)
         logger.info("DB module not available, skipping auto-save")
-        return
+        return True
 
-    import asyncio
-    logger = logging.getLogger(__name__)
     try:
         with open(results_path) as f:
             result_data = json.load(f)
@@ -340,27 +357,24 @@ def _save_to_db(job_dir: Path) -> None:
             low_conf, needs_review,
             result_data.get("processing_time", 0),
         )
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(upsert_ocr_document(
-                job_id=job_dir.name,
-                file_name=orig_name,
-                status="done",
-                processing_time=result_data.get("processing_time"),
-                confidence_score=result_data.get("overall_confidence"),
-                num_pdfs=result_data.get("num_pdfs"),
-                result_json=result_data,
-            ))
-        finally:
-            loop.close()
+        await upsert_ocr_document(
+            job_id=job_dir.name,
+            file_name=orig_name,
+            status="done",
+            processing_time=result_data.get("processing_time"),
+            confidence_score=result_data.get("overall_confidence"),
+            num_pdfs=result_data.get("num_pdfs"),
+            result_json=result_data,
+        )
         logger.info("Auto-save to DB succeeded for job %s", job_dir.name)
+        return True
     except Exception as e:
         logger.warning("Auto-save to DB failed for job %s: %s", job_dir.name, e)
+        return False
 
 
-def run_pipeline(job_dir: Path, pdf_path: str) -> None:
-    if not _wait_for_memory(job_dir):
+async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
+    if not await _wait_for_memory(job_dir):
         return
     try:
         t0 = time.time()
@@ -369,50 +383,53 @@ def run_pipeline(job_dir: Path, pdf_path: str) -> None:
 
         valid, err_msg = _validate_pdf(pdf_path)
         if not valid:
-            _set_status(job_dir, "error", err_msg)
+            await _set_status(job_dir, "error", err_msg)
             return
 
         config = Config()
         primary = get_model_client("primary")
-        secondary = get_model_client("secondary")
-        pipeline = ExtractionPipeline(config, primary_client=primary, secondary_client=secondary)
+        pipeline = ExtractionPipeline(config, primary_client=primary)
 
         checkpoint = _load_checkpoint(job_dir)
         if not checkpoint:
-            _set_status(job_dir, "preprocessing", f"Preprocessing PDF ({pdf_name})...")
+            await _set_status(job_dir, "preprocessing", f"Preprocessing PDF ({pdf_name})...")
             pipeline.preprocess(pdf_path, str(job_dir))
-            _set_status(job_dir, "preprocessing", "Preprocessing done.", pages=6)
+            await _set_status(job_dir, "preprocessing", "Preprocessing done.", pages=6)
 
         processed_images = _ensure_page_images(job_dir / "pages")
-        
-        def status_func(stage, msg):
-            _set_status(job_dir, stage, msg)
 
-        res = _run_core_extraction(
+        async def status_func(stage, msg):
+            await _set_status(job_dir, stage, msg)
+
+        res = await _run_core_extraction(
             job_dir=job_dir,
             pdf_path=pdf_path,
             processed_images=processed_images,
             pipeline=pipeline,
             primary_name=type(primary).__name__.replace("Client", ""),
-            secondary_name=type(secondary).__name__.replace("Client", ""),
             status_func=status_func,
             use_cache=True,
             checkpoint=checkpoint,
         )
         res["processing_time"] = round(time.time() - t0, 2)
         res["input_type"] = "pdf"
+        res["pdf_names"] = [pdf_name]
 
-        _set_status(job_dir, "saving_results", "Saving results...")
+        await _set_status(job_dir, "saving_results", "Saving results...")
         _save_results(job_dir, res, job_dir.name)
         _print_field_report(job_dir, res)
-        _set_status(job_dir, "done", "Extraction complete. Results ready for download.")
-        _save_to_db(job_dir)
+        await _set_status(job_dir, "done", "Extraction complete. Results ready for download.")
+        _db_ok = await _save_to_db(job_dir)
+        if not _db_ok:
+            await _set_status(job_dir, "done", "Extraction complete but DB save failed")
+            logger.error("Pipeline extraction OK but DB save failed | job=%s", job_dir.name)
         print(f"{'='*80}")
-        print(f"  SUMMARY: 1 file processed — 1 succeeded, 0 failed")
+        _ok_label = "1 succeeded" if _db_ok else "1 extracted (DB save failed)"
+        print(f"  SUMMARY: 1 file processed — {_ok_label}, 0 failed")
         print(f"{'='*80}\n")
     except Exception as e:
         logger.exception("Pipeline failed")
-        _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
+        await _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
         print(f"{'='*80}")
         print(f"  SUMMARY: 1 file processed — 0 succeeded, 1 failed")
         print(f"{'='*80}\n")
@@ -420,65 +437,65 @@ def run_pipeline(job_dir: Path, pdf_path: str) -> None:
         _cleanup_intermediate(job_dir)
 
 
-def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
+async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
     t0 = time.time()
     try:
         config = Config()
         primary = get_model_client("primary")
-        secondary = get_model_client("secondary")
-        pipeline = ExtractionPipeline(config, primary_client=primary, secondary_client=secondary)
+        pipeline = ExtractionPipeline(config, primary_client=primary)
         primary_name = type(primary).__name__.replace("Client", "")
-        secondary_name = type(secondary).__name__.replace("Client", "")
 
-        _set_status(job_dir, "preprocessing", f"Batch: processing {len(pdfs_info)} PDFs...")
+        await _set_status(job_dir, "preprocessing", f"Batch: processing {len(pdfs_info)} PDFs...")
 
         all_results: list[dict] = []
         for idx, pdf_info in enumerate(pdfs_info):
             pdf_name = Path(pdf_info["path"]).name
-            _set_batch_pdf_status(job_dir, pdf_name, "processing", 0, f"Starting ({idx+1}/{len(pdfs_info)})")
+            await _set_batch_pdf_status(job_dir, pdf_name, "processing", 0, f"Starting ({idx+1}/{len(pdfs_info)})")
 
             try:
                 valid, err = _validate_pdf(pdf_info["path"])
                 if not valid:
-                    _set_batch_pdf_status(job_dir, pdf_name, "error", 100, err)
+                    await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, err)
                     all_results.append({"name": pdf_name, "error": err})
                     continue
 
                 pipeline.preprocess(pdf_info["path"], str(job_dir))
-                _set_batch_pdf_status(job_dir, pdf_name, "preprocessing", 20, f"Preprocessed ({idx+1}/{len(pdfs_info)})")
+                await _set_batch_pdf_status(job_dir, pdf_name, "preprocessing", 20, f"Preprocessed ({idx+1}/{len(pdfs_info)})")
 
                 processed_images = _ensure_page_images(job_dir / "pages")
 
-                def batch_status_func(stage, msg):
+                async def batch_status_func(stage, msg):
                     pct = 40 if stage == "primary_extraction" else (70 if stage == "secondary_verification" else 85)
-                    _set_batch_pdf_status(job_dir, pdf_name, stage, pct, f"{msg} ({idx+1}/{len(pdfs_info)})")
+                    await _set_batch_pdf_status(job_dir, pdf_name, stage, pct, f"{msg} ({idx+1}/{len(pdfs_info)})")
 
-                res = _run_core_extraction(
+                res = await _run_core_extraction(
                     job_dir=job_dir,
                     pdf_path=pdf_info["path"],
                     processed_images=processed_images,
                     pipeline=pipeline,
                     primary_name=primary_name,
-                    secondary_name=secondary_name,
                     status_func=batch_status_func,
                     use_cache=False,
                 )
                 res["pdf_name"] = pdf_name
                 res["input_type"] = "batch_pdf"
                 res["processing_time"] = round(time.time() - t0, 2)
-                
+
+                _print_field_report(job_dir, res, pdf_name)
+
                 all_results.append(res)
-                _set_batch_pdf_status(job_dir, pdf_name, "done", 100, f"Done ({idx+1}/{len(pdfs_info)})")
+                await _set_batch_pdf_status(job_dir, pdf_name, "done", 100, f"Done ({idx+1}/{len(pdfs_info)})")
             except Exception as e:
                 logger.exception("Batch item failed: %s", pdf_name)
-                _set_batch_pdf_status(job_dir, pdf_name, "error", 100, str(e))
+                await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, str(e))
                 all_results.append({"name": pdf_name, "error": str(e)})
 
-        _set_status(job_dir, "saving_results", "Saving batch results...")
+        await _set_status(job_dir, "saving_results", "Saving batch results...")
         combined = {
             "batch": True,
             "num_pdfs": len(pdfs_info),
             "pdfs": all_results,
+            "pdf_names": [r.get("pdf_name") or r.get("name", f"file_{i}") for i, r in enumerate(all_results)],
             "processing_time": round(time.time() - t0, 2),
         }
         results_dir = job_dir / "results"
@@ -486,8 +503,7 @@ def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         with open(results_dir / "result.json", "w") as f:
             json.dump(combined, f, indent=2)
 
-        with _progress_lock:
-            _progress_store.pop(job_dir.name, None)
+        _progress_store.pop(job_dir.name, None)
         success = sum(1 for r in all_results if 'error' not in r)
         failed = len(pdfs_info) - success
         print(f"\n{'='*80}")
@@ -505,65 +521,66 @@ def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         print(f"{'─'*80}")
         print(f"  FILES: {len(pdfs_info)} total  |  SUCCESS: {success}  |  FAILED: {failed}  |  Time: {combined.get('processing_time', '?')}s")
         print(f"{'='*80}\n")
-        _set_status(job_dir, "done", f"Batch complete: {success}/{len(pdfs_info)} succeeded.")
+        await _set_status(job_dir, "done", f"Batch complete: {success}/{len(pdfs_info)} succeeded.")
     except Exception as e:
         logger.exception("Batch pipeline failed")
-        _set_status(job_dir, "error", f"Batch pipeline failed: {e}")
+        await _set_status(job_dir, "error", f"Batch pipeline failed: {e}")
     finally:
         _cleanup_intermediate(job_dir)
 
 
-def run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None:
+async def run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None:
     try:
         t0 = time.time()
         config = Config()
         primary = get_model_client("primary")
-        secondary = get_model_client("secondary")
-        pipeline = ExtractionPipeline(config, primary_client=primary, secondary_client=secondary)
+        pipeline = ExtractionPipeline(config, primary_client=primary)
 
-        _set_status(job_dir, "preprocessing", "Preprocessing page images...")
+        await _set_status(job_dir, "preprocessing", "Preprocessing page images...")
         pages = pipeline.preprocess_images(image_paths, str(job_dir))
-        _set_status(job_dir, "preprocessing", f"Preprocessing done. {len(pages)} pages ready.", pages=len(pages))
+        await _set_status(job_dir, "preprocessing", f"Preprocessing done. {len(pages)} pages ready.", pages=len(pages))
 
         processed_images = _ensure_page_images(job_dir / "pages")
 
-        def status_func(stage, msg):
-            _set_status(job_dir, stage, msg)
+        async def status_func(stage, msg):
+            await _set_status(job_dir, stage, msg)
 
-        res = _run_core_extraction(
+        res = await _run_core_extraction(
             job_dir=job_dir,
             pdf_path="",
             processed_images=processed_images,
             pipeline=pipeline,
             primary_name=type(primary).__name__.replace("Client", ""),
-            secondary_name=type(secondary).__name__.replace("Client", ""),
             status_func=status_func,
             use_cache=False,
         )
         res["processing_time"] = round(time.time() - t0, 2)
         res["input_type"] = "image_set"
+        name_path = job_dir / "original_name.txt"
+        image_name = name_path.read_text().strip() if name_path.exists() else job_dir.name
+        res["pdf_names"] = [image_name]
 
-        _set_status(job_dir, "saving_results", "Saving results...")
+        await _set_status(job_dir, "saving_results", "Saving results...")
         _save_results(job_dir, res, job_dir.name)
         _print_field_report(job_dir, res)
-        _set_status(job_dir, "done", "Extraction complete.")
+        await _set_status(job_dir, "done", "Extraction complete.")
     except Exception as e:
         logger.exception("Image pipeline failed")
-        _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
+        await _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
     finally:
         _cleanup_intermediate(job_dir)
 
 
-def run_image_pipeline_from_zip(job_dir: Path, image_paths: list[str]) -> None:
-    if not _wait_for_memory(job_dir):
+async def run_image_pipeline_from_zip(job_dir: Path, image_paths: list[str]) -> None:
+    if not await _wait_for_memory(job_dir):
         return
     try:
         valid, err = _validate_images(image_paths)
         if not valid:
-            _set_status(job_dir, "error", err)
+            await _set_status(job_dir, "error", err)
             return
 
-        _set_status(job_dir, "preprocessing", f"Classifying {len(image_paths)} pages...")
+        await _set_status(job_dir, "preprocessing", f"Classifying {len(image_paths)} pages...")
         classifier = PageClassifier()
         classifications = classifier.classify_all(image_paths)
         page_map, validation = classifier.resolve_order(classifications)
@@ -584,7 +601,7 @@ def run_image_pipeline_from_zip(job_dir: Path, image_paths: list[str]) -> None:
                 f"missing: {validation.get('missing_pages', [])}, "
                 f"duplicates: {validation.get('duplicate_pages', [])}."
             )
-            _set_status(job_dir, "incomplete", msg)
+            await _set_status(job_dir, "incomplete", msg)
             print(f"\n{'='*80}")
             print(f"  FILE: {job_dir.name}")
             print(f"  STATUS: INCOMPLETE — {msg}")
@@ -595,11 +612,11 @@ def run_image_pipeline_from_zip(job_dir: Path, image_paths: list[str]) -> None:
         for page_num, img_idx in page_map.items():
             reordered[page_num] = image_paths[img_idx]
 
-        _set_status(job_dir, "preprocessing", f"Pages classified. Running pipeline...", pages=len(reordered))
-        run_image_pipeline(job_dir, reordered)
+        await _set_status(job_dir, "preprocessing", f"Pages classified. Running pipeline...", pages=len(reordered))
+        await run_image_pipeline(job_dir, reordered)
     except Exception as e:
         logger.exception("Image pipeline from zip failed")
-        _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
+        await _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
     finally:
         _cleanup_intermediate(job_dir)
 
@@ -665,47 +682,202 @@ def _insert_page_markers(raw_text: str, fields: list[dict]) -> str:
     return result
 
 
+def _checkbox_bracket(value: str) -> str:
+    if "\u2713" in value:
+        return "[✓]"
+    if value in ("\u2717", "No", "✗"):
+        return "[✗]"
+    if value in ("—", "", "\u2014"):
+        return "[ ]"
+    if len(value) <= 3:
+        return f"[{value}]"
+    return f"[{value[:3]}…]"
+
+
 def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -> None:
     name_path = job_dir / "original_name.txt"
     display_name = pdf_name or (name_path.read_text().strip() if name_path.exists() else job_dir.name)
     fields = res.get("fields", [])
-    status_str = "DONE" if "error" not in res else "FAILED"
-    conf = res.get("overall_confidence", "?")
-    elapsed = res.get("processing_time", "?")
-    sections = res.get("sections", [])
+    status_bad = "error" in res
+    status_str = "\033[91m\033[1mFAILED\033[0m" if status_bad else "\033[92m\033[1mDONE\033[0m"
 
-    sec_by_page: dict[int, list[str]] = {}
-    for s in sections:
-        sec_by_page.setdefault(s["page"], []).append(s["name"])
+    raw_conf = res.get("overall_confidence", "?")
+    try:
+        conf_val = float(raw_conf)
+        conf_str = (
+            f"\033[92m{raw_conf}%\033[0m" if conf_val >= 85 else
+            f"\033[93m{raw_conf}%\033[0m" if conf_val >= 70 else
+            f"\033[91m{raw_conf}%\033[0m"
+        )
+    except (ValueError, TypeError):
+        conf_str = f"\033[93m{raw_conf}%\033[0m"
+
+    elapsed = res.get("processing_time", "?")
+    sec_names: dict[int, str] = {}
+    for s in res.get("sections", []):
+        sec_names[s["number"]] = s["name"]
+
+    known_labels: set[str] = {t["label"] for t in KNOWN_TEMPLATE_FIELDS}
 
     pages: dict[int, list[dict]] = {}
     for f in fields:
         pages.setdefault(f["page"], []).append(f)
 
     total_review = sum(1 for f in fields if f.get("needs_clarification"))
-    print(f"\n{'='*80}")
-    print(f"  FILE: {display_name}")
-    print(f"  STATUS: {status_str}  |  Confidence: {conf}%  |  Time: {elapsed}s")
-    print(f"  FIELDS: {len(fields)} total  |  {total_review} need review  |  Pages: {len(pages)}")
-    print(f"{'─'*80}")
+    review_str = f"\033[91m\033[1m{total_review} need review\033[0m" if total_review > 0 else "\033[92m0 need review\033[0m"
+
+    W = 80
+    print(f"\n\033[94m┌{'─'*(W-2)}┐\033[0m")
+    print(f"\033[94m│\033[0m  \033[1m📄 {display_name:<{W-7}}\033[0m\033[94m│\033[0m")
+    
+    status_clean = "FAILED" if status_bad else "DONE"
+    conf_clean = f"Confidence: {raw_conf}%"
+    elapsed_clean = f"{elapsed}s"
+    fields_clean = f"{len(fields)} fields"
+    review_clean = f"{total_review} need review"
+    summary_text = f"{status_clean}  •  {conf_clean}  •  {elapsed_clean}  •  {fields_clean}  •  {review_clean}"
+    
+    summary_colored = f"{status_str}  \033[90m•\033[0m  Confidence: {conf_str}  \033[90m•\033[0m  {elapsed}s  \033[90m•\033[0m  {len(fields)} fields  \033[90m•\033[0m  {review_str}"
+    pad_len = W - 5 - len(summary_text)
+    print(f"\033[94m│\033[0m  {summary_colored}{' '*max(0, pad_len)} \033[94m│\033[0m")
+    print(f"\033[94m└{'─'*(W-2)}┘\033[0m")
+
+    re_row = __import__('re').compile(r'^(.+?) — Row (\d+) — (.+)$')
+    re_check = __import__('re').compile(r'^(.+?) — (.+)$')
 
     for page_num in sorted(pages):
         page_fields = pages[page_num]
-        sec_names = sec_by_page.get(page_num, [])
-        sec_label = f" ({', '.join(sec_names)})" if sec_names else ""
         needs_review = sum(1 for f in page_fields if f.get("needs_clarification"))
-        review_suffix = f"  ⚠ {needs_review}" if needs_review else ""
-        print(f"\n  Page {page_num}{sec_label}{review_suffix}")
-        print(f"  {'─'*72}")
+
+        if needs_review:
+            page_tag = f" \033[1;41;37m PAGE {page_num} \033[0m \033[91m⚠ {needs_review} review needed\033[0m "
+            page_clean = f"  PAGE {page_num}  ⚠ {needs_review} review needed "
+        else:
+            page_tag = f" \033[1;42;30m PAGE {page_num} \033[0m \033[92m✓ Clean\033[0m "
+            page_clean = f"  PAGE {page_num}  ✓ Clean "
+            
+        pad = W - len(page_clean) - 4
+        print(f"\n\033[90m┯━\033[0m{page_tag}\033[90m{'━'*max(0, pad)}\033[0m")
+
+        by_sec: dict[int | None | str, list[dict]] = {}
         for f in page_fields:
-            label = f.get("label", "?")
-            value = (f.get("value") or "—")
-            print(f"    {label:<58} {value}")
-        print(f"  {'─'*72}")
+            sec = f.get("section_number")
+            by_sec.setdefault("header" if sec is None else sec, []).append(f)
+
+        sec_keys = sorted(
+            (k for k in by_sec if k != "header"),
+            key=lambda k: int(k) if isinstance(k, int) else 0,
+        )
+        ordered = (["header"] if "header" in by_sec else []) + sec_keys
+
+        for sec_key in ordered:
+            sec_fields = by_sec[sec_key]
+            sec_title = "Header" if sec_key == "header" else f"Section {sec_key}" + (f" — {sec_names.get(sec_key, '').rstrip('*').strip()}" if sec_names.get(sec_key) else "")
+            print(f"  \033[1;36m┠─ {sec_title}\033[0m")
+
+            tables: dict[str, dict[int, dict[str, str]]] = {}
+            checklists: dict[str, list[tuple[str, str]]] = {}
+            simple: list[dict] = []
+
+            for f in sec_fields:
+                label = f.get("label", "?")
+                value_raw = f.get("value") or ""
+                value = value_raw or "—"
+
+                m = re_row.match(label)
+                if m:
+                    table_name = m.group(1)
+                    row_num = int(m.group(2))
+                    col_name = m.group(3)
+                    tables.setdefault(table_name, {}).setdefault(row_num, {})[col_name] = value
+                    continue
+
+                m = re_check.match(label)
+                if m and label not in known_labels:
+                    group_name = m.group(1)
+                    option = m.group(2)
+                    checklists.setdefault(group_name, []).append((option, value))
+                    continue
+
+                simple.append(f)
+
+            agg_labels = {g for g in checklists if any("[✓]" in _checkbox_bracket(v) for _, v in checklists[g])}
+
+            for f in simple:
+                label = f.get("label", "?")
+                val = f.get("value") or "—"
+
+                if val == "—" and label in agg_labels:
+                    checked = sum(1 for _, v in checklists[label] if "[✓]" in _checkbox_bracket(v))
+                    val_display = f"\033[92m({checked} selected)\033[0m"
+                elif val == "—":
+                    val_display = f"\033[90m—\033[0m"
+                elif f.get("needs_clarification"):
+                    val_display = f"\033[93m{val} (needs review)\033[0m"
+                else:
+                    val_display = val
+
+                print(f"  \033[90m┃\033[0m   \033[90m{label:<45}\033[0m {val_display}")
+
+            for group_name, options in checklists.items():
+                if not options:
+                    continue
+                max_opt = max(len(opt) for opt, _ in options)
+                checked_count = sum(1 for _, v in options if "[✓]" in _checkbox_bracket(v))
+
+                if sum(len(opt) for opt, _ in options) < 36:
+                    parts = []
+                    for option, value in options:
+                        bracket = _checkbox_bracket(value)
+                        sym = f"\033[92m✓\033[0m" if "[✓]" in bracket else f"\033[90m✗\033[0m"
+                        parts.append(f"{option} {sym}")
+                    print(f"  \033[90m┃\033[0m   \033[1;33m{group_name:<45}\033[0m {'  '.join(parts)}")
+                else:
+                    print(f"  \033[90m┃\033[0m   \033[1;33m{group_name:<45}\033[0m \033[90m({checked_count} checked)\033[0m")
+                    for option, value in options:
+                        bracket = _checkbox_bracket(value)
+                        bracket_display = f"\033[92m{bracket}\033[0m" if "[✓]" in bracket else bracket
+                        print(f"  \033[90m┃\033[0m     \033[90m{option:<43}\033[0m {bracket_display}")
+
+            for table_name, rows in tables.items():
+                col_order: list[str] = []
+                for rn in sorted(rows):
+                    for c in rows[rn]:
+                        if c not in col_order:
+                            col_order.append(c)
+                col_widths = []
+                for c in col_order:
+                    max_val = max(len(rows[rn].get(c, "")) for rn in rows)
+                    col_widths.append(max(len(c), max_val, 8))
+
+                print(f"  \033[90m┃\033[0m")
+                print(f"  \033[90m┃\033[0m   \033[1;4;35mTable: {table_name}\033[0m \033[90m({len(rows)} rows)\033[0m")
+                
+                header = " │ ".join(f"\033[1;37m{c.center(col_widths[i])}\033[0m" for i, c in enumerate(col_order))
+                sep = "━╋━".join("━" * w for w in col_widths)
+                
+                total_w = sum(col_widths) + 3 * len(col_order) - 3
+                print(f"  \033[90m┃\033[0m     \033[90m┏━\033[0m{'━'*total_w}\033[90m━┓\033[0m")
+                print(f"  \033[90m┃\033[0m     \033[90m┃\033[0m {header} \033[90m┃\033[0m")
+                print(f"  \033[90m┃\033[0m     \033[90m┣━{sep}━┫\033[0m")
+                for rn in sorted(rows):
+                    vals = [rows[rn].get(c, "—").center(col_widths[i]) for i, c in enumerate(col_order)]
+                    print(f"  \033[90m┃\033[0m     \033[90m┃\033[0m {' │ '.join(vals)} \033[90m┃\033[0m")
+                print(f"  \033[90m┃\033[0m     \033[90m┗━\033[0m{'━'*total_w}\033[90m━┛\033[0m")
+
+        print("  \033[90m┃\033[0m")
         high_conf = sum(1 for f in page_fields if f.get("confidence", 0) >= 90)
         low_conf = sum(1 for f in page_fields if f.get("confidence", 0) < 70)
-        print(f"  Fields: {len(page_fields)}  |  High: {high_conf}  |  Low: {low_conf}")
-    print(f"{'='*80}\n")
 
+        page_details = f"Page {page_num} • {len(page_fields)} fields"
+        if high_conf:
+            page_details += f" • \033[92m{high_conf} high\033[0m"
+        if low_conf:
+            page_details += f" • \033[91m{low_conf} low\033[0m"
+        else:
+            page_details += f" • 0 low"
 
-
+        clean_w = len(f"Page {page_num} • {len(page_fields)} fields • {high_conf} high • {low_conf} low")
+        remaining = max(W - clean_w - 7, 4)
+        print(f"  \033[90m┗━━ {page_details} {'━' * remaining}\033[0m")
+    print(f"\033[94m└{'─'*(W-2)}┘\n")

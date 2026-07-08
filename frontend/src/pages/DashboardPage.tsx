@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { listJobs, deleteJob } from '../api/client';
+import { useState, useEffect } from 'react';
+import { deleteJob, subscribeNewJobs } from '../api/client';
 
 interface JobEntry {
   job_id: string;
@@ -14,7 +14,6 @@ interface JobEntry {
 }
 
 interface Props {
-  onNewBatch: () => void;
   onSelectBatch: (jobId: string) => void;
 }
 
@@ -34,37 +33,44 @@ function statusBadge(s: string): { bg: string; label: string } {
   return { bg: c, label: s.replace(/_/g, ' ') };
 }
 
-export default function DashboardPage({ onNewBatch, onSelectBatch }: Props) {
+export default function DashboardPage({ onSelectBatch }: Props) {
   const [jobs, setJobs] = useState<JobEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortOrder, setSortOrder] = useState<'latest' | 'oldest'>('latest');
   const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
 
-  const fetch = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await listJobs();
-      setJobs(Array.isArray(data) ? data : []);
-      setSelectedJobIds([]);
-    } catch { /* ignore */ }
-    setLoading(false);
-  }, []);
+  // Subscribe to SSE — snapshot populates dashboard, new jobs auto-navigate
+  useEffect(() => {
+    let knownIds = new Set<string>();
 
-  useEffect(() => { fetch(); }, [fetch]);
+    const unsub = subscribeNewJobs(
+      (snapshot) => {
+        setJobs(snapshot);
+        knownIds = new Set(snapshot.map((j: any) => j.job_id));
+        setLoading(false);
+      },
+      (jobId) => {
+        if (!knownIds.has(jobId)) {
+          onSelectBatch(jobId);
+        }
+      },
+    );
+
+    return unsub;
+  }, [onSelectBatch]);
 
   const handleDeleteSelected = async () => {
     if (selectedJobIds.length === 0) return;
     if (!window.confirm(`Are you sure you want to delete the selected ${selectedJobIds.length} batch(es)?`)) {
       return;
     }
-    setLoading(true);
     try {
       await Promise.all(selectedJobIds.map(id => deleteJob(id)));
-      await fetch();
+      setJobs(prev => prev.filter(j => !selectedJobIds.includes(j.job_id)));
+      setSelectedJobIds([]);
     } catch (e) {
       alert('Failed to delete some batches');
     }
-    setLoading(false);
   };
 
   const handleDeleteOne = async (id: string, e: React.MouseEvent) => {
@@ -72,14 +78,12 @@ export default function DashboardPage({ onNewBatch, onSelectBatch }: Props) {
     if (!window.confirm('Are you sure you want to delete this batch?')) {
       return;
     }
-    setLoading(true);
     try {
       await deleteJob(id);
-      await fetch();
+      setJobs(prev => prev.filter(j => j.job_id !== id));
     } catch (e) {
       alert('Failed to delete batch');
     }
-    setLoading(false);
   };
 
   const sorted = [...jobs].sort((a, b) => {
@@ -143,21 +147,7 @@ export default function DashboardPage({ onNewBatch, onSelectBatch }: Props) {
               </button>
             ))}
           </div>
-          <button
-            onClick={onNewBatch}
-            style={{
-              padding: '10px 20px', fontSize: 14, fontWeight: 600,
-              border: 'none', borderRadius: 'var(--radius-lg)',
-              background: 'var(--color-primary)', color: '#fff',
-              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-              transition: 'all var(--transition-fast)',
-              boxShadow: '0 2px 8px rgba(37,99,235,0.3)',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.filter = 'brightness(1.08)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.filter = 'none'; }}
-          >
-            + New Batch
-          </button>
+
         </div>
       </header>
 
@@ -176,7 +166,7 @@ export default function DashboardPage({ onNewBatch, onSelectBatch }: Props) {
               No completed batches yet
             </p>
             <p style={{ fontSize: 12, marginTop: 4 }}>
-              Upload a document to get started.
+              Batches will appear here once processed from Zoho Creator.
             </p>
           </div>
         ) : (

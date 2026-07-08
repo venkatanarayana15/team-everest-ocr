@@ -304,7 +304,7 @@ export default function DocumentReview({
                   <div style={{ position: 'relative', width: '100%' }}>
                     <img
                       id={`doc-review-img-${pageNum}`}
-                      src={pageImageUrl(jobId, pageOffset + pageNum, pdfName)}
+                      src={pageImageUrl(jobId, pdfName ? pageNum : pageOffset + pageNum, pdfName)}
                       onLoad={() => handleImgLoad(pageNum)}
                       style={{ width: '100%', maxWidth: '100%', height: 'auto', display: 'block' }}
                       alt={`Page ${pageNum}`}
@@ -324,7 +324,7 @@ export default function DocumentReview({
                   <div style={{ position: 'relative', display: 'inline-block', padding: 8 }}>
                     <img
                       id={`doc-review-img-${pageNum}`}
-                      src={pageImageUrl(jobId, pageOffset + pageNum, pdfName)}
+                      src={pageImageUrl(jobId, pdfName ? pageNum : pageOffset + pageNum, pdfName)}
                       onLoad={() => handleImgLoad(pageNum)}
                       style={{ display: 'block', boxShadow: '0 1px 4px rgba(0,0,0,0.1)' }}
                       alt={`Page ${pageNum}`}

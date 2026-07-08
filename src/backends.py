@@ -92,7 +92,7 @@ class TesseractBackend(OCRBackend):
     def process(self, pdf_path: str, config: Config) -> OCRResult:
         import fitz
         from PIL import Image
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, wait, FIRST_EXCEPTION, TimeoutError as FuturesTimeout
 
         doc = fitz.open(pdf_path)
         pages_arr: list[tuple[np.ndarray, int]] = []
@@ -108,11 +108,17 @@ class TesseractBackend(OCRBackend):
 
         all_boxes: list[WordBox] = []
         pages_data: dict[int, dict] = {}
-        num_workers = min(len(pages_arr), 6)
+        num_workers = min(len(pages_arr), config.tesseract_workers)
 
         with ThreadPoolExecutor(max_workers=num_workers) as pool:
             futures = [pool.submit(self._page_result, arr, pn) for arr, pn in pages_arr]
-            for f in futures:
+            done, not_done = wait(futures, timeout=config.tesseract_timeout, return_when=FIRST_EXCEPTION)
+            for f in not_done:
+                logger.warning("Tesseract page task timed out — skipping")
+            for f in done:
+                if f.exception() is not None:
+                    logger.error("Tesseract page task failed: %s", f.exception())
+                    continue
                 page_num, word_boxes, page_dict = f.result()
                 all_boxes.extend(word_boxes)
                 pages_data[page_num] = page_dict
@@ -129,7 +135,7 @@ class TesseractBackend(OCRBackend):
         page numbers directly from the dict keys.
         """
         from PIL import Image
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, wait, FIRST_EXCEPTION, TimeoutError as FuturesTimeout
 
         pages_arr: list[tuple[np.ndarray, int]] = []
         for page_num in sorted(image_paths):
@@ -138,11 +144,17 @@ class TesseractBackend(OCRBackend):
 
         all_boxes: list[WordBox] = []
         pages_data: dict[int, dict] = {}
-        num_workers = min(len(pages_arr), 6)
+        num_workers = min(len(pages_arr), config.tesseract_workers)
 
         with ThreadPoolExecutor(max_workers=num_workers) as pool:
             futures = [pool.submit(self._page_result, arr, pn) for arr, pn in pages_arr]
-            for f in futures:
+            done, not_done = wait(futures, timeout=config.tesseract_timeout, return_when=FIRST_EXCEPTION)
+            for f in not_done:
+                logger.warning("Tesseract image page task timed out — skipping")
+            for f in done:
+                if f.exception() is not None:
+                    logger.error("Tesseract image page task failed: %s", f.exception())
+                    continue
                 page_num, word_boxes, page_dict = f.result()
                 all_boxes.extend(word_boxes)
                 pages_data[page_num] = page_dict

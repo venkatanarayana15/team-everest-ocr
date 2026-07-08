@@ -1,7 +1,6 @@
+import asyncio
 import json
 import logging
-import queue
-import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -28,92 +27,108 @@ STAGE_PROGRESS: dict[str, int] = {
 }
 
 _progress_store: dict[str, dict] = {}
-_progress_lock = threading.Lock()
+
+_status_queues: dict[str, asyncio.Queue] = {}
+
+_new_job_queues: list[asyncio.Queue] = []
 
 
 def update_progress(job_id: str, data: dict) -> None:
-    with _progress_lock:
-        _progress_store[job_id] = data
+    _progress_store[job_id] = data
 
 
 def get_job_progress(job_id: str) -> dict:
-    with _progress_lock:
-        return _progress_store.get(job_id, {})
-
-
-_status_queues: dict[str, queue.Queue] = {}
-_status_queues_lock = threading.Lock()
+    return _progress_store.get(job_id, {})
 
 
 def _push_sse(job_id: str, payload: dict) -> None:
-    with _status_queues_lock:
-        q = _status_queues.get(job_id)
-        if q:
-            try:
-                q.put_nowait(payload)
-            except queue.Full:
-                pass
+    q = _status_queues.get(job_id)
+    if q:
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            pass
+
+
+def _push_new_job(job_id: str) -> None:
+    payload = json.dumps({"job_id": job_id})
+    dead: list[int] = []
+    for i, q in enumerate(_new_job_queues):
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            dead.append(i)
+    for i in reversed(dead):
+        _new_job_queues.pop(i)
 
 
 _last_good_status: dict[str, dict] = {}
 
 
-def _set_status(job_dir: Path, status: str, message: str = "", pages: int = 0, fields: list[dict] | None = None) -> None:
+async def _set_status(job_dir: Path, status: str, message: str = "", pages: int = 0, fields: list[dict] | None = None) -> None:
     path = job_dir / "status.json"
-    existing = {"log": []}
-    if path.exists():
-        with open(path) as f:
-            existing = json.load(f)
+    loop = asyncio.get_running_loop()
 
-    log = existing.get("log", [])
-    if message:
-        log.append({"t": datetime.now().strftime("%H:%M:%S"), "msg": message})
+    def _write_status() -> dict:
+        existing = {"log": []}
+        if path.exists():
+            with open(path) as f:
+                existing = json.load(f)
 
-    data = {
-        "status": status,
-        "message": message or existing.get("message", ""),
-        "log": log,
-        "pages": pages or existing.get("pages", 0),
-    }
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+        log = existing.get("log", [])
+        if message:
+            log.append({"t": datetime.now().strftime("%H:%M:%S"), "msg": message})
+
+        data = {
+            "status": status,
+            "message": message or existing.get("message", ""),
+            "log": log,
+            "pages": pages or existing.get("pages", 0),
+        }
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+        return data
+
+    data = await loop.run_in_executor(None, _write_status)
+    stored_message = data.get("message", message or "")
+    stored_log = data.get("log", [])
+    stored_pages = data.get("pages", pages or 0)
 
     pct = STAGE_PROGRESS.get(status, 0)
     name_path = job_dir / "original_name.txt"
     pdf_name = name_path.read_text().strip() if name_path.exists() else job_dir.name
 
-    with _progress_lock:
-        existing_progress = _progress_store.get(job_dir.name, {})
-        start_time = existing_progress.get("start_time")
-        if not start_time:
-            start_time = time.time()
-        now = time.time()
+    existing_progress = _progress_store.get(job_dir.name, {})
+    start_time = existing_progress.get("start_time")
+    if not start_time:
+        start_time = time.time()
+    now = time.time()
 
-        pdfs_map = existing_progress.get("pdfs", {})
-        pdf_file_start = existing_progress.get("pdf_file_start", {})
-        if pdf_name not in pdf_file_start:
-            pdf_file_start[pdf_name] = now
-        file_elapsed = round(now - pdf_file_start[pdf_name], 1)
+    pdfs_map = existing_progress.get("pdfs", {})
+    pdf_file_start = existing_progress.get("pdf_file_start", {})
+    if pdf_name not in pdf_file_start:
+        pdf_file_start[pdf_name] = now
+    file_elapsed = round(now - pdf_file_start[pdf_name], 1)
 
-        pdfs_map[pdf_name] = {
-            "progress": pct,
-            "stage": status,
-            "elapsed": file_elapsed,
-        }
+    pdfs_map[pdf_name] = {
+        "progress": pct,
+        "stage": status,
+        "elapsed": file_elapsed,
+    }
 
-        _progress_store[job_dir.name] = {
-            "overall": pct,
-            "pdfs": pdfs_map,
-            "start_time": start_time,
-            "pdf_file_start": pdf_file_start,
-            "elapsed": round(now - start_time, 1),
-        }
+    _progress_store[job_dir.name] = {
+        "overall": pct,
+        "pdfs": pdfs_map,
+        "start_time": start_time,
+        "pdf_file_start": pdf_file_start,
+        "elapsed": round(now - start_time, 1),
+    }
 
     sse_payload = {
         "status": status,
-        "message": message or existing.get("message", ""),
-        "log": log,
-        "pages": pages or existing.get("pages", 0),
+        "message": stored_message,
+        "log": stored_log,
+        "pages": stored_pages,
         "progress": {
             "overall": pct,
             "pdfs": pdfs_map,
