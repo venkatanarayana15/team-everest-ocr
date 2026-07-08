@@ -11,7 +11,6 @@ interface Props {
 
 export default function FolderReviewPage({ jobId, onBack }: Props) {
   const [result, setResult] = useState<JobResult | null>(null);
-  const [fields, setFields] = useState<Field[]>([]);
   const [sections, setSections] = useState<import('../types').Section[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<string>('queued');
@@ -19,7 +18,7 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
   const [selectedField, setSelectedField] = useState<Field | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedPdf, setSelectedPdf] = useState<string | null>(null);
-  const [filteredFields, setFilteredFields] = useState<Field[]>([]);
+  const [pdfResultsMap, setPdfResultsMap] = useState<Record<string, any>>({});
   const [progress, setProgress] = useState(0);
   const [overallProgress, setOverallProgress] = useState<number | null>(null);
   const [perPdfProgress, setPdfProgresses] = useState<Record<string, { progress: number; stage: string }>>({});
@@ -46,23 +45,45 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
       }
       const r: JobResult = data.result;
       setResult(r);
-      setFields(r.fields || []);
-      setSections(r.sections || []);
       if (r.processing_time) {
         setElapsed(r.processing_time);
       }
 
-      const pdfs: string[] = r.fields && r.fields.length > 0
-        ? [...new Set(r.fields.map((f: any) => f.file).filter(Boolean))] as string[]
-        : [];
-      const firstPdf = pdfs[0] || null;
-      setSelectedPdf(firstPdf);
-      if (r.fields && r.fields.length > 0) {
-        setCurrentPage(r.fields[0].page);
+      const rawResult = data.result as any;
+      const pdfsArr: any[] = rawResult.pdfs;
+      const names: string[] = rawResult.pdf_names || [];
+
+      if (pdfsArr && pdfsArr.length > 0) {
+        const map: Record<string, any> = {};
+        for (const pr of pdfsArr) {
+          const name = pr.pdf_name || pr.name || '';
+          if (name) map[name] = pr;
+        }
+        setPdfResultsMap(map);
+
+        const first = names[0] || Object.keys(map)[0] || null;
+        setSelectedPdf(first);
+
+        const firstSections = pdfsArr[0]?.sections;
+        if (firstSections) setSections(firstSections);
+      } else {
+        // Single-document fallback
+        const singleName = names[0] || originalName || jobId;
+        const wrapped: Record<string, any> = {};
+        wrapped[singleName] = {
+          fields: r.fields || [],
+          sections: r.sections || [],
+          num_pages: r.num_pages || 1,
+          overall_confidence: r.overall_confidence || 0,
+          pdf_name: singleName,
+        };
+        setPdfResultsMap(wrapped);
+        setSelectedPdf(singleName);
+        setSections(r.sections || []);
       }
     } catch { /* ignore */ }
     setLoading(false);
-  }, [jobId]);
+  }, [jobId, originalName]);
 
   useEffect(() => {
     fetchResult();
@@ -99,30 +120,16 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
     return () => unsub();
   }, [jobId]);
 
-  useEffect(() => {
-    if (!selectedPdf) {
-      setFilteredFields(fields);
-      return;
-    }
-    setFilteredFields(fields.filter((f) => (f as any).file === selectedPdf));
-  }, [fields, selectedPdf]);
+  const currentPdfResult = selectedPdf ? pdfResultsMap[selectedPdf] : null;
+  const displayFields: Field[] = currentPdfResult?.fields || [];
+  const displayNumPages: number = currentPdfResult?.num_pages || 1;
+  const displayConfidence: number | null = currentPdfResult?.overall_confidence ?? null;
 
-  const handleFieldClick = useCallback((field: Field) => {
-    setSelectedField(field);
-    setCurrentPage(field.page);
-  }, []);
-
-  const handleFieldsUpdated = useCallback((updated: Field[]) => {
-    setFields((prev) => {
-      if (!selectedPdf) return updated;
-      const other = prev.filter((f) => (f as any).file !== selectedPdf);
-      return [...other, ...updated];
-    });
-  }, [selectedPdf]);
-
-  const pdfNames: string[] = result
-    ? (result as any).pdf_names || [...new Set(fields.map((f) => (f as any).file).filter(Boolean))] as string[]
-    : [];
+  const pdfNames: string[] = useMemo(() => {
+    const fromMap = Object.keys(pdfResultsMap);
+    if (fromMap.length > 0) return fromMap;
+    return (result as any)?.pdf_names || [];
+  }, [pdfResultsMap, result]);
 
   const handleSelectPdf = useCallback((name: string) => {
     setSelectedPdf(name);
@@ -130,22 +137,19 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
     setCurrentPage(1);
   }, []);
 
-  const getPdfPageCount = useCallback((name: string) => {
-    const pdfFields = fields.filter((f) => (f as any).file === name);
-    return pdfFields.reduce((max, f) => Math.max(max, f.page), 0) || 1;
-  }, [fields]);
+  const handleFieldClick = useCallback((field: Field) => {
+    setSelectedField(field);
+    setCurrentPage(field.page);
+  }, []);
 
-  const selectedPdfPageCount = result ? result.num_pages : (selectedPdf ? getPdfPageCount(selectedPdf) : 1);
-
-  const pageOffset = useMemo(() => {
-    if (!selectedPdf) return 0;
-    let offset = 0;
-    for (const name of pdfNames) {
-      if (name === selectedPdf) break;
-      offset += getPdfPageCount(name);
-    }
-    return offset;
-  }, [pdfNames, selectedPdf, getPdfPageCount]);
+  const handleFieldsUpdated = useCallback((updated: Field[]) => {
+    setPdfResultsMap((prev) => {
+      if (!selectedPdf) return prev;
+      const entry = prev[selectedPdf];
+      if (!entry) return prev;
+      return { ...prev, [selectedPdf]: { ...entry, fields: updated } };
+    });
+  }, [selectedPdf]);
 
   if (loading && !result) {
     return (
@@ -224,6 +228,7 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
             </div>
           ) : pdfNames.map((name) => {
             const isActive = name === selectedPdf;
+            const pdfConfidence = pdfResultsMap[name]?.overall_confidence;
             return (
               <div
                 key={name}
@@ -239,7 +244,15 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
                 onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--color-bg)'; }}
                 onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
               >
-                <span>📄 {name} {result?.pdf_times?.[name] != null ? `(${result.pdf_times[name]}s)` : ''}</span>
+                <span>📄 {name}</span>
+                {pdfConfidence != null && (
+                  <span style={{
+                    marginLeft: 6, fontSize: 10, fontWeight: 600,
+                    color: pdfConfidence >= 70 ? 'var(--color-success, #16a34a)' : pdfConfidence >= 40 ? 'var(--color-warning, #d97706)' : 'var(--color-error, #dc2626)',
+                  }}>
+                    {pdfConfidence}%
+                  </span>
+                )}
               </div>
             );
           })}
@@ -248,12 +261,11 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
 
       {/* Main area: DocumentReview */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {result ? (
+        {result && selectedPdf ? (
           <DocumentReview
             jobId={jobId}
-            numPages={selectedPdfPageCount}
-            pageOffset={pageOffset}
-            fields={filteredFields}
+            numPages={displayNumPages}
+            fields={displayFields}
             sections={sections}
             selectedField={selectedField}
             currentPage={currentPage}
@@ -263,7 +275,7 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
           />
         ) : (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}>
-            {loading ? 'Loading...' : 'No results available'}
+            {loading ? 'Loading...' : selectedPdf ? 'No results available' : 'Select a PDF from the sidebar'}
           </div>
         )}
       </div>

@@ -235,7 +235,11 @@ async def _run_core_extraction(
         if model_data:
             overall_confidence = model_data.get("overall_confidence", 0)
             raw_text = model_data.get("raw_text", "")
-            raw_text = _insert_page_markers(raw_text, model_data.get("fields", []))
+            raw_fields = model_data.get("fields", [])
+            bad_fields = [f for f in raw_fields if not isinstance(f, dict)]
+            if bad_fields:
+                logger.warning("Ignoring %d non-dict fields from LLM response", len(bad_fields))
+            raw_text = _insert_page_markers(raw_text, raw_fields)
             fields = pipeline.merge_fields(model_data, word_boxes, prefix=primary_name)
             await status_func("field_mapping", f"Merged {len(fields)} fields.")
         else:
@@ -291,6 +295,7 @@ async def _save_to_db(job_dir: Path) -> bool:
     results_path = job_dir / "results" / "result.json"
     if not results_path.exists():
         return True
+    print(f"  [DB] _save_to_db: job_dir={job_dir} result.json={'exists' if results_path.exists() else 'MISSING'}")
     try:
         from src.database import upsert_ocr_document
     except ImportError:
@@ -302,6 +307,8 @@ async def _save_to_db(job_dir: Path) -> bool:
             result_data = json.load(f)
         name_path = job_dir / "original_name.txt"
         orig_name = name_path.read_text().strip() if name_path.exists() else job_dir.name
+        hash_path = job_dir / "file_hash.txt"
+        file_hash = hash_path.read_text().strip() if hash_path.exists() else None
         fields_data = result_data.get("fields", [])
         low_conf = sum(1 for f in fields_data if f.get("confidence", 0) < 70)
         needs_review = sum(1 for f in fields_data if f.get("needs_clarification", False))
@@ -318,14 +325,17 @@ async def _save_to_db(job_dir: Path) -> bool:
             job_id=job_dir.name,
             file_name=orig_name,
             status="done",
+            file_hash=file_hash,
             processing_time=result_data.get("processing_time"),
             confidence_score=result_data.get("overall_confidence"),
             num_pdfs=result_data.get("num_pdfs"),
             result_json=result_data,
         )
         if not doc_id:
+            print(f"  ❌ DB save: upsert returned empty id (job={job_dir.name})")
             logger.warning("Auto-save to DB failed (upsert returned empty id) for job %s", job_dir.name)
             return False
+        print(f"  ✅ DB save: {len(fields_data)} fields, {low_conf} low-conf, row={doc_id}")
         logger.info("Auto-save to DB succeeded for job %s → row id=%s", job_dir.name, doc_id)
         return True
     except Exception as e:
@@ -336,6 +346,7 @@ async def _save_to_db(job_dir: Path) -> bool:
             _hint = "table 'ocr_documents' missing — run schema migration"
         elif "23505" in str(e).split():
             _hint = "duplicate key violation — check upsert logic"
+        print(f"  ❌ DB save FAILED: {e} | hint={_hint}")
         logger.warning("Auto-save to DB failed for job %s: %s | hint=%s", job_dir.name, e, _hint)
         return False
 
@@ -363,7 +374,7 @@ async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
                 await _set_status(job_dir, "preprocessing", f"Preprocessing PDF ({pdf_name})...")
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, pipeline.preprocess, pdf_path, str(job_dir))
-                await _set_status(job_dir, "preprocessing", "Preprocessing done.", pages=6)
+                await _set_status(job_dir, "preprocessing", "Preprocessing done.", pages=len(processed_images))
                 processed_images = _ensure_page_images(job_dir / "pages")
             else:
                 await _set_status(job_dir, "preprocessing", "Skipping page rendering (Chandra OCR).")
@@ -500,6 +511,10 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                     res["input_type"] = "batch_" + input_type
                     res["processing_time"] = round(time.time() - t0, 2)
 
+                    # Save individual result to DB (each batch item gets its own row)
+                    _save_results(pdf_job_dir, res, pdf_job_dir.name)
+                    await _save_to_db(pdf_job_dir)
+
                     if "zoho_req" in pdf_info:
                         from src.zoho_integration import run_zoho_writeback_for_batch_item
                         await run_zoho_writeback_for_batch_item(job_dir, Path(pdf_info["path"]), pdf_info["zoho_req"], res, input_info)
@@ -535,9 +550,29 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         with open(results_dir / "result.json", "w") as f:
             json.dump(combined, f, indent=2)
 
-        _db_ok = await _save_to_db(job_dir)
-        if not _db_ok:
-            logger.error("Batch DB save failed | job=%s", job_dir.name)
+        # Re-save each individual PDF's full result to DB using the batch job_id prefix
+        # so the row is discoverable under the batch job rather than subdirectory "0"/"1".
+        from src.database import upsert_ocr_document as _batch_upsert
+        for r in all_results:
+            if "error" in r or not r.get("fields"):
+                continue
+            pdf_result_path = job_dir / str(all_results.index(r)) / "results" / "result.json"
+            if pdf_result_path.exists():
+                with open(pdf_result_path) as f:
+                    pdf_result = json.load(f)
+                pdf_result["processing_time"] = combined.get("processing_time", 0)
+                doc_id = await _batch_upsert(
+                    job_id=f"{job_dir.name}_{all_results.index(r)}",
+                    file_name=r.get("pdf_name", f"file_{all_results.index(r)}"),
+                    status="done",
+                    processing_time=pdf_result.get("processing_time"),
+                    confidence_score=pdf_result.get("overall_confidence"),
+                    result_json=pdf_result,
+                )
+                if doc_id:
+                    print(f"  ✅ Batch-level DB save: job={job_dir.name}_{all_results.index(r)} row={doc_id} fields={len(pdf_result.get('fields',[]))}")
+                else:
+                    print(f"  ❌ Batch-level DB save failed for {r.get('pdf_name','?')}")
 
         _progress_store.pop(job_dir.name, None)
         success = sum(1 for r in all_results if 'error' not in r)
@@ -600,6 +635,9 @@ async def run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None
         await _set_status(job_dir, "saving_results", "Saving results...")
         _save_results(job_dir, res, job_dir.name)
         _print_field_report(job_dir, res)
+        _db_ok = await _save_to_db(job_dir)
+        if not _db_ok:
+            logger.error("Image pipeline DB save failed | job=%s", job_dir.name)
         await _set_status(job_dir, "done", "Extraction complete.")
     except Exception as e:
         logger.exception("Image pipeline failed")
@@ -692,9 +730,10 @@ def _derive_sections(fields: list[StructuredField], raw_text: str) -> list[dict]
     ]
 
 
-def _insert_page_markers(raw_text: str, fields: list[dict]) -> str:
+def _insert_page_markers(raw_text: str, fields: list) -> str:
     if not raw_text:
         return raw_text
+    fields = [f for f in fields if isinstance(f, dict)]
     sorted_fields = sorted(fields, key=lambda f: f.get("page", 1))
     current_page = sorted_fields[0].get("page", 1) if sorted_fields else 1
     result = raw_text
@@ -740,7 +779,7 @@ def visible_len(s: str) -> int:
 
 def pad_line(content: str, width: int) -> str:
     vis_w = visible_len(content)
-    if vis_w >= width:
+    if vis_w > width:
         res = []
         cur_len = 0
         in_esc = False
@@ -765,232 +804,272 @@ def pad_line(content: str, width: int) -> str:
     return content + " " * (width - vis_w)
 
 
+def _normalize_label(label: str) -> str:
+    return label.lower().rstrip(".").strip()
+
+
 def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -> None:
     name_path = job_dir / "original_name.txt"
     display_name = pdf_name or (name_path.read_text().strip() if name_path.exists() else job_dir.name)
     fields = res.get("fields", [])
-    status_bad = "error" in res
-    status_str = "\033[91m\033[1mFAILED\033[0m" if status_bad else "\033[92m\033[1mDONE\033[0m"
 
-    raw_conf = res.get("overall_confidence", "?")
-    try:
-        conf_val = float(raw_conf)
-        conf_str = (
-            f"\033[92m{raw_conf}%\033[0m" if conf_val >= 85 else
-            f"\033[93m{raw_conf}%\033[0m" if conf_val >= 70 else
-            f"\033[91m{raw_conf}%\033[0m"
-        )
-    except (ValueError, TypeError):
-        conf_str = f"\033[93m{raw_conf}%\033[0m"
-
-    elapsed = res.get("processing_time", "?")
-    sec_names: dict[int, str] = {}
-    for s in res.get("sections", []):
-        sec_names[s["number"]] = s["name"]
-
-    known_labels: set[str] = {t["label"] for t in KNOWN_TEMPLATE_FIELDS}
-
-    pages: dict[int, list[dict]] = {}
+    fv = {}
+    fv_norm: dict[str, str] = {}
     for f in fields:
-        pages.setdefault(f["page"], []).append(f)
+        label = f.get("label", "")
+        value = str(f.get("value", "")).strip()
+        if label and value:
+            fv[label] = value
+            fv_norm[_normalize_label(label)] = value
 
-    total_review = sum(1 for f in fields if f.get("needs_clarification"))
-    review_str = f"\033[91m\033[1m{total_review} need review\033[0m" if total_review > 0 else "\033[92m0 need review\033[0m"
+    def _lookup(label: str) -> str:
+        if label in fv:
+            return fv[label]
+        return fv_norm.get(_normalize_label(label), "")
 
-    W = 86
+    def get_val(label: str) -> str:
+        return _lookup(label)
+
+    def get_check(label: str) -> str:
+        val = _lookup(label)
+        if "✓" in val or val.lower() in ("yes", "true", "x"):
+            return "☑"
+        return "☐"
+
+    def get_radio(label: str, option: str) -> str:
+        val = _lookup(label)
+        if val.lower() == option.lower():
+            return "☑"
+        return "☐"
+
+    def get_table_val(table: str, row: int, col: str) -> str:
+        raw = f"{table} — Row {row} — {col}"
+        return _lookup(raw)
+
+    W = 100
     C_WIDTH = W - 4
 
-    report_lines = []
-    report_lines.append("")
-    report_lines.append(f"  \033[1m📄 {display_name}\033[0m")
-    report_lines.append(f"  {status_str}  ·  Confidence: {conf_str}  ·  {elapsed}s  ·  {len(fields)} fields  ·  {review_str}")
-    report_lines.append(f"\033[90m{'─'*C_WIDTH}\033[0m")
+    def format_table(headers: list[str], ratios: list[float], rows: list[list[str]]) -> list[str]:
+        avail = C_WIDTH - len(headers) - 1
+        widths = [int(avail * r) for r in ratios[:-1]]
+        widths.append(avail - sum(widths))
+        
+        tbl = []
+        tbl.append("┌" + "┬".join("─" * w for w in widths) + "┐")
+        tbl.append("│" + "│".join(f" {h.ljust(widths[i]-2)[:widths[i]-2]} " for i, h in enumerate(headers)) + "│")
+        tbl.append("├" + "┼".join("─" * w for w in widths) + "┤")
+        for r in rows:
+            tbl.append("│" + "│".join(f" {str(val).ljust(widths[i]-2)[:widths[i]-2]} " for i, val in enumerate(r)) + "│")
+        tbl.append("└" + "┴".join("─" * w for w in widths) + "┘")
+        return tbl
 
-    re_row = __import__('re').compile(r'^(.+?) — Row (\d+) — (.+)$')
-    re_check = __import__('re').compile(r'^(.+?) — (.+)$')
+    pages = {1: [], 2: [], 3: [], 4: [], 5: [], 6: []}
 
-    for page_num in sorted(pages):
-        page_fields = pages[page_num]
-        needs_review = sum(1 for f in page_fields if f.get("needs_clarification"))
+    # Page 1
+    p1 = pages[1]
+    p1.append("I AM THE CHANGE")
+    p1.append("Scholarship Program — Home Visit Questionnaire")
+    p1.append("Team Everest | Confidential")
+    p1.append("─" * C_WIDTH)
+    p1.append(f"Volunteer Name: {get_val('Volunteer Name'):<25} Co-Volunteer Name: {get_val('Co-Volunteer Name'):<25} Date: {get_val('Date of Visit')}")
+    p1.append("─" * C_WIDTH)
+    p1.append("Section 1 — Student Profile")
+    p1.append("")
+    p1.append("1.1. Application ID")
+    p1.append(get_val('1.1 Application ID'))
+    p1.append("")
+    p1.append("1.2. Student Full Name")
+    p1.append(get_val('1.2 Student Full Name'))
+    p1.append("")
+    p1.append(f"1.3. Gender:   {get_radio('1.3 Gender', 'Male')} Male     {get_radio('1.3 Gender', 'Female')} Female     {get_radio('1.3 Gender', 'Others')} Others")
+    p1.append("─" * C_WIDTH)
+    p1.append("Section 2 — Family Background")
+    p1.append("")
+    p1.append(f"2.1. Family Status:   {get_radio('2.1 Family Status', 'Single Parent')} Single Parent     {get_radio('2.1 Family Status', 'Parentless')} Parentless     {get_radio('2.1 Family Status', 'Having both parents')} Having both parents")
+    p1.append("")
+    p1.append("2.2. Relationship Details (if applicable)")
+    r_rows = []
+    for i in range(1, 4):
+        r1 = get_table_val('2.2 Relationship Details', i, 'Year of Death / Separation')
+        r2 = get_table_val('2.2 Relationship Details', i, 'Reason for Death / Separation')
+        if r1 or r2:
+            r_rows.append([r1, r2])
+    if r_rows:
+        p1.extend(format_table(["Year of Death / Separation", "Reason for Death / Separation"], [0.35, 0.65], r_rows))
+    else:
+        p1.append("No relationship details recorded.")
 
-        by_sec: dict[int | None | str, list[dict]] = {}
-        for f in page_fields:
-            sec = f.get("section_number")
-            by_sec.setdefault("header" if sec is None else sec, []).append(f)
+    # Page 2
+    p2 = pages[2]
+    p2.append("2.3. Is Father/ Mother photograph kept at home?")
+    p2.append(f"  {get_radio('2.3 Is Father/Mother photograph kept at home?', 'Yes')} Yes     {get_radio('2.3 Is Father/Mother photograph kept at home?', 'No')} No")
+    p2.append("")
+    p2.append("2.4. Government ID Verified")
+    p2.append(f"  {get_check('2.4 Government ID Verified — Aadhaar Card')} Aadhaar Card    {get_check('2.4 Government ID Verified — Ration Card')} Ration Card    {get_check('2.4 Government ID Verified — Driving Licence')} Driving Licence    {get_check('2.4 Government ID Verified — Voter ID')} Voter ID    {get_check('2.4 Government ID Verified — Other')} Other")
+    p2.append("")
+    p2.append("2.5. Family Members")
+    f_rows = []
+    for i in range(1, 7):
+        c1 = get_table_val('2.5 Family Members', i, 'Name')
+        c2 = get_table_val('2.5 Family Members', i, 'Age')
+        c3 = get_table_val('2.5 Family Members', i, 'Education')
+        c4 = get_table_val('2.5 Family Members', i, 'Occupation')
+        c5 = get_table_val('2.5 Family Members', i, 'Annual Income')
+        if any([c1, c2, c3, c4, c5]):
+            f_rows.append([c1, c2, c3, c4, c5])
+    if f_rows:
+        p2.extend(format_table(["Name", "Age", "Education", "Occupation", "Annual Income"], [0.3, 0.1, 0.2, 0.2, 0.2], f_rows))
+    else:
+        p2.append("No family members recorded.")
+    p2.append("─" * C_WIDTH)
+    p2.append("Section 3 — Housing Condition")
+    p2.append("")
+    p2.append(f"3.1. House Ownership:   {get_radio('3.1 House Ownership', 'Own')} Own     {get_radio('3.1 House Ownership', 'Rented')} Rented")
+    p2.append(f"3.1.1 If rented, what is the rent amount?  {get_val('3.1.1 If rented, what is the rent amount?')}")
+    p2.append("")
+    p2.append(f"3.2. Type of Home:   {get_check('3.2 Type of Home — Individual')} Individual   {get_check('3.2 Type of Home — Private Apartment')} Private Apartment   {get_check('3.2 Type of Home — Housing Board')} Housing Board   {get_check('3.2 Type of Home — Line House')} Line House   {get_check('3.2 Type of Home — Others')} Others")
 
-        sec_keys = sorted(
-            (k for k in by_sec if k != "header"),
-            key=lambda k: int(k) if isinstance(k, int) else 0,
-        )
-        ordered = (["header"] if "header" in by_sec else []) + sec_keys
+    # Page 3
+    p3 = pages[3]
+    p3.append("3.3. Type of Ceiling")
+    p3.append(f"  {get_check('3.3 Type of Ceiling — Roof')} Roof (Kurai)    {get_check('3.3 Type of Ceiling — Tiled')} Tiled    {get_check('3.3 Type of Ceiling — Asbestos')} Asbestos / Sheet    {get_check('3.3 Type of Ceiling — Concrete')} Concrete")
+    p3.append("")
+    p3.append(f"3.4. Number of Bedrooms:  {get_val('3.4 Number of Bedrooms')}")
+    p3.append(f"3.4.1 Type of Bedroom:   {get_radio('3.4.1 Type of Bedroom', 'Separate Bedroom')} Separate Bedroom     {get_radio('3.4.1 Type of Bedroom', 'No Separate Bedroom')} No Separate Bedroom")
+    p3.append("")
+    p3.append(f"3.5. Bathroom:   {get_radio('3.5 Bathroom', 'Separate')} Separate     {get_radio('3.5 Bathroom', 'Common for Apartment')} Common for Apartment")
+    p3.append("")
+    p3.append(f"3.6. Kitchen Type:   {get_check('3.6 Kitchen Type — Separate Kitchen')} Separate Kitchen     {get_check('3.6 Kitchen Type — Hall with Kitchen')} Hall with Kitchen")
+    p3.append("─" * C_WIDTH)
+    p3.append("Section 4 — Financial Background")
+    p3.append("")
+    p3.append("4.1. Assets at Home (tick all that apply)")
+    p3.append(f"  {get_check('4.1 Assets at Home — Washing Machine')} Washing Machine   {get_check('4.1 Assets at Home — Fridge')} Fridge   {get_check('4.1 Assets at Home — AC')} AC   {get_check('4.1 Assets at Home — LED TV')} LED TV   {get_check('4.1 Assets at Home — Two-Wheeler')} Two-Wheeler   {get_check('4.1 Assets at Home — Car')} Car")
+    p3.append(f"  {get_check('4.1 Assets at Home — Smartphone')} Smartphone   {get_check('4.1 Assets at Home — Separate Wi-Fi')} Separate Wi-Fi   {get_check('4.1 Assets at Home — Others')} Others")
+    p3.append("")
+    p3.append(f"4.2. Amount of Last Electricity Bill:  {get_val('4.2 Amount of Last Electricity Bill')}")
+    p3.append("")
+    p3.append("4.3. Do you own any other assets/properties in the name of grandparents, parents, or student?")
+    p3.append(f"  {get_radio('4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?', 'Yes')} Yes     {get_radio('4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?', 'No')} No")
 
-        # Clean, aligned page header
-        if needs_review:
-            suffix_colored = f" \033[91m\033[1m[⚠ {needs_review}]\033[0m"
-            suffix_clean = f" [⚠ {needs_review}]"
-        else:
-            suffix_colored = " \033[92m[✓]\033[0m"
-            suffix_clean = " [✓]"
-        prefix = f" \033[1mPage {page_num}\033[0m"
-        prefix_clean = f" Page {page_num}"
-        pad = C_WIDTH - 6 - len(prefix_clean) - len(suffix_clean)
-        report_lines.append(f" \033[90m──\033[0m{prefix}{suffix_colored} \033[90m{'─' * pad}\033[0m")
+    # Page 4
+    p4 = pages[4]
+    p4.append("4.3.1 If yes, list their properties:")
+    prop_rows = []
+    for i in range(1, 4):
+        c1 = get_table_val('4.3.1', i, 'Property Description')
+        c2 = get_table_val('4.3.1', i, 'Owner Name')
+        c3 = get_table_val('4.3.1', i, 'Approximate Value')
+        if any([c1, c2, c3]):
+            prop_rows.append([c1, c2, c3])
+    if prop_rows:
+        p4.extend(format_table(["Property Description", "Owner Name", "Approximate Value"], [0.4, 0.3, 0.3], prop_rows))
+    else:
+        p4.append("No properties recorded.")
+    p4.append("")
+    p4.append("4.4. Apart from your job, is there any other source of income?")
+    p4.append(f"  {get_radio('4.4 Apart from your job, is there any other source of income?', 'Yes')} Yes     {get_radio('4.4 Apart from your job, is there any other source of income?', 'No')} No")
+    p4.append("")
+    p4.append("4.4.1 If yes, list other sources of income:")
+    inc_rows = []
+    for i in range(1, 4):
+        c1 = get_table_val('4.4.1', i, 'Source of Income')
+        c2 = get_table_val('4.4.1', i, 'Amount')
+        if any([c1, c2]):
+            inc_rows.append([c1, c2])
+    if inc_rows:
+        p4.extend(format_table(["Source of Income", "Amount"], [0.65, 0.35], inc_rows))
+    else:
+        p4.append("No other sources of income recorded.")
+    p4.append("")
+    p4.append(f"4.5. Income Type:   {get_radio('4.5 Income Type', 'Monthly')} Monthly     {get_radio('4.5 Income Type', 'Daily')} Daily     {get_radio('4.5 Income Type', 'Weekly')} Weekly     {get_radio('4.5 Income Type', 'Ad-Hoc')} Ad-Hoc")
+    p4.append("")
+    p4.append("4.6. Do you have any loans?")
+    p4.append(f"  {get_radio('4.6 Do you have any loans?', 'Yes')} Yes     {get_radio('4.6 Do you have any loans?', 'No')} No")
+    p4.append("")
+    p4.append("4.6.1 If yes, share Loan Purpose, Amount Taken, and Pending Loan Amount:")
+    loan_rows = []
+    for i in range(1, 5):
+        c1 = get_table_val('4.6.1', i, 'Loan Purpose')
+        c2 = get_table_val('4.6.1', i, 'Loan Amount Taken')
+        c3 = get_table_val('4.6.1', i, 'Pending Loan Amount')
+        if any([c1, c2, c3]):
+            loan_rows.append([str(i), c1, c2, c3])
+    if loan_rows:
+        p4.extend(format_table(["Sr. No.", "Loan Purpose", "Loan Amount Taken", "Pending Loan Amount"], [0.1, 0.4, 0.25, 0.25], loan_rows))
+    else:
+        p4.append("No loans recorded.")
 
-        for sec_key in ordered:
-            sec_fields = by_sec[sec_key]
-            sec_title = "Header" if sec_key == "header" else f"Section {sec_key}" + (f" — {sec_names.get(sec_key, '').rstrip('*').strip()}" if sec_names.get(sec_key) else "")
-            
-            # Clean section header line
-            pad_sec = C_WIDTH - 6 - len(sec_title)
-            report_lines.append(f"    \033[1m\033[36m{sec_title}\033[0m \033[90m{'─' * max(pad_sec, 4)}\033[0m")
+    # Page 5
+    p5 = pages[5]
+    p5.append(f"4.7. If you choose any college, how much is the college fee?  {get_val('4.7 If you choose any college, how much is the college fee?')}")
+    p5.append("")
+    p5.append(f"4.8. If the college fee is higher, how will you manage it?  {get_val('4.8 If the college fee is higher, how will you manage it?')}")
+    p5.append("")
+    p5.append(f"4.9. If you do not receive this scholarship, how will you pay the fees?  {get_val('4.9 If you do not receive this scholarship, how will you pay the fees?')}")
+    p5.append("─" * C_WIDTH)
+    p5.append("Section 5 — Health Information")
+    p5.append("")
+    p5.append("5.1. Does the student have any health issues?")
+    p5.append(f"  {get_radio('5.1 Does the student have any health issues?', 'Yes')} Yes     {get_radio('5.1 Does the student have any health issues?', 'No')} No")
+    p5.append("")
+    p5.append(f"5.2. If yes, list the health issues:  {get_val('5.2 If yes, list the health issues:')}")
+    p5.append("─" * C_WIDTH)
+    p5.append("Section 6 — Student Commitment")
+    p5.append("")
+    p5.append(f"6.1. Will you study college for three years without any obstacle?  {get_val('6.1 Will you study college for three years without any obstacle?')}")
+    p5.append("")
+    p5.append(f"6.2. If we have a training program within 15 km from your home, can you come?   {get_radio('6.2 If we have a training program within 15 km from your home, can you come?', 'Yes')} Yes     {get_radio('6.2 If we have a training program within 15 km from your home, can you come?', 'No')} No     {get_radio('6.2 If we have a training program within 15 km from your home, can you come?', 'Maybe')} Maybe")
 
-            tables: dict[str, dict[int, dict[str, str]]] = {}
-            checklists: dict[str, list[tuple[str, str]]] = {}
-            simple: list[dict] = []
+    # Page 6
+    p6 = pages[6]
+    p6.append("6.3. Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?")
+    p6.append(f"  {get_radio('6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?', 'Yes')} Yes     {get_radio('6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?', 'No')} No")
+    p6.append("─" * C_WIDTH)
+    p6.append("Section 7 — Scholarship Information")
+    p6.append("")
+    p6.append(f"7.1. Has the student received or applied for any other scholarships for their UG degree?  {get_val('7.1 Has the student received or applied for any other scholarships for their UG degree?')}")
+    p6.append("─" * C_WIDTH)
+    p6.append("Section 8 — Volunteer Observation")
+    p6.append("")
+    p6.append(f"8.1. What is your opinion about the student, their family members, and their living condition?  {get_val('8.1 What is your opinion about the student, their family members, and their living condition?')}")
+    p6.append("")
+    p6.append(f"8.2. Will you recommend this student for this scholarship?   {get_radio('8.2 Will you recommend this student for this scholarship?', 'Yes')} Yes     {get_radio('8.2 Will you recommend this student for this scholarship?', 'No')} No     {get_radio('8.2 Will you recommend this student for this scholarship?', 'Not Sure')} Not Sure")
+    p6.append("")
+    p6.append(f"8.3. Any other comments you want to share?  {get_val('8.3 Any other comments you want to share?')}")
 
-            for f in sec_fields:
-                label = f.get("label", "?")
-                value_raw = f.get("value") or ""
-                value = value_raw or "—"
+    # Center-alignment configurations
+    import os
+    try:
+        term_width = os.get_terminal_size().columns
+    except Exception:
+        term_width = 120
+    indent = max((term_width - W) // 2, 0)
+    ind_str = " " * indent
 
-                m = re_row.match(label)
-                if m:
-                    table_name = m.group(1)
-                    row_num = int(m.group(2))
-                    col_name = m.group(3)
-                    tables.setdefault(table_name, {}).setdefault(row_num, {})[col_name] = value
-                    continue
+    print(f"\n{ind_str}\033[1m📄 {display_name}\033[0m\n")
+    for page_num in sorted(pages.keys()):
+        page_title = f"Page {page_num} of 6"
+        top_border = f"\033[90m┌── {page_title} " + "─" * (W - 8 - len(page_title)) + "┐\033[0m"
+        bottom_border = "\033[90m└" + "─" * (W - 2) + "┘\033[0m"
+        
+        print(f"{ind_str}{top_border}")
+        for line in pages[page_num]:
+            print(f"{ind_str}\033[90m│\033[0m {pad_line(line, C_WIDTH)} \033[90m│\033[0m")
+        print(f"{ind_str}{bottom_border}")
+        print()
 
-                m = re_check.match(label)
-                if m and label not in known_labels:
-                    group_name = m.group(1)
-                    option = m.group(2)
-                    checklists.setdefault(group_name, []).append((option, value))
-                    continue
-
-                simple.append(f)
-
-            # Suppress all checklist parents from simple list
-            agg_labels = set(checklists.keys())
-
-            for f in simple:
-                label = f.get("label", "?")
-                val = f.get("value") or "—"
-
-                if label in agg_labels:
-                    continue
-
-                if val == "—":
-                    val_display = f"\033[90m—\033[0m"
-                elif f.get("needs_clarification"):
-                    val_display = f"\033[93m{val} (needs review)\033[0m"
-                else:
-                    val_display = val
-
-                # Handle multi-line layouts nicely
-                if len(label) > 40 and len(str(val)) > 15:
-                    report_lines.append(f"      {label}")
-                    lines = str(val_display).split('\n')
-                    for line in lines:
-                        report_lines.append(f"        {line}")
-                else:
-                    lines = str(val_display).split('\n')
-                    report_lines.append(f"      {label:<40} {lines[0]}")
-                    for extra_line in lines[1:]:
-                        report_lines.append(f"{' ' * 47}{extra_line}")
-
-            for group_name, options in checklists.items():
-                if not options:
-                    continue
-                max_opt = max(len(opt) for opt, _ in options)
-                
-                # Check status counting
-                checked_count = sum(1 for _, v in options if "[✓]" in _checkbox_bracket(v))
-
-                if sum(len(opt) for opt, _ in options) < 30:
-                    parts = []
-                    for option, value in options:
-                        bracket = _checkbox_bracket(value)
-                        if "[✓]" in bracket:
-                            sym = f"\033[92m✓\033[0m"
-                        elif "[✗]" in bracket:
-                            sym = f"\033[91m✗\033[0m"
-                        else:
-                            sym = f"\033[90m·\033[0m"
-                        parts.append(f"{option} {sym}")
-                    report_lines.append(f"      {group_name}  \033[90m({checked_count} checked)\033[0m  {'  '.join(parts)}")
-                else:
-                    report_lines.append(f"      {group_name}  \033[90m({checked_count} checked)\033[0m")
-                    for option, value in options:
-                        bracket = _checkbox_bracket(value)
-                        if "[✓]" in bracket:
-                            bracket_display = f"\033[92m[✓]\033[0m"
-                        elif "[✗]" in bracket:
-                            bracket_display = f"\033[91m[✗]\033[0m"
-                        else:
-                            bracket_display = f"\033[90m{bracket}\033[0m"
-                        report_lines.append(f"        {option:{max_opt}}  {bracket_display}")
-
-            for table_name, rows in tables.items():
-                col_order: list[str] = []
-                for rn in sorted(rows):
-                    for c in rows[rn]:
-                        if c not in col_order:
-                            col_order.append(c)
-                
-                sr_col = "Sr. No."
-                col_order = [sr_col] + col_order
-                col_widths = []
-                for c in col_order:
-                    if c == sr_col:
-                        max_val = max(len(str(rn)) for rn in rows) if rows else 3
-                        col_widths.append(max(len(c), max_val))
-                    else:
-                        max_val = max(len(str(rows[rn].get(c, "")).replace("\r", "").replace("\n", " ")) for rn in rows) if rows else 0
-                        col_widths.append(max(len(c), max_val))
-
-                report_lines.append("")
-                report_lines.append(f"      \033[4m{table_name}\033[0m  \033[90m({len(rows)} rows)\033[0m")
-                
-                # Unicode box-drawing aligned table layout
-                top_border = "\033[90m┌" + "┬".join("─" * (w + 2) for w in col_widths) + "┐\033[0m"
-                header_row = "\033[90m│\033[0m" + "│".join(f" \033[1m{c.ljust(col_widths[i])}\033[0m " for i, c in enumerate(col_order)) + "\033[90m│\033[0m"
-                mid_border = "\033[90m├" + "┼".join("─" * (w + 2) for w in col_widths) + "┤\033[0m"
-                bottom_border = "\033[90m└" + "┴".join("─" * (w + 2) for w in col_widths) + "┘\033[0m"
-
-                report_lines.append(f"        {top_border}")
-                report_lines.append(f"        {header_row}")
-                report_lines.append(f"        {mid_border}")
-                for rn in sorted(rows):
-                    row_cells = []
-                    for i, c in enumerate(col_order):
-                        val = str(rn) if c == sr_col else str(rows[rn].get(c, "—"))
-                        val_clean = val.replace("\r", "").replace("\n", " ")
-                        row_cells.append(f" {val_clean.ljust(col_widths[i])} ")
-                    row_str = "\033[90m│\033[0m" + "\033[90m│\033[0m".join(row_cells) + "\033[90m│\033[0m"
-                    report_lines.append(f"        {row_str}")
-                report_lines.append(f"        {bottom_border}")
-
-        report_lines.append("")
-        high_conf = sum(1 for f in page_fields if f.get("confidence", 0) >= 90)
-        low_conf = sum(1 for f in page_fields if f.get("confidence", 0) < 70)
-
-        page_details = f"Page {page_num} · {len(page_fields)} fields"
-        if high_conf:
-            page_details += f" · \033[92m{high_conf} high\033[0m"
-        if low_conf:
-            page_details += f" · \033[91m{low_conf} low\033[0m"
-        else:
-            page_details += f" · 0 low"
-
-        remaining = max(C_WIDTH - 4 - visible_len(page_details), 4)
-        report_lines.append(f"  {page_details} \033[90m{'─' * remaining}\033[0m")
-
-    # Print the border container layout
-    top_box = "\033[90m┌" + "─" * (W - 2) + "┐\033[0m"
-    bottom_box = "\033[90m└" + "─" * (W - 2) + "┘\033[0m"
-    
-    print(f"\n{top_box}")
-    for line in report_lines:
-        print(f"\033[90m│\033[0m {pad_line(line, C_WIDTH)} \033[90m│\033[0m")
-    print(f"{bottom_box}\n")
+    raw_entries = []
+    for f in fields:
+        label = f.get("label", "")
+        value = str(f.get("value", "")).strip()
+        if label and value:
+            raw_entries.append(f"  {label}: {value}")
+    if raw_entries:
+        top_border = f"\033[90m┌── Extracted Fields " + "─" * (W - 23) + "┐\033[0m"
+        bottom_border = "\033[90m└" + "─" * (W - 2) + "┘\033[0m"
+        print(f"{ind_str}{top_border}")
+        for entry in raw_entries:
+            print(f"{ind_str}\033[90m│\033[0m {pad_line(entry, C_WIDTH)} \033[90m│\033[0m")
+        print(f"{ind_str}{bottom_border}")
+        print()

@@ -388,6 +388,7 @@ _BASE_URLS: dict[str, str] = {
     "deepseek": "https://api.deepseek.com/v1",
     "openrouter": "https://openrouter.ai/api/v1",
     "nvidia": "https://integrate.api.nvidia.com/v1",
+    "datalab": "https://www.datalab.to/api/v1",
 }
 
 
@@ -417,6 +418,10 @@ def get_model_client(role: str = "primary") -> ModelClient:
     if provider == "chandra-2":
         from src.chandra_client import ChandraOcrClient
         return ChandraOcrClient(api_key=api_key, base_url=base_url)
+
+    if provider == "datalab":
+        from src.datalab_client import DatalabOcrClient
+        return DatalabOcrClient(api_key=api_key, model=model, base_url=base_url)
 
     if provider == "gemini":
         logger.info("[%s] Using Gemini: %s  base_url=%s", role, model, base_url)

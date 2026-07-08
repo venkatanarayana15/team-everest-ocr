@@ -365,30 +365,6 @@ class ExtractionPipeline:
             except Exception:
                 num_pages = 0
 
-        # If primary provider is Gemini or we only have 1 page, run sequentially.
-        # Otherwise, run page-by-page extractions in parallel for a massive speedup.
-        if not self.primary_client.needs_images or getattr(self.primary_client, 'provider', '') == "gemini" or num_pages <= 1:
-            if num_pages > 1:
-                prompt = (
-                    f"You are examining all {num_pages} pages of the Home Visit Questionnaire. "
-                    f"Each image below is labeled with its page number.\n\n"
-                    f"RULES:\n"
-                    f"1. Extract ALL fields visible across ALL pages.\n"
-                    f"2. Set the 'page' field to the page number where each field physically appears.\n"
-                    f"3. If a field is NOT visible (cropped/blank/hidden), output value=\"\" with 0 confidence.\n\n"
-                    f"{PRIMARY_EXTRACTION_PROMPT}"
-                )
-            else:
-                prompt = PRIMARY_EXTRACTION_PROMPT
-
-            data, token_usage = await self.primary_client.extract_structured(
-                pdf_path, page_images, prompt
-            )
-            token_usage["calls"] = 1
-            return data, token_usage
-
-        # Parallel extraction for vision providers (e.g., OpenAI). Chandra uses sequential path.
-
         def build_page_prompt(page: int) -> str:
             sections_on_page = {
                 1: [{"number": 1, "name": "Student Profile", "page": 1}, {"number": 2, "name": "Family Background", "page": 1}],
@@ -398,7 +374,7 @@ class ExtractionPipeline:
                 5: [{"number": 4, "name": "Financial Background", "page": 5}, {"number": 5, "name": "Health Information", "page": 5}, {"number": 6, "name": "Student Commitment", "page": 5}],
                 6: [{"number": 6, "name": "Student Commitment", "page": 6}, {"number": 7, "name": "Scholarship Information", "page": 6}, {"number": 8, "name": "Volunteer Observation", "page": 6}]
             }.get(page, [])
-            
+
             return f'''You are a trusted form extraction engine for Page {page} of the "I Am The Change — Home Visit Questionnaire".
 Output ONLY valid JSON. No markdown fences. No explanations. No commentary. ONLY the JSON object.
 
@@ -445,102 +421,120 @@ FIELD LIST FOR PAGE {page}:
                 cleaned.append(f)
             return cleaned
 
-        logger.info("Starting page-by-page parallel LLM extraction...")
-        tasks = []
-        pages = sorted(page_images.keys())
-        for p in pages:
-            single_page_images = {p: page_images[p]}
-            prompt = build_page_prompt(p)
-            tasks.append(self.primary_client.extract_structured(None, single_page_images, prompt))
+        # Three-way dispatch:
+        #   6 pages + vision provider → parallel per-page extraction (fast, accurate)
+        #   non-6 pages              → sequential all-pages prompt (handles any page count/order)
+        #   1 page or text-only      → single prompt
+        if num_pages == 6 and self.primary_client.needs_images and getattr(self.primary_client, 'provider', '') != "gemini":
+            logger.info("Starting page-by-page parallel LLM extraction for %d pages...", num_pages)
+            tasks = []
+            pages = sorted(page_images.keys())
+            for p in pages:
+                single_page_images = {p: page_images[p]}
+                prompt = build_page_prompt(p)
+                tasks.append(self.primary_client.extract_structured(None, single_page_images, prompt))
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Merge results
-        merged_data = {
-            "sections": [
-                {"number": 1, "name": "Student Profile", "page": 1},
-                {"number": 2, "name": "Family Background", "page": 1},
-                {"number": 3, "name": "Housing Condition", "page": 2},
-                {"number": 4, "name": "Financial Background", "page": 3},
-                {"number": 5, "name": "Health Information", "page": 5},
-                {"number": 6, "name": "Student Commitment", "page": 5},
-                {"number": 7, "name": "Scholarship Information", "page": 6},
-                {"number": 8, "name": "Volunteer Observation", "page": 6}
-            ],
-            "fields": [],
-            "overall_confidence": 0,
-            "clarification_needed": [],
-            "raw_text": "",
-            "markdown_output": ""
-        }
+            merged_data = {
+                "sections": [
+                    {"number": 1, "name": "Student Profile", "page": 1},
+                    {"number": 2, "name": "Family Background", "page": 1},
+                    {"number": 3, "name": "Housing Condition", "page": 2},
+                    {"number": 4, "name": "Financial Background", "page": 3},
+                    {"number": 5, "name": "Health Information", "page": 5},
+                    {"number": 6, "name": "Student Commitment", "page": 5},
+                    {"number": 7, "name": "Scholarship Information", "page": 6},
+                    {"number": 8, "name": "Volunteer Observation", "page": 6}
+                ],
+                "fields": [],
+                "overall_confidence": 0,
+                "clarification_needed": [],
+                "raw_text": "",
+                "markdown_output": ""
+            }
 
-        total_prompt_tokens = 0
-        total_completion_tokens = 0
-        merged_fields = {}
-        raw_text_parts = []
-        markdown_parts = []
-        clarifications = set()
+            total_prompt_tokens = 0
+            total_completion_tokens = 0
+            merged_fields: dict[str, dict] = {}
+            raw_text_parts: list[str] = []
+            markdown_parts: list[str] = []
+            clarifications: set[str] = set()
 
-        for idx, res in enumerate(results):
-            page = pages[idx]
-            if isinstance(res, Exception):
-                logger.error("Parallel extraction failed for page %d: %s — fields on this page will be missing", page, res)
-                continue
-            if not res or not res[0]:
-                logger.warning("Parallel extraction returned no data for page %d — fields on this page will be missing", page)
-                continue
-            data, token_usage = res
-            total_prompt_tokens += token_usage.get("prompt_tokens", 0)
-            total_completion_tokens += token_usage.get("completion_tokens", 0)
-
-            cleaned_fields = clean_labels(data.get("fields", []))
-            for f in cleaned_fields:
-                label = f.get("label")
-                if not label:
+            for idx, res in enumerate(results):
+                page = pages[idx]
+                if isinstance(res, Exception):
+                    logger.error("Parallel extraction failed for page %d: %s", page, res)
                     continue
-                if label not in merged_fields:
-                    merged_fields[label] = f
-                else:
-                    existing = merged_fields[label]
-                    existing_conf = existing.get("confidence", 0)
-                    new_conf = f.get("confidence", 0)
-                    if new_conf > existing_conf:
+                if not res or not res[0]:
+                    logger.warning("Parallel extraction returned no data for page %d", page)
+                    continue
+                data, token_usage = res
+                total_prompt_tokens += token_usage.get("prompt_tokens", 0) or 0
+                total_completion_tokens += token_usage.get("completion_tokens", 0) or 0
+
+                cleaned_fields = clean_labels(data.get("fields", []))
+                for f in cleaned_fields:
+                    label = f.get("label")
+                    if not label:
+                        continue
+                    existing = merged_fields.get(label)
+                    if not existing:
                         merged_fields[label] = f
-                    elif new_conf == existing_conf:
-                        if f.get("value") and not existing.get("value"):
+                    else:
+                        existing_conf = existing.get("confidence", 0) or 0
+                        new_conf = f.get("confidence", 0) or 0
+                        if new_conf > existing_conf or (new_conf == existing_conf and f.get("value") and not existing.get("value")):
                             merged_fields[label] = f
 
-            if data.get("raw_text"):
-                raw_text_parts.append(data["raw_text"])
-            if data.get("markdown_output"):
-                markdown_parts.append(data["markdown_output"])
-            for clar in data.get("clarification_needed", []):
-                if " [" in clar:
-                    clar = clar.split(" [")[0].strip()
-                elif "[" in clar:
-                    clar = clar.split("[")[0].strip()
-                clarifications.add(clar)
+                if data.get("raw_text"):
+                    raw_text_parts.append(data["raw_text"])
+                if data.get("markdown_output"):
+                    markdown_parts.append(data["markdown_output"])
+                for clar in data.get("clarification_needed", []):
+                    if " [" in clar:
+                        clar = clar.split(" [")[0].strip()
+                    elif "[" in clar:
+                        clar = clar.split("[")[0].strip()
+                    clarifications.add(clar)
 
-        merged_data["fields"] = list(merged_fields.values())
-        merged_data["clarification_needed"] = list(clarifications)
-        merged_data["raw_text"] = "\n\n".join(raw_text_parts)
-        merged_data["markdown_output"] = "\n\n".join(markdown_parts)
+            merged_data["fields"] = list(merged_fields.values())
+            merged_data["clarification_needed"] = list(clarifications)
+            merged_data["raw_text"] = "\n\n".join(raw_text_parts)
+            merged_data["markdown_output"] = "\n\n".join(markdown_parts)
 
-        # Calculate average confidence
-        all_confidences = [f.get("confidence", 0) for f in merged_data["fields"] if f.get("confidence") is not None]
-        if all_confidences:
-            merged_data["overall_confidence"] = int(sum(all_confidences) / len(all_confidences))
+            all_confidences = [f.get("confidence", 0) for f in merged_data["fields"] if f.get("confidence") is not None]
+            merged_data["overall_confidence"] = int(sum(all_confidences) / len(all_confidences)) if all_confidences else 0
+
+            token_usage = {
+                "prompt_tokens": total_prompt_tokens,
+                "completion_tokens": total_completion_tokens,
+                "total_tokens": total_prompt_tokens + total_completion_tokens,
+                "calls": len(tasks)
+            }
+            logger.info("Parallel extraction merged: %d fields (confidence=%d%%, tokens=%s)",
+                        len(merged_data["fields"]), merged_data["overall_confidence"], token_usage)
+            return merged_data, token_usage
+
+        # Sequential all-pages extraction for non-standard page counts/orders
+        if num_pages > 1:
+            prompt = (
+                f"You are examining all {num_pages} pages of the Home Visit Questionnaire. "
+                f"Each image below is labeled with its page number.\n\n"
+                f"RULES:\n"
+                f"1. Extract ALL fields visible across ALL pages.\n"
+                f"2. Set the 'page' field to the page number where each field physically appears.\n"
+                f"3. If a field is NOT visible (cropped/blank/hidden), output value=\"\" with 0 confidence.\n\n"
+                f"{PRIMARY_EXTRACTION_PROMPT}"
+            )
         else:
-            merged_data["overall_confidence"] = 0
+            prompt = PRIMARY_EXTRACTION_PROMPT
 
-        token_usage = {
-            "prompt_tokens": total_prompt_tokens,
-            "completion_tokens": total_completion_tokens,
-            "total_tokens": total_prompt_tokens + total_completion_tokens,
-            "calls": len(tasks)
-        }
-        logger.info("Parallel extraction merged: %d fields (tokens: %s)", len(merged_data["fields"]), token_usage)
-        return merged_data, token_usage
+        data, token_usage = await self.primary_client.extract_structured(
+            pdf_path, page_images, prompt
+        )
+        token_usage["calls"] = 1
+        return data, token_usage
 
     # ── Stage 3b: Merge (enhanced with position_hint + confidence weighting) ──
 
@@ -585,7 +579,7 @@ FIELD LIST FOR PAGE {page}:
         prefix: str = "",
     ) -> list[StructuredField]:
         fields: list[StructuredField] = []
-        raw_fields = model_data.get("fields", [])
+        raw_fields = [f for f in model_data.get("fields", []) if isinstance(f, dict)]
 
         pages_in_fields = sorted({gf.get("page", 1) for gf in raw_fields})
         lines_by_page: dict[int, list[TextLine]] = {

@@ -14,8 +14,9 @@ from pathlib import Path
 
 def _suppress_interrupt_signals():
     def handler(sig, frame):
+        import os as _os
         print("\nINFO:     Server stopped gracefully.")
-        sys.exit(0)
+        _os._exit(0)
     try:
         signal.signal(signal.SIGINT, handler)
         signal.signal(signal.SIGTERM, handler)
@@ -146,6 +147,7 @@ try:
         get_pool,
         close_pool,
         upsert_ocr_document,
+        get_result_by_file_hash,
     )
     DB_AVAILABLE = True
 except ImportError as e:
@@ -489,6 +491,25 @@ async def upload(file: UploadFile = File(...)):
         file_hash = hashlib.sha256(content).hexdigest()
         file_size = len(content)
 
+        if DB_AVAILABLE:
+            try:
+                existing = await get_result_by_file_hash(file_hash)
+                if existing:
+                    existing_job_id = existing.get("job_id")
+                    logger.info(
+                        "Dedup hit for hash=%s — returning existing job_id=%s",
+                        file_hash[:12], existing_job_id,
+                    )
+                    return {
+                        "job_id": existing_job_id,
+                        "status": "duplicate",
+                        "input_type": "pdf",
+                        "dedup": True,
+                        "message": "This file has already been processed",
+                    }
+            except Exception as e:
+                logger.warning("Dedup check failed for hash=%s: %s — proceeding", file_hash[:12], e)
+
         job_id, job_dir = await _create_job_dir(file.filename, "PDF uploaded, starting pipeline...")
 
         pdf_path = job_dir / "input.pdf"
@@ -826,13 +847,22 @@ async def get_page_image(job_id: str, page_num: int, width: int = 0, original: i
 
         if idx == -1:
             for sub in job_dir.iterdir():
-                if sub.is_dir() and sub.name.startswith("pdf_"):
-                    orig_path = sub / "original_name.txt"
-                    if orig_path.exists() and orig_path.read_text().strip() == pdf_name:
-                        pages_dir = sub / "pages"
-                        break
+                if sub.is_dir():
+                    if sub.name.startswith("pdf_"):
+                        orig_path = sub / "original_name.txt"
+                        if orig_path.exists() and orig_path.read_text().strip() == pdf_name:
+                            pages_dir = sub / "pages"
+                            break
+                    elif sub.name.isdigit():
+                        orig_path = sub / "original_name.txt"
+                        if orig_path.exists() and orig_path.read_text().strip() == pdf_name:
+                            pages_dir = sub / "pages"
+                            break
         else:
-            pages_dir = job_dir / f"pdf_{idx}" / "pages"
+            pages_dir = job_dir / str(idx) / "pages"
+
+        logger.info("get_page_image job=%s page=%d pdf_name=%s idx=%s pages_dir=%s",
+                     job_id, page_num, pdf_name, idx, pages_dir)
 
     if not pages_dir.exists():
         raise HTTPException(404, "Pages directory not found")

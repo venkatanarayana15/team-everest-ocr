@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS ocr_documents (
 
     -- Processing metadata
     job_id          TEXT,
+    file_hash       TEXT,
     processing_time DOUBLE PRECISION,
     confidence_score DOUBLE PRECISION,
     num_pdfs        INTEGER,
@@ -91,6 +92,9 @@ UPDATE ocr_documents SET job_id = result_json->>'job_id'
 -- ON CONFLICT (job_id) works in asyncpg/PostgreSQL.
 ALTER TABLE ocr_documents
     ADD CONSTRAINT uq_ocr_documents_job_id UNIQUE (job_id);
+
+ALTER TABLE ocr_documents
+    ADD CONSTRAINT uq_ocr_documents_file_hash UNIQUE (file_hash);
 
 -- Trigger to auto-update updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
