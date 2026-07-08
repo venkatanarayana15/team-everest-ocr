@@ -511,9 +511,7 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                     res["input_type"] = "batch_" + input_type
                     res["processing_time"] = round(time.time() - t0, 2)
 
-                    # Save individual result to DB (each batch item gets its own row)
-                    _save_results(pdf_job_dir, res, pdf_job_dir.name)
-                    await _save_to_db(pdf_job_dir)
+                
 
                     if "zoho_req" in pdf_info:
                         from src.zoho_integration import run_zoho_writeback_for_batch_item
