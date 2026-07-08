@@ -55,8 +55,9 @@ EXTRACT_SCHEMA: dict = {
         },
         "description": "2.5 Family Members table",
     },
-    "house_ownership": {"type": "string", "description": "3.1 House Ownership: Own | Rented"},
-    "rent_amount": {"type": "string", "description": "3.1.1 If rented, what is the rent amount?"},
+    "house_ownership_own": {"type": "boolean", "description": "3.1 House Ownership — Own"},
+    "house_ownership_rented": {"type": "boolean", "description": "3.1 House Ownership — Rented"},
+    "rent_amount": {"type": "string", "description": "3.1.1 Rent amount or ownership notes (capture any text written, even if Own is selected)"},
     "home_type_individual": {"type": "boolean", "description": "3.2 Type of Home — Individual"},
     "home_type_private_apartment": {"type": "boolean", "description": "3.2 Type of Home — Private Apartment"},
     "home_type_housing_board": {"type": "boolean", "description": "3.2 Type of Home — Housing Board"},
@@ -67,7 +68,8 @@ EXTRACT_SCHEMA: dict = {
     "ceiling_asbestos": {"type": "boolean", "description": "3.3 Type of Ceiling — Asbestos / Sheet"},
     "ceiling_concrete": {"type": "boolean", "description": "3.3 Type of Ceiling — Concrete"},
     "number_of_bedrooms": {"type": "string", "description": "3.4 Number of Bedrooms"},
-    "type_of_bedroom": {"type": "string", "description": "3.4.1 Type of Bedroom: Separate Bedroom | No Separate Bedroom"},
+    "bedroom_separate": {"type": "boolean", "description": "3.4.1 Type of Bedroom — Separate Bedroom"},
+    "bedroom_no_separate": {"type": "boolean", "description": "3.4.1 Type of Bedroom — No Separate Bedroom"},
     "bathroom": {"type": "string", "description": "3.5 Bathroom: Separate | Common for Apartment"},
     "kitchen_separate": {"type": "boolean", "description": "3.6 Kitchen Type — Separate Kitchen"},
     "kitchen_hall": {"type": "boolean", "description": "3.6 Kitchen Type — Hall with Kitchen"},
@@ -79,9 +81,10 @@ EXTRACT_SCHEMA: dict = {
     "asset_car": {"type": "boolean", "description": "4.1 Assets at Home — Car"},
     "asset_smartphone": {"type": "boolean", "description": "4.1 Assets at Home — Smartphone"},
     "asset_separate_wifi": {"type": "boolean", "description": "4.1 Assets at Home — Separate Wi-Fi"},
-    "asset_others": {"type": "boolean", "description": "4.1 Assets at Home — Others"},
+    "asset_others": {"type": "string", "description": "4.1 Assets at Home — Others (capture full text if user wrote something after 'Others', e.g. 'Others: computer'). IMPORTANT: include the 'Others:' prefix"},
     "last_electricity_bill": {"type": "string", "description": "4.2 Amount of Last Electricity Bill"},
-    "owns_other_assets": {"type": "string", "description": "4.3 Do you own any other assets?: Yes | No"},
+    "owns_other_assets_yes": {"type": "boolean", "description": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes"},
+    "owns_other_assets_no": {"type": "boolean", "description": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No"},
     "other_assets_table": {
         "type": "array",
         "items": {
@@ -151,7 +154,8 @@ SCHEMA_KEY_MAP = {
     "govt_id_driving_licence": {"label": "2.4 Government ID Verified — Driving Licence", "page": 2, "section": 2},
     "govt_id_voter": {"label": "2.4 Government ID Verified — Voter ID", "page": 2, "section": 2},
     "govt_id_other": {"label": "2.4 Government ID Verified — Other", "page": 2, "section": 2},
-    "house_ownership": {"label": "3.1 House Ownership", "page": 2, "section": 3},
+    "house_ownership_own": {"label": "3.1 House Ownership — Own", "page": 2, "section": 3},
+    "house_ownership_rented": {"label": "3.1 House Ownership — Rented", "page": 2, "section": 3},
     "rent_amount": {"label": "3.1.1 If rented, what is the rent amount?", "page": 2, "section": 3},
     "home_type_individual": {"label": "3.2 Type of Home — Individual", "page": 2, "section": 3},
     "home_type_private_apartment": {"label": "3.2 Type of Home — Private Apartment", "page": 2, "section": 3},
@@ -163,7 +167,8 @@ SCHEMA_KEY_MAP = {
     "ceiling_asbestos": {"label": "3.3 Type of Ceiling — Asbestos / Sheet", "page": 3, "section": 3},
     "ceiling_concrete": {"label": "3.3 Type of Ceiling — Concrete", "page": 3, "section": 3},
     "number_of_bedrooms": {"label": "3.4 Number of Bedrooms", "page": 3, "section": 3},
-    "type_of_bedroom": {"label": "3.4.1 Type of Bedroom", "page": 3, "section": 3},
+    "bedroom_separate": {"label": "3.4.1 Type of Bedroom — Separate Bedroom", "page": 3, "section": 3},
+    "bedroom_no_separate": {"label": "3.4.1 Type of Bedroom — No Separate Bedroom", "page": 3, "section": 3},
     "bathroom": {"label": "3.5 Bathroom", "page": 3, "section": 3},
     "kitchen_separate": {"label": "3.6 Kitchen Type — Separate Kitchen", "page": 3, "section": 3},
     "kitchen_hall": {"label": "3.6 Kitchen Type — Hall with Kitchen", "page": 3, "section": 3},
@@ -177,7 +182,8 @@ SCHEMA_KEY_MAP = {
     "asset_separate_wifi": {"label": "4.1 Assets at Home — Separate Wi-Fi", "page": 3, "section": 4},
     "asset_others": {"label": "4.1 Assets at Home — Others", "page": 3, "section": 4},
     "last_electricity_bill": {"label": "4.2 Amount of Last Electricity Bill", "page": 4, "section": 4},
-    "owns_other_assets": {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?", "page": 4, "section": 4},
+    "owns_other_assets_yes": {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes", "page": 4, "section": 4},
+    "owns_other_assets_no": {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No", "page": 4, "section": 4},
     "has_other_income": {"label": "4.4 Apart from your job, is there any other source of income?", "page": 4, "section": 4},
     "income_type": {"label": "4.5 Income Type", "page": 4, "section": 4},
     "has_loans": {"label": "4.6 Do you have any loans?", "page": 4, "section": 4},
@@ -258,7 +264,7 @@ def convert_extract_response(response: dict) -> dict:
                 continue
             elif clean != value:
                 continue
-        if key == "home_type_others" and value and value not in ("\u2713", "\u2717", ""):
+        if key in ("home_type_others", "asset_others") and value and value not in ("\u2713", "\u2717", ""):
             if not value.lower().startswith("others"):
                 value = f"Others: {value}"
 

@@ -108,7 +108,8 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "2.5 Family Members — Row 1 — Occupation", "section_number": 2, "page": 2},
     {"label": "2.5 Family Members — Row 1 — AnnualIncome", "section_number": 2, "page": 2},
     # Section 3 — Housing Condition (Page 2: 3.1-3.2)
-    {"label": "3.1 House Ownership", "section_number": 3, "page": 2},
+    {"label": "3.1 House Ownership — Own", "section_number": 3, "page": 2},
+    {"label": "3.1 House Ownership — Rented", "section_number": 3, "page": 2},
     {"label": "3.1.1 If rented, what is the rent amount?", "section_number": 3, "page": 2},
     {"label": "3.2 Type of Home — Individual", "section_number": 3, "page": 2},
     {"label": "3.2 Type of Home — Private Apartment", "section_number": 3, "page": 2},
@@ -122,8 +123,8 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "3.3 Type of Ceiling — Asbestos / Sheet", "section_number": 3, "page": 3},
     {"label": "3.3 Type of Ceiling — Concrete", "section_number": 3, "page": 3},
     {"label": "3.4 Number of Bedrooms", "section_number": 3, "page": 3},
-    {"label": "3.4.1 Type of Bedroom - Separate Bedroom", "section_number": 3, "page": 3},
-    {"label": "3.4.1 Type of Bedroom - No Separate Bedroom", "section_number": 3, "page": 3},
+    {"label": "3.4.1 Type of Bedroom — Separate Bedroom", "section_number": 3, "page": 3},
+    {"label": "3.4.1 Type of Bedroom — No Separate Bedroom", "section_number": 3, "page": 3},
     {"label": "3.5 Bathroom - Separate", "section_number": 3, "page": 3},
     {"label": "3.5 Bathroom - Common for Apartment", "section_number": 3, "page": 3},
     {"label": "3.6 Kitchen Type — Separate Kitchen", "section_number": 3, "page": 3},
@@ -139,7 +140,8 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "4.1 Assets at Home(tick all that apply) - Separate Wi-Fi", "section_number": 4, "page": 3},
     {"label": "4.1 Assets at Home(tick all that apply) - Others:", "section_number": 4, "page": 3},
     {"label": "4.2 Amount of Last Electricity Bill", "section_number": 4, "page": 3},
-    {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?", "section_number": 4, "page": 3},
+    {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes", "section_number": 4, "page": 3},
+    {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No", "section_number": 4, "page": 3},
     # ── Page 4 ──
     # Section 4 — Financial Background (Page 4: 4.4-4.7)
     {"label": "4.3.1 If Yes, list their properties: - Property Description", "section_number": 4, "page": 4},
@@ -947,5 +949,3 @@ FIELD LIST FOR PAGE {page}:
                 extracted_by="template_fill",
             ))
         return fields
-
-

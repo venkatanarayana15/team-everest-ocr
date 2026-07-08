@@ -115,7 +115,8 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
   2.5 Family Members                                    [table — columns: Name, Age, Education, Occupation, Annual Income]  ← pg 2
 
 --- Section 3 — Housing Condition (Pages 2-3) — 12 fields ---
-  3.1 House Ownership                     [radio → Own | Rented]          ← pg 2
+  3.1 House Ownership — Own               [checkbox]                     ← pg 2
+  3.1 House Ownership — Rented            [checkbox]
   3.1.1 If rented, what is the rent amount? [text]                        ← pg 2
   3.2 Type of Home — Individual           [checkbox]                      ← pg 2
   3.2 Type of Home — Private Apartment    [checkbox]
@@ -127,7 +128,8 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
   3.3 Type of Ceiling — Asbestos / Sheet   [checkbox]
   3.3 Type of Ceiling — Concrete          [checkbox]
   3.4 Number of Bedrooms                  [text]                          ← pg 3
-  3.4.1 Type of Bedroom                   [radio → Separate Bedroom | No Separate Bedroom]
+  3.4.1 Type of Bedroom — Separate Bedroom   [checkbox]
+  3.4.1 Type of Bedroom — No Separate Bedroom [checkbox]
   3.5 Bathroom                            [radio → Separate | Common for Apartment]
   3.6 Kitchen Type — Separate Kitchen     [checkbox]                      ← pg 3
   3.6 Kitchen Type — Hall with Kitchen    [checkbox]
@@ -143,7 +145,8 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
   4.1 Assets at Home — Separate Wi-Fi     [checkbox]
   4.1 Assets at Home — Others             [checkbox]
   4.2 Amount of Last Electricity Bill     [text — numbers only, no ₹, no commas]   ← pg 4
-  4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? [radio → Yes | No]                 ← pg 4
+  4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox]                 ← pg 4
+  4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No   [checkbox]
     4.3.1                             [table — columns: Property Description, Owner Name, Approximate Value]
   4.4 Apart from your job, is there any other source of income? [radio → Yes | No]  ← pg 4
     4.4.1                             [table — columns: Source of Income, Amount]
@@ -329,7 +332,8 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   2.5 Family Members                                    [table — columns: Name, Age, Education, Occupation, Annual Income]
 
 --- Section 3 — Housing Condition (Page 2) — 7 fields ---
-  3.1 House Ownership                     [radio → Own | Rented]
+  3.1 House Ownership — Own               [checkbox]
+  3.1 House Ownership — Rented            [checkbox]
   3.1.1 If rented, what is the rent amount? [text]
   3.2 Type of Home — Individual           [checkbox]
   3.2 Type of Home — Private Apartment    [checkbox]
@@ -344,7 +348,8 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   3.3 Type of Ceiling — Asbestos / Sheet   [checkbox]
   3.3 Type of Ceiling — Concrete          [checkbox]
   3.4 Number of Bedrooms                  [text]
-  3.4.1 Type of Bedroom                   [radio → Separate Bedroom | No Separate Bedroom]
+  3.4.1 Type of Bedroom — Separate Bedroom   [checkbox]
+  3.4.1 Type of Bedroom — No Separate Bedroom [checkbox]
   3.5 Bathroom                            [radio → Separate | Common for Apartment]
   3.6 Kitchen Type — Separate Kitchen     [checkbox]
   3.6 Kitchen Type — Hall with Kitchen    [checkbox]
@@ -360,7 +365,8 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   4.1 Assets at Home — Separate Wi-Fi     [checkbox]
   4.1 Assets at Home — Others             [checkbox]
   4.2 Amount of Last Electricity Bill     [text — numbers only, no ₹, no commas]
-  4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? [radio → Yes | No]
+  4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox]
+  4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No   [checkbox]
 """,
     4: """
 --- Section 4 — Financial Background (Page 4) — 3 fields + two tables ---

@@ -96,6 +96,11 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
     label_map: dict[str, str] = {}
     table_rows: dict[str, dict[int, dict[str, str]]] = {}
 
+    def _is_checked(value: str | None) -> bool:
+        if not isinstance(value, str):
+            return False
+        return value.strip().lower() in ("\u2713", "1", "yes", "true", "y")
+
     for f in fields:
         label = f.get("label", "")
         value = f.get("value", "")
@@ -143,7 +148,10 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
         if val is None:
             continue
         if col in BOOLEAN_COLUMNS:
-            out[col] = val.strip().lower() in ("yes", "true", "1")
+            norm = val.strip().lower()
+            if not norm:
+                continue
+            out[col] = norm in ("yes", "true", "1", "y")
         elif col not in TABLE_PARENT_COLUMNS.values():
             out[col] = val
 
@@ -153,6 +161,34 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
             for row_num in sorted(rows.keys())
         ]
         out[col] = json.dumps(sorted_rows)
+
+    # Derive House Ownership from split checkbox fields (3.1)
+    own_label = "3.1 House Ownership — Own"
+    rent_label = "3.1 House Ownership — Rented"
+    own_checked = _is_checked(label_map.get(own_label))
+    rent_checked = _is_checked(label_map.get(rent_label))
+    if "house_ownership" not in out and own_checked ^ rent_checked:
+        out["house_ownership"] = "Own" if own_checked else "Rented"
+
+    # Derive Type of Bedroom from split checkbox fields (3.4.1)
+    bed_sep_label = "3.4.1 Type of Bedroom — Separate Bedroom"
+    bed_no_label = "3.4.1 Type of Bedroom — No Separate Bedroom"
+    bed_sep_checked = _is_checked(label_map.get(bed_sep_label))
+    bed_no_checked = _is_checked(label_map.get(bed_no_label))
+    if "type_of_bedroom" not in out and bed_sep_checked ^ bed_no_checked:
+        out["type_of_bedroom"] = "Separate Bedroom" if bed_sep_checked else "No Separate Bedroom"
+
+    # Derive owns_other_assets boolean from split checkbox fields (4.3)
+    assets_yes_label = (
+        "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes"
+    )
+    assets_no_label = (
+        "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No"
+    )
+    assets_yes_checked = _is_checked(label_map.get(assets_yes_label))
+    assets_no_checked = _is_checked(label_map.get(assets_no_label))
+    if "owns_other_assets" not in out and assets_yes_checked ^ assets_no_checked:
+        out["owns_other_assets"] = assets_yes_checked
 
     return out
 

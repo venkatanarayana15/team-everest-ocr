@@ -256,10 +256,16 @@ FIELD_TO_ZOHO: dict[str, str] = {
 # The OCR extracts each checkbox option as "{prefix} — {option}" with value "✓"/"✗"
 AGGREGATE_MAP: dict[str, dict[str, str]] = {
     "2.4 Government ID Verified": {"target": "Government_ID_Verified_Ration_Card_Aadhaar_Driving_Licence_Voter_ID", "type": "stringlist"},
+    "3.1 House Ownership": {"target": "House_Ownership", "type": "text"},
     "3.2 Type of Home": {"target": "Type_of_Home", "type": "text"},
     "3.3 Type of Ceiling": {"target": "Type_of_Ceiling", "type": "text"},
     "3.6 Kitchen Type": {"target": "Kitchen_Type", "type": "text"},
     "4.1 Assets at Home": {"target": "Assets_at_Home_tick_all_that_apply", "type": "stringlist"},
+    "3.4.1 Type of Bedroom": {"target": "Type_of_Bedroom", "type": "text"},
+    "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?": {
+        "target": "Do_you_own_any_other_assets_or_properties_in_the_name_of_grandparents_parent_or_student",
+        "type": "text",
+    },
 }
 
 # Map extracted option names to exact values expected by Zoho Creator
@@ -1308,7 +1314,8 @@ async def process_pending_on_startup(base_dir: Path) -> None:
     skip_creator = os.environ.get("SKIP_ZOHO_CREATOR", "").strip().lower() in ("1", "true", "yes")
     if skip_creator:
         csv_path = Path(os.environ.get("ZOHO_CSV_PATH", "tests/fixtures/sample.csv"))
-        pdf_dir = Path(os.environ.get("ZOHO_LOCAL_INPUT_DIR", "tests/fixtures/pdfs"))
+        pdf_dir = Path(os.environ.get("ZOHO_LOCAL_INPUT_DIR", "Test_Batch/1test"))
+        # pdf_dir = Path(os.environ.get("ZOHO_LOCAL_INPUT_DIR", "tests/fixtures/pdfs"))
         print(f"  SKIP_ZOHO_CREATOR=true → CSV: {csv_path}  PDFs: {pdf_dir}\n")
         logger.info("STARTUP: SKIP_ZOHO_CREATOR=true — CSV=%s PDFs=%s", csv_path, pdf_dir)
         return await _process_pending_from_local(base_dir, csv_path, pdf_dir)
