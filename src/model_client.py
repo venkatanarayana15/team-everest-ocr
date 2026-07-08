@@ -4,8 +4,13 @@ import json
 import logging
 import os
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 import time
 import random
+
+
+if TYPE_CHECKING:
+    from src.datalab_schema import DatalabJob
 
 
 
@@ -183,6 +188,18 @@ class ModelClient(ABC):
     async def extract_structured(self, pdf_path: str, page_images: dict[int, str], prompt: str) -> tuple[dict | None, TokenUsage]:
         ...
 
+    async def submit(self, pdf_data: bytes) -> "DatalabJob | None":
+        """Optional: submit PDF async and return a job reference immediately.
+        Override in clients that support split submit/collect (e.g. DatalabOcrClient).
+        Returns None by default (synchronous fallback)."""
+        return None
+
+    async def collect(self, job: "DatalabJob") -> dict | None:
+        """Optional: poll a submitted job until complete.
+        Override in clients that support split submit/collect.
+        Returns None by default."""
+        return None
+
 
 # ── Unified OpenAI-Compatible Provider ──────────────────────────
 
@@ -312,6 +329,7 @@ class GeminiClient(ModelClient):
         self._client = _genai.Client(api_key=api_key, http_options=http_options or None)
         self._genai = _genai
         self.model_name = model
+        self.provider = "gemini"
         self._rl = RateLimiter()
 
     @staticmethod

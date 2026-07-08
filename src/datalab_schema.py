@@ -1,6 +1,15 @@
 """JSON schema + response mapper for Datalab /api/v1/extract."""
 
 import json
+from dataclasses import dataclass
+
+
+@dataclass
+class DatalabJob:
+    """Represents a submitted Datalab extraction job."""
+    request_id: str
+    check_url: str
+    status: str = "submitted"
 
 EXTRACT_SCHEMA: dict = {
     "type": "object",
@@ -40,7 +49,7 @@ EXTRACT_SCHEMA: dict = {
     "home_type_private_apartment": {"type": "boolean", "description": "3.2 Type of Home — Private Apartment"},
     "home_type_housing_board": {"type": "boolean", "description": "3.2 Type of Home — Housing Board"},
     "home_type_line_house": {"type": "boolean", "description": "3.2 Type of Home — Line House"},
-    "home_type_others": {"type": "boolean", "description": "3.2 Type of Home — Others"},
+    "home_type_others": {"type": "string", "description": "3.2 Type of Home — Others (capture full text if user wrote something, e.g. 'Others: living with grand parents')"},
     "ceiling_roof": {"type": "boolean", "description": "3.3 Type of Ceiling — Roof (Kurai)"},
     "ceiling_tiled": {"type": "boolean", "description": "3.3 Type of Ceiling — Tiled"},
     "ceiling_asbestos": {"type": "boolean", "description": "3.3 Type of Ceiling — Asbestos / Sheet"},
@@ -137,9 +146,9 @@ SCHEMA_KEY_MAP = {
     "home_type_housing_board": {"label": "3.2 Type of Home — Housing Board", "page": 2, "section": 3},
     "home_type_line_house": {"label": "3.2 Type of Home — Line House", "page": 2, "section": 3},
     "home_type_others": {"label": "3.2 Type of Home — Others", "page": 2, "section": 3},
-    "ceiling_roof": {"label": "3.3 Type of Ceiling — Roof", "page": 3, "section": 3},
+    "ceiling_roof": {"label": "3.3 Type of Ceiling — Roof (Kurai)", "page": 3, "section": 3},
     "ceiling_tiled": {"label": "3.3 Type of Ceiling — Tiled", "page": 3, "section": 3},
-    "ceiling_asbestos": {"label": "3.3 Type of Ceiling — Asbestos", "page": 3, "section": 3},
+    "ceiling_asbestos": {"label": "3.3 Type of Ceiling — Asbestos / Sheet", "page": 3, "section": 3},
     "ceiling_concrete": {"label": "3.3 Type of Ceiling — Concrete", "page": 3, "section": 3},
     "number_of_bedrooms": {"label": "3.4 Number of Bedrooms", "page": 3, "section": 3},
     "type_of_bedroom": {"label": "3.4.1 Type of Bedroom", "page": 3, "section": 3},
@@ -173,6 +182,8 @@ SCHEMA_KEY_MAP = {
     "recommend_student": {"label": "8.2 Will you recommend this student for this scholarship?", "page": 6, "section": 8},
     "volunteer_comments": {"label": "8.3 Any other comments you want to share?", "page": 6, "section": 8},
 }
+
+EXPECTED_FIELD_LABELS: set[str] = {meta["label"] for meta in SCHEMA_KEY_MAP.values()}
 
 TABLE_MAP = {
     "family_members": {
@@ -271,13 +282,18 @@ def convert_extract_response(response: dict) -> dict:
         {"number": 8, "name": "Volunteer Observation", "page": 6},
     ]
 
-    overall_confidence = 100
-    if fields:
-        overall_confidence = round(sum(f.get("confidence", 90) for f in fields) / len(fields))
+    confidence = round(sum(f.get("confidence", 90) for f in fields) / len(fields)) if fields else 100
+
+    found_labels = {f.get("label") for f in fields}
+    coverage = round(len(found_labels & EXPECTED_FIELD_LABELS) / len(EXPECTED_FIELD_LABELS) * 100) if EXPECTED_FIELD_LABELS else 100
+
+    overall_confidence = round(coverage * confidence / 100)
 
     return {
         "fields": fields,
         "sections": sections,
         "overall_confidence": overall_confidence,
+        "coverage": coverage,
+        "confidence": confidence,
         "raw_text": "",
     }

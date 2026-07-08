@@ -576,6 +576,7 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
               rawText={result?.raw_text}
               rightPanelFormat={rightPanelFormat}
               onRawTextUpdated={handleRawTextUpdated}
+              pdfName={result?.batch ? result?.pdf_names?.[0] : null}
             />
           )}
         </div>

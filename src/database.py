@@ -123,8 +123,14 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
             for flabel, fval in label_map.items():
                 if flabel.startswith(prefix):
                     option = flabel[len(prefix):]
-                    if option and fval.strip().lower() in ("\u2713", "1", "yes", "true", "y"):
-                        checked.append(option)
+                    if option and fval.strip():
+                        lower_val = fval.strip().lower()
+                        if lower_val in ("\u2713", "1", "yes", "true", "y"):
+                            checked.append(option)
+                        elif lower_val not in (
+                            "\u2717", "no", "false", "0", "", "n/a", "\u2014", "-", "nil", "none",
+                        ):
+                            checked.append(fval.strip())
             if checked:
                 out[col] = json.dumps(sorted(checked))
             elif val is not None:
@@ -337,3 +343,127 @@ async def get_last_job_id_by_pdf_id(pdf_id: str) -> Optional[str]:
             pdf_id,
         )
         return row["job_id"] if row else None
+
+
+# ── Async job tracking (webhook-style submit/collect) ──────────────────
+
+
+async def init_jobs_table() -> None:
+    """Create ocr_jobs table if not exists. Call once at startup."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ocr_jobs (
+                job_id TEXT PRIMARY KEY,
+                file_name TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'submitted'
+                    CHECK (status IN ('submitted','collecting','completed','failed')),
+                datalab_request_id TEXT NOT NULL DEFAULT '',
+                datalab_check_url TEXT NOT NULL DEFAULT '',
+                file_hash TEXT NOT NULL DEFAULT '',
+                file_path TEXT NOT NULL DEFAULT '',
+                error_detail TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                completed_at TIMESTAMPTZ
+            )
+        """)
+
+
+async def create_job(
+    *,
+    job_id: str,
+    file_name: str = "",
+    file_hash: str = "",
+    file_path: str = "",
+) -> bool:
+    """Insert a new job with status='submitted'."""
+    pool = get_pool()
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO ocr_jobs (job_id, file_name, status, file_hash, file_path)
+                VALUES ($1, $2, 'submitted', $3, $4)
+                ON CONFLICT (job_id) DO NOTHING
+                """,
+                job_id, file_name, file_hash, file_path,
+            )
+        return True
+    except Exception as e:
+        logger.error("create_job: FAILED for job=%s — %s", job_id, e, exc_info=True)
+        return False
+
+
+async def update_job_status(
+    *,
+    job_id: str,
+    status: str,
+    datalab_request_id: str = "",
+    datalab_check_url: str = "",
+    error_detail: str = "",
+) -> bool:
+    """Update job status and optional metadata."""
+    pool = get_pool()
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE ocr_jobs SET
+                    status = $2,
+                    datalab_request_id = COALESCE(NULLIF($3, ''), datalab_request_id),
+                    datalab_check_url = COALESCE(NULLIF($4, ''), datalab_check_url),
+                    error_detail = COALESCE(NULLIF($5, ''), error_detail),
+                    updated_at = NOW(),
+                    completed_at = CASE WHEN $2 IN ('completed','failed') THEN NOW() ELSE NULL END
+                WHERE job_id = $1
+                """,
+                job_id, status, datalab_request_id, datalab_check_url, error_detail,
+            )
+        logger.info("update_job_status: job=%s → status=%s", job_id, status)
+        return True
+    except Exception as e:
+        logger.error("update_job_status: FAILED for job=%s — %s", job_id, e, exc_info=True)
+        return False
+
+
+async def get_stuck_jobs(minutes: int = 15) -> list[dict]:
+    """Return jobs stuck in 'submitted' or 'collecting' for longer than `minutes`."""
+    pool = get_pool()
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT job_id, status, datalab_request_id, datalab_check_url,
+                       file_name, file_path, created_at
+                FROM ocr_jobs
+                WHERE status IN ('submitted', 'collecting')
+                  AND updated_at < NOW() - make_interval(mins => $1)
+                ORDER BY updated_at ASC
+                """,
+                minutes,
+            )
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error("get_stuck_jobs: FAILED — %s", e, exc_info=True)
+        return []
+
+
+async def get_incomplete_jobs() -> list[dict]:
+    """Return all jobs not in 'completed' or 'failed' state (for startup reconciliation)."""
+    pool = get_pool()
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT job_id, status, datalab_request_id, datalab_check_url,
+                       file_name, file_path, created_at
+                FROM ocr_jobs
+                WHERE status NOT IN ('completed', 'failed')
+                ORDER BY created_at ASC
+                """
+            )
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error("get_incomplete_jobs: FAILED — %s", e, exc_info=True)
+        return []

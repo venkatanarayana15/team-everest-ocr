@@ -263,7 +263,7 @@ export default function FieldCard({ field, isSelected, onClick, jobId, onCorrect
             )}
             {field.value ? <CheckboxDisplay value={field.value} /> : <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>empty</span>}
             <span style={{ fontSize: 12, fontWeight: 600, color: pill.color, background: pill.bg, padding: '2px 8px', borderRadius: 999 }}>
-              {pill.label}
+              {field.confidence}%
             </span>
           </div>
 

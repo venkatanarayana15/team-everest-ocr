@@ -9,6 +9,7 @@ import numpy as np
 from rapidfuzz import fuzz
 
 import os
+from src.datalab_schema import EXPECTED_FIELD_LABELS
 from src.tesseract import WordBox, get_backend
 from src.model_client import ModelClient, get_model_client
 
@@ -116,9 +117,9 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "3.2 Type of Home — Others", "section_number": 3, "page": 2},
     # ── Page 3 ──
     # Section 3 — Housing Condition (Page 3: 3.3-3.6)
-    {"label": "3.3 Type of Ceiling — Roof(kurai)", "section_number": 3, "page": 3},
+    {"label": "3.3 Type of Ceiling — Roof (Kurai)", "section_number": 3, "page": 3},
     {"label": "3.3 Type of Ceiling — Tiled", "section_number": 3, "page": 3},
-    {"label": "3.3 Type of Ceiling — Asbestos/sheet", "section_number": 3, "page": 3},
+    {"label": "3.3 Type of Ceiling — Asbestos / Sheet", "section_number": 3, "page": 3},
     {"label": "3.3 Type of Ceiling — Concrete", "section_number": 3, "page": 3},
     {"label": "3.4 Number of Bedrooms", "section_number": 3, "page": 3},
     {"label": "3.4.1 Type of Bedroom - Separate Bedroom", "section_number": 3, "page": 3},
@@ -231,6 +232,16 @@ class ExtractionPipeline:
         elif tier == "medium":
             return 65
         return 30
+
+    @staticmethod
+    def _compute_coverage_confidence(fields: list) -> tuple[int, int]:
+        fields = [f for f in fields if isinstance(f, dict)]
+        non_empty = [f for f in fields if f.get("value") and f.get("value") not in ("", "N/A")]
+        found_labels = {f.get("label") for f in fields if f.get("label")}
+        expected = EXPECTED_FIELD_LABELS
+        coverage = round(len(found_labels & expected) / len(expected) * 100) if expected else 100
+        confidence = round(sum(f.get("confidence", 0) for f in non_empty) / len(non_empty)) if non_empty else 0
+        return coverage, confidence
 
     @staticmethod
     def _infer_section_from_label(label: str) -> int | None:
@@ -503,8 +514,10 @@ FIELD LIST FOR PAGE {page}:
             merged_data["raw_text"] = "\n\n".join(raw_text_parts)
             merged_data["markdown_output"] = "\n\n".join(markdown_parts)
 
-            all_confidences = [f.get("confidence", 0) for f in merged_data["fields"] if f.get("confidence") is not None]
-            merged_data["overall_confidence"] = int(sum(all_confidences) / len(all_confidences)) if all_confidences else 0
+            coverage, confidence = self._compute_coverage_confidence(merged_data["fields"])
+            merged_data["coverage"] = coverage
+            merged_data["confidence"] = confidence
+            merged_data["overall_confidence"] = round(coverage * confidence / 100) if coverage and confidence else 0
 
             token_usage = {
                 "prompt_tokens": total_prompt_tokens,
@@ -512,8 +525,8 @@ FIELD LIST FOR PAGE {page}:
                 "total_tokens": total_prompt_tokens + total_completion_tokens,
                 "calls": len(tasks)
             }
-            logger.info("Parallel extraction merged: %d fields (confidence=%d%%, tokens=%s)",
-                        len(merged_data["fields"]), merged_data["overall_confidence"], token_usage)
+            logger.info("Parallel extraction merged: %d fields (coverage=%d%%, confidence=%d%%, tokens=%s)",
+                        len(merged_data["fields"]), coverage, confidence, token_usage)
             return merged_data, token_usage
 
         # Sequential all-pages extraction for non-standard page counts/orders
@@ -534,6 +547,13 @@ FIELD LIST FOR PAGE {page}:
             pdf_path, page_images, prompt
         )
         token_usage["calls"] = 1
+        if data and isinstance(data, dict):
+            fields = data.get("fields", [])
+            if fields:
+                coverage, confidence = self._compute_coverage_confidence(fields)
+                data["coverage"] = coverage
+                data["confidence"] = confidence
+                data["overall_confidence"] = round(coverage * confidence / 100) if coverage and confidence else data.get("overall_confidence", 0)
         return data, token_usage
 
     # ── Stage 3b: Merge (enhanced with position_hint + confidence weighting) ──

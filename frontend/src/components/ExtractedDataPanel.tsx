@@ -17,10 +17,7 @@ function confidenceColor(c: number): string {
 }
 
 function confidenceLabel(c: number): string {
-  if (c >= 0.9) return 'High';
-  if (c >= 0.7) return 'Medium';
-  if (c >= 0.4) return 'Low';
-  return 'Very Low';
+  return `${c}%`;
 }
 
 function checkboxDisplay(val: string): { icon: string; color: string } {

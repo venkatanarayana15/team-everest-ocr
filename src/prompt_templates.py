@@ -122,9 +122,9 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
   3.2 Type of Home — Housing Board        [checkbox]
   3.2 Type of Home — Line House           [checkbox]
   3.2 Type of Home — Others               [checkbox]
-  3.3 Type of Ceiling — Roof              [checkbox]                      ← pg 3
+  3.3 Type of Ceiling — Roof (Kurai)     [checkbox]                      ← pg 3
   3.3 Type of Ceiling — Tiled             [checkbox]
-  3.3 Type of Ceiling — Asbestos          [checkbox]
+  3.3 Type of Ceiling — Asbestos / Sheet   [checkbox]
   3.3 Type of Ceiling — Concrete          [checkbox]
   3.4 Number of Bedrooms                  [text]                          ← pg 3
   3.4.1 Type of Bedroom                   [radio → Separate Bedroom | No Separate Bedroom]
@@ -339,9 +339,9 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
 """,
     3: """
 --- Section 3 — Housing Condition (Page 3) — 9 fields ---
-  3.3 Type of Ceiling — Roof              [checkbox]
+  3.3 Type of Ceiling — Roof (Kurai)     [checkbox]
   3.3 Type of Ceiling — Tiled             [checkbox]
-  3.3 Type of Ceiling — Asbestos          [checkbox]
+  3.3 Type of Ceiling — Asbestos / Sheet   [checkbox]
   3.3 Type of Ceiling — Concrete          [checkbox]
   3.4 Number of Bedrooms                  [text]
   3.4.1 Type of Bedroom                   [radio → Separate Bedroom | No Separate Bedroom]

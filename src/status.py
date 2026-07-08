@@ -21,6 +21,7 @@ _status_locks_lock = threading.Lock()
 
 STAGE_PROGRESS: dict[str, int] = {
     "queued": 0,
+    "submitted": 5,
     "oauth": 3,
     "downloading": 10,
     "converting": 18,
@@ -177,11 +178,13 @@ def _get_status(job_dir: Path) -> dict:
     return data
 
 
-def _save_checkpoint(job_dir: Path, step: str, fields: list[StructuredField], overall_confidence: float, raw_text: str = "", sections: list[dict] | None = None) -> None:
+def _save_checkpoint(job_dir: Path, step: str, fields: list[StructuredField], overall_confidence: float, raw_text: str = "", sections: list[dict] | None = None, *, coverage: int | None = None, confidence: int | None = None) -> None:
     path = job_dir / "checkpoint.json"
     data = {
         "step": step,
         "overall_confidence": overall_confidence,
+        "coverage": coverage,
+        "confidence": confidence,
         "raw_text": raw_text,
         "fields": [
             {
@@ -384,7 +387,7 @@ def _render_text(data: dict, job_id: str) -> str:
         "======================",
         f"Job ID: {job_id}",
         f"Date Created: {_format_job_datetime(job_id)}",
-        f"Overall Confidence: {data.get('overall_confidence', '?')}%",
+        f"Coverage: {data.get('coverage', '?')}%    Confidence: {data.get('confidence', '?')}%    Overall: {data.get('overall_confidence', '?')}%",
         f"Processing Time: {data.get('processing_time', '?')}s",
         f"Number of Pages: {data.get('num_pages', '?')}",
         "",

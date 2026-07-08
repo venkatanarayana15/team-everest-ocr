@@ -29,6 +29,8 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
+import httpx
+
 from src.extraction_pipeline import ExtractionPipeline, StructuredField, Config
 from src.page_classifier import PageClassifier
 from src.status import (
@@ -130,7 +132,8 @@ def scan_folder(folder_path: str | Path) -> list[dict]:
                 })
     return items
 from src.pipeline_runner import (
-    run_pipeline, run_batch_pdfs_pipeline, run_image_pipeline_from_zip,
+    run_pipeline, run_batch_pdfs_pipeline, run_batch_pdfs_pipeline_async,
+    run_image_pipeline_from_zip,
     _validate_pdf, _validate_images,
 )
 from src.zoho_integration import (
@@ -144,13 +147,17 @@ from src.zoho_integration import (
 try:
     from src.database import (
         init_pool,
+        init_jobs_table,
+        get_incomplete_jobs,
+        update_job_status,
         get_pool,
         close_pool,
         upsert_ocr_document,
-        get_result_by_file_hash,
+
     )
     DB_AVAILABLE = True
 except ImportError as e:
+    logger.warning("Database module not available: %s — DB save/webhook disabled", e)
     DB_AVAILABLE = False
     logger = logging.getLogger(__name__)
     logger.warning("Database module not available (%s). Dedup + DB features disabled.", e)
@@ -203,19 +210,51 @@ root_logger.addHandler(handler)
 
 logger = logging.getLogger(__name__)
 
+
+def _validate_env() -> None:
+    """Validate critical environment variables at startup.
+    Logs warnings for missing or misconfigured vars — does not crash.
+    """
+    provider = os.environ.get("PRIMARY_PROVIDER", "").lower().strip()
+    api_key = os.environ.get("PRIMARY_API_KEY", "")
+
+    if not provider:
+        logger.warning("PRIMARY_PROVIDER not set — extraction will fail at runtime")
+    elif provider in ("datalab", "chandra-2") and not api_key:
+        logger.warning("PRIMARY_API_KEY not set — %s extraction will fail at runtime", provider)
+
+    if provider == "datalab":
+        base_url = os.environ.get("PRIMARY_BASE_URL", "")
+        if not base_url:
+            logger.warning("PRIMARY_BASE_URL not set — Datalab client will use default")
+        model = os.environ.get("PRIMARY_MODEL", "")
+        if not model:
+            logger.warning("PRIMARY_MODEL not set — Datalab client will use default")
+
+    if not os.environ.get("DATABASE_URL"):
+        logger.warning("DATABASE_URL not set — DB features (save-to-db, webhook) disabled")
+
+    webhook_secret = os.environ.get("WEBHOOK_SECRET", "")
+    if not webhook_secret:
+        logger.info("WEBHOOK_SECRET not set — webhook endpoint has no auth (set it in production)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global DB_AVAILABLE
+    _validate_env()
     if DB_AVAILABLE and os.environ.get("DATABASE_URL"):
         try:
             await init_pool()
-            logger.info("Database pool initialized")
+            await init_jobs_table()
+            logger.info("Database pool + jobs table initialized")
         except Exception as e:
             logger.warning("Failed to init DB pool: %s — disabling DB features", e)
             DB_AVAILABLE = False
     _start_cleanup_thread()
     logger.info("Auto-cleanup thread started (every %ds, max age %ds)", CLEANUP_INTERVAL_SEC, JOB_MAX_AGE_SEC)
     asyncio.create_task(_safe_startup_poller())
+    asyncio.create_task(_reconcile_stuck_jobs_on_startup())
     yield
     _stop_cleanup_thread()
     if DB_AVAILABLE:
@@ -227,6 +266,94 @@ async def _safe_startup_poller() -> None:
         await process_pending_on_startup(BASE_DIR)
     except Exception as e:
         logger.exception("Startup poller crashed: %s — will not retry", e)
+
+
+async def _reconcile_stuck_jobs_on_startup() -> None:
+    """Reconcile incompleting jobs on server startup.
+
+    For jobs in 'collecting' state, attempts to poll Datalab once.
+    Only marks as failed if the collect attempt confirms failure.
+    """
+    if not DB_AVAILABLE:
+        return
+    try:
+        stuck = await get_incomplete_jobs()
+        if not stuck:
+            logger.info("Startup reconciliation: no incomplete jobs found")
+            return
+
+        logger.info("Startup reconciliation: found %d incomplete jobs — attempting recovery", len(stuck))
+        from src.datalab_client import DatalabOcrClient
+
+        recovered = 0
+        failed = 0
+
+        for job in stuck:
+            job_id = job["job_id"]
+            check_url = job.get("datalab_check_url", "")
+            request_id = job.get("datalab_request_id", "")
+
+            if not check_url or not request_id:
+                # No Datalab tracking info — can't recover
+                await update_job_status(
+                    job_id=job_id,
+                    status="failed",
+                    error_detail="Server restarted while job was in progress (no Datalab tracking info)",
+                )
+                failed += 1
+                continue
+
+            # Attempt to check Datalab status once
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    api_key = os.environ.get("PRIMARY_API_KEY", "")
+                    headers = {"X-API-Key": api_key}
+                    resp = await client.get(check_url, headers=headers)
+                    resp.raise_for_status()
+                    body = resp.json()
+                    status = body.get("status", "processing")
+
+                    if status == "complete" and body.get("success"):
+                        # Job completed while server was down — process results
+                        from src.datalab_schema import convert_extract_response
+                        extraction_data = body.get("extraction_schema_json", body)
+                        if isinstance(extraction_data, str):
+                            extraction_data = json.loads(extraction_data)
+                        data = convert_extract_response(extraction_data)
+
+                        await upsert_ocr_document(
+                            job_id=job_id,
+                            file_name=job.get("file_name", ""),
+                            status="done",
+                            result_json=data,
+                        )
+                        await update_job_status(
+                            job_id=job_id,
+                            status="completed",
+                        )
+                        recovered += 1
+                        logger.info("Reconciliation: recovered job=%s (completed while down)", job_id)
+                    else:
+                        # Still processing or failed — mark as failed
+                        reason = body.get("error", "Server restarted while job was in progress")
+                        await update_job_status(
+                            job_id=job_id,
+                            status="failed",
+                            error_detail=reason,
+                        )
+                        failed += 1
+            except Exception as e:
+                logger.warning("Reconciliation: Datalab check failed for job=%s: %s", job_id, e)
+                await update_job_status(
+                    job_id=job_id,
+                    status="failed",
+                    error_detail=f"Server restart — Datalab check failed: {e}",
+                )
+                failed += 1
+
+        logger.info("Startup reconciliation: %d recovered, %d failed", recovered, failed)
+    except Exception as e:
+        logger.exception("Startup reconciliation failed: %s", e)
 
 
 app = FastAPI(title="OCR Extraction Pipeline", lifespan=lifespan)
@@ -462,8 +589,13 @@ async def _run_pipeline_task(job_dir: Path, pdf_path: str) -> None:
 
 
 async def _run_batch_task(job_dir: Path, pdfs_info: list[dict]) -> None:
-    async with _job_semaphore:
-        await run_batch_pdfs_pipeline(job_dir, pdfs_info)
+    primary_provider = os.environ.get("PRIMARY_PROVIDER", "").lower().strip()
+    if primary_provider == "datalab":
+        # Async submit+collect: no semaphore needed, all PDFs submitted instantly
+        await run_batch_pdfs_pipeline_async(job_dir, pdfs_info)
+    else:
+        async with _job_semaphore:
+            await run_batch_pdfs_pipeline(job_dir, pdfs_info)
 
 
 async def _run_image_task(job_dir: Path, image_paths) -> None:
@@ -859,12 +991,17 @@ async def get_page_image(job_id: str, page_num: int, width: int = 0, original: i
                             pages_dir = sub / "pages"
                             break
         else:
-            pages_dir = job_dir / str(idx) / "pages"
+            batch_pages = job_dir / str(idx) / "pages"
+            if batch_pages.exists():
+                pages_dir = batch_pages
 
         logger.info("get_page_image job=%s page=%d pdf_name=%s idx=%s pages_dir=%s",
                      job_id, page_num, pdf_name, idx, pages_dir)
 
     if not pages_dir.exists():
+        original_pdf = _find_original_pdf(job_dir, pdf_name)
+        if original_pdf:
+            return _render_pdf_page(original_pdf, page_num, width, pages_dir)
         raise HTTPException(404, "Pages directory not found")
 
     image_path = pages_dir / (f"page_{page_num}_original.png" if original else f"page_{page_num}.png")
@@ -893,6 +1030,72 @@ async def get_page_image(job_id: str, page_num: int, width: int = 0, original: i
         return Response(content=buf.read(), media_type="image/png")
 
     return FileResponse(str(image_path), media_type="image/png")
+
+
+def _find_original_pdf(job_dir: Path, pdf_name: str | None = None) -> str | None:
+    if pdf_name:
+        pdf_path = job_dir / "pdfs" / pdf_name
+        if pdf_path.exists():
+            return str(pdf_path)
+        result_path = job_dir / "results" / "result.json"
+        if result_path.exists():
+            try:
+                with open(result_path) as f:
+                    r = json.load(f)
+                pdf_names = r.get("pdf_names", [])
+                if pdf_name in pdf_names:
+                    idx = pdf_names.index(pdf_name)
+                    sub_original = job_dir / str(idx) / "original.pdf"
+                    if sub_original.exists():
+                        return str(sub_original)
+            except Exception:
+                pass
+    pdf_path = job_dir / "input.pdf"
+    if pdf_path.exists():
+        return str(pdf_path)
+    return None
+
+
+def _render_pdf_page(pdf_path: str, page_num: int, width: int, pages_dir: Path) -> Response:
+    import fitz
+    from PIL import Image
+    import io
+
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception as e:
+        logger.error("Failed to open PDF for lazy rendering: %s", e)
+        raise HTTPException(500, "Failed to open original PDF")
+
+    if page_num < 1 or page_num > len(doc):
+        doc.close()
+        raise HTTPException(404, f"Page {page_num} not found (PDF has {len(doc)} pages)")
+
+    page = doc[page_num - 1]
+    # Render at ~144 DPI for good UI quality
+    mat = fitz.Matrix(2.0, 2.0)
+    pix = page.get_pixmap(matrix=mat)
+    doc.close()
+
+    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+    # Cache to pages dir for subsequent requests
+    try:
+        pages_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = pages_dir / f"page_{page_num}.png"
+        img.save(str(cache_path))
+    except Exception as e:
+        logger.warning("Failed to cache lazy-rendered page: %s", e)
+
+    if width > 0:
+        w, h = img.size
+        new_h = int(h * (width / w))
+        img = img.resize((width, new_h), Image.LANCZOS)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return Response(content=buf.read(), media_type="image/png")
 
 
 @app.post("/correct/{job_id}")
@@ -1041,11 +1244,15 @@ def _list_jobs():
             num_pdfs = None
             pdf_names = []
             overall_confidence = None
+            coverage = None
+            confidence = None
             processing_time = None
             if result_path.exists():
                 with open(result_path) as f:
                     r = json.load(f)
                 overall_confidence = r.get("overall_confidence")
+                coverage = r.get("coverage")
+                confidence = r.get("confidence")
                 num_pages = r.get("num_pages")
                 num_pdfs = r.get("num_pdfs", 1)
                 pdf_names = r.get("pdf_names", [])
@@ -1055,6 +1262,8 @@ def _list_jobs():
                 "status": status.get("status"),
                 "filename": filename,
                 "overall_confidence": overall_confidence,
+                "coverage": coverage,
+                "confidence": confidence,
                 "num_pages": num_pages,
                 "num_pdfs": num_pdfs,
                 "pdf_names": pdf_names,
@@ -1110,12 +1319,16 @@ async def list_uploaded_pdfs():
             "status": status_data.get("status"),
             "uploaded_at": d.stat().st_mtime,
             "overall_confidence": None,
+            "coverage": None,
+            "confidence": None,
             "input_type": input_type,
         }
         if result_path.exists():
             try:
                 r = json.loads(result_path.read_text())
                 entry["overall_confidence"] = r.get("overall_confidence")
+                entry["coverage"] = r.get("coverage")
+                entry["confidence"] = r.get("confidence")
                 entry["input_type"] = r.get("input_type", input_type)
             except Exception:
                 pass
@@ -1172,6 +1385,127 @@ async def save_result_to_db(job_id: str):
         "status": "saved",
         "doc_id": doc_id,
     }
+
+
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+
+
+@app.post("/api/webhooks/extraction-completed")
+async def webhook_extraction_completed(payload: dict):
+    """Webhook endpoint called by Datalab when extraction completes.
+
+    Expects: { request_id, check_url, status, markdown, ... }
+    Returns 200 immediately, processes payload in background.
+    """
+    auth = payload.get("auth_token", "")
+    if WEBHOOK_SECRET and auth != WEBHOOK_SECRET:
+        raise HTTPException(401, "Invalid auth token")
+
+    request_id = payload.get("request_id", "")
+    if not request_id:
+        raise HTTPException(400, "Missing request_id")
+
+    logger.info("Webhook received: request_id=%s status=%s", request_id, payload.get("status"))
+
+    # Dispatch background processing immediately
+    asyncio.create_task(_process_webhook_payload(request_id, payload))
+
+    return {"status": "acknowledged"}
+
+
+async def _process_webhook_payload(request_id: str, payload: dict) -> None:
+    """Background process a completed extraction webhook payload.
+
+    Includes retry logic and basic payload validation.
+    """
+    if not DB_AVAILABLE:
+        logger.warning("Webhook: DB not available, skipping processing for request_id=%s", request_id)
+        return
+
+    # Basic payload validation
+    status = payload.get("status", "")
+    if status not in ("completed", "failed", "complete"):
+        logger.warning("Webhook: unexpected status=%s for request_id=%s", status, request_id)
+        return
+
+    for attempt in range(3):
+        try:
+            from src.datalab_schema import convert_extract_response
+
+            if status in ("failed",):
+                error_msg = payload.get("error", "Unknown error")
+                logger.error("Webhook: extraction failed for request_id=%s: %s", request_id, error_msg)
+                from src.database import get_pool
+                pool = get_pool()
+                async with pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        "SELECT job_id FROM ocr_jobs WHERE datalab_request_id = $1",
+                        request_id,
+                    )
+                    if row:
+                        await update_job_status(
+                            job_id=row["job_id"],
+                            status="failed",
+                            error_detail=error_msg,
+                        )
+                return
+
+            extraction_data = payload.get("extraction_schema_json", payload)
+            if isinstance(extraction_data, str):
+                extraction_data = json.loads(extraction_data)
+            if not isinstance(extraction_data, dict):
+                raise ValueError(f"Expected dict extraction data, got {type(extraction_data).__name__}")
+
+            data = convert_extract_response(extraction_data)
+
+            from src.database import get_pool
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT job_id, file_name FROM ocr_jobs WHERE datalab_request_id = $1",
+                    request_id,
+                )
+
+            if not row:
+                logger.warning("Webhook: no job found for request_id=%s", request_id)
+                return
+
+            job_id = row["job_id"]
+            file_name = row["file_name"]
+
+            # Idempotency check: skip if already completed
+            async with pool.acquire() as conn:
+                existing = await conn.fetchrow(
+                    "SELECT status FROM ocr_jobs WHERE job_id = $1",
+                    job_id,
+                )
+                if existing and existing["status"] == "completed":
+                    logger.info("Webhook: job=%s already completed (idempotent skip)", job_id)
+                    return
+
+            await upsert_ocr_document(
+                job_id=job_id,
+                file_name=file_name,
+                status="done",
+                result_json=data,
+            )
+
+            await update_job_status(
+                job_id=job_id,
+                status="completed",
+            )
+
+            logger.info("Webhook: processed OK for request_id=%s job=%s fields=%d",
+                         request_id, job_id, len(data.get("fields", [])))
+            return
+
+        except Exception as e:
+            logger.warning("Webhook processing failed (attempt %d/3) for request_id=%s: %s",
+                           attempt + 1, request_id, e)
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+
+    logger.error("Webhook processing exhausted retries for request_id=%s", request_id)
 
 
 @app.get("/download/{job_id}")

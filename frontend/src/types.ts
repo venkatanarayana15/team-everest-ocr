@@ -42,6 +42,8 @@ export interface TokenUsage {
 
 export interface JobResult {
   overall_confidence: number;
+  coverage?: number;
+  confidence?: number;
   num_pages: number;
   processing_time: number;
   fields: Field[];
@@ -55,6 +57,9 @@ export interface JobResult {
     total: TokenUsage;
   };
   pdf_times?: Record<string, number>;
+  batch?: boolean;
+  num_pdfs?: number;
+  pdf_names?: string[];
 }
 
 export interface JobInfo {

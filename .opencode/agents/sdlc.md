@@ -1,7 +1,7 @@
 ---
 description: SDLC agent that implements features following requirements, design, and test-driven development workflow
 mode: primary
-model: moonshotai/kimi-k2.6
+model: bigpickle/bigpickle-1.2-turbo
 temperature: 0.2
 permissions:
   edit: allow

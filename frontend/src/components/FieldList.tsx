@@ -32,9 +32,7 @@ function confidenceColor(conf: number): string {
 }
 
 function confidenceLabel(conf: number): string {
-  if (conf >= 80) return 'High';
-  if (conf >= 50) return 'Med';
-  return 'Low';
+  return `${conf}%`;
 }
 
 function inferSection(label: string): number | null {

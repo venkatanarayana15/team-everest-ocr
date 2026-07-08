@@ -266,7 +266,7 @@ AGGREGATE_MAP: dict[str, dict[str, str]] = {
 # LLM may extract checkbox option text with variations (e.g. "Asbestos / Sheet" vs "Asbestos")
 OPTION_VALUE_REPLACEMENTS: dict[str, str] = {
     # Type of Ceiling — Zoho options: Roof (Kurai), Tiled, Asbestos, Concrete
-    "Roof": "Roof (Kurai)",
+    "Roof (Kurai)": "Roof (Kurai)",
     "Asbestos / Sheet": "Asbestos",
     "Asbestos sheet": "Asbestos",
     "Asbestos Sheet": "Asbestos",
@@ -528,8 +528,12 @@ def _build_creator_payload(result: dict) -> dict:
         for prefix in agg_prefixes:
             if label.startswith(prefix + " — "):
                 option = label[len(prefix) + 3:].strip()
-                if option and value in ("✓", "1", "yes", "Yes", "true", "True", "Y", "y"):
-                    aggregates.setdefault(prefix, []).append(option)
+                if option:
+                    lower_val = value.strip().lower()
+                    if lower_val in ("✓", "1", "yes", "true", "y"):
+                        aggregates.setdefault(prefix, []).append(option)
+                    elif lower_val not in ("✗", "no", "false", "0", "", "n/a", "—", "-", "nil", "none"):
+                        aggregates.setdefault(prefix, []).append(value.strip())
                 matched_agg = True
                 break
         if matched_agg:
@@ -1154,13 +1158,18 @@ async def _run_pipeline_only(job_dir: Path, req: OcrExtractRequest, access_token
             llm_calls = ocr_result.get("llm_calls", 0)
             fields_count = len(ocr_result.get("fields", []))
             overall_conf = ocr_result.get("overall_confidence", 0)
+            coverage = ocr_result.get("coverage")
+            confidence = ocr_result.get("confidence")
 
         print(f"\n  {'='*56}")
         print(f"   SUMMARY  ─  {rid}{aid}")
         print(f"  {'─'*56}")
         print(f"   App name          : {rid}")
         print(f"   Fields extracted  : {fields_count}")
-        print(f"   Overall confidence: {overall_conf}%")
+        cov_str = f"coverage={coverage}%" if coverage is not None else "?"
+        conf_str = f"confidence={confidence}%" if confidence is not None else "?"
+        print(f"   {cov_str}   {conf_str}")
+        print(f"   Overall           : {overall_conf}%")
         print(f"   LLM calls         : {llm_calls}")
         print(f"   Prompt tokens     : {prompt_tokens:,}")
         print(f"   Completion tokens : {completion_tokens:,}")
@@ -1596,6 +1605,8 @@ async def _process_pending_from_local(base_dir: Path, csv_path: Path, pdf_dir: P
     print(f"  Skipped (not found): {skipped_not_found}")
     print(f"  → Eligible to process:  {total_eligible}")
     print(f"{'='*70}\n")
+    logger.info("ELIGIBILITY: CSV=%d skip_status=%d skip_nofile=%d skip_notfound=%d eligible=%d",
+                len(rows), skipped_status, skipped_no_file, skipped_not_found, total_eligible)
 
     if not pdfs_info:
         print(f"  Nothing to process.\n")
@@ -1606,18 +1617,28 @@ async def _process_pending_from_local(base_dir: Path, csv_path: Path, pdf_dir: P
     batch_job_dir.mkdir(parents=True, exist_ok=True)
     (batch_job_dir / "original_name.txt").write_text(f"Local Batch ({total_eligible} records)")
 
+    # Setup file logging to capture structured terminal output
+    log_path = batch_job_dir / "result.logs"
+    root_logger = logging.getLogger()
+    # Avoid duplicate file handlers across calls
+    if not any(isinstance(h, logging.FileHandler) and h.baseFilename == str(log_path) for h in root_logger.handlers):
+        _fh = logging.FileHandler(str(log_path), mode="w")
+        _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        root_logger.addHandler(_fh)
+    logger.info("Batch logging to %s", log_path)
+
     print(f"  Starting batch pipeline run for {total_eligible} file(s)...\n")
     await _set_status(batch_job_dir, "queued", f"Processing {total_eligible} files...")
     from src.pipeline_runner import run_batch_pdfs_pipeline
     await run_batch_pdfs_pipeline(batch_job_dir, pdfs_info)
 
+    logger.info("LOCAL BATCH COMPLETE | job=%s | files=%d", batch_job_id, total_eligible)
     print(f"\n{'='*70}")
     print(f"  LOCAL BATCH — COMPLETE")
     print(f"{'─'*70}")
     print(f"  Batch Job ID: {batch_job_id}")
     print(f"  Total processed: {total_eligible}")
     print(f"{'='*70}\n")
-    logger.info("LOCAL SCAN: batch complete | job=%s | files=%d", batch_job_id, total_eligible)
 
 
 async def run_zoho_writeback_for_batch_item(job_dir: Path, pdf_path: Path, zoho_req_dict: dict, ocr_result: dict, input_info: dict | None = None) -> None:

@@ -12,6 +12,7 @@ import numpy as np
 
 from src.extraction_pipeline import ExtractionPipeline, KNOWN_TEMPLATE_FIELDS, StructuredField, Config
 from src.model_client import get_model_client
+from src.datalab_schema import DatalabJob
 from src.page_classifier import PageClassifier
 from src.status import (
     _set_status, _save_checkpoint, _load_checkpoint, _cleanup_intermediate,
@@ -204,6 +205,9 @@ async def _run_core_extraction(
     checkpoint=None,
     tesseract_enabled: bool = True,
 ) -> dict:
+    coverage = None
+    confidence = None
+
     if checkpoint:
         step, fields, overall_confidence, raw_text, sections_data = checkpoint
         word_boxes = []
@@ -234,6 +238,8 @@ async def _run_core_extraction(
 
         if model_data:
             overall_confidence = model_data.get("overall_confidence", 0)
+            coverage = model_data.get("coverage")
+            confidence = model_data.get("confidence")
             raw_text = model_data.get("raw_text", "")
             raw_fields = model_data.get("fields", [])
             bad_fields = [f for f in raw_fields if not isinstance(f, dict)]
@@ -264,7 +270,7 @@ async def _run_core_extraction(
                 sections_data.append(ds)
         sections_data.sort(key=lambda s: s["number"])
 
-        _save_checkpoint(job_dir, "mapped", fields, overall_confidence, raw_text, sections=sections_data)
+        _save_checkpoint(job_dir, "mapped", fields, overall_confidence, raw_text, sections=sections_data, coverage=coverage, confidence=confidence)
 
     token_usage = {
         "primary": primary_token_usage,
@@ -279,9 +285,21 @@ async def _run_core_extraction(
     fields = ExtractionPipeline.fill_missing_template_fields(fields)
     sections_data = _derive_sections(fields, raw_text or "")
 
+    num_pages = len(processed_images)
+    if not num_pages and pdf_path:
+        try:
+            import fitz
+            doc = fitz.open(pdf_path)
+            num_pages = len(doc)
+            doc.close()
+        except Exception:
+            num_pages = 0
+
     return {
         "overall_confidence": overall_confidence,
-        "num_pages": len(processed_images),
+        "coverage": coverage,
+        "confidence": confidence,
+        "num_pages": num_pages,
         "raw_text": raw_text or "",
         "primary_model": primary_name,
         "token_usage": token_usage,
@@ -295,7 +313,7 @@ async def _save_to_db(job_dir: Path) -> bool:
     results_path = job_dir / "results" / "result.json"
     if not results_path.exists():
         return True
-    print(f"  [DB] _save_to_db: job_dir={job_dir} result.json={'exists' if results_path.exists() else 'MISSING'}")
+    logger.info("  [DB] _save_to_db: job_dir=%s result.json=%s", job_dir, "exists" if results_path.exists() else "MISSING")
     try:
         from src.database import upsert_ocr_document
     except ImportError:
@@ -313,11 +331,12 @@ async def _save_to_db(job_dir: Path) -> bool:
         low_conf = sum(1 for f in fields_data if f.get("confidence", 0) < 70)
         needs_review = sum(1 for f in fields_data if f.get("needs_clarification", False))
         logger.info(
-            "Uploading extracted data to Supabase... (file=%r, fields=%d, confidence=%s, "
+            "Uploading extracted data to Supabase... (file=%r, fields=%d, coverage=%s, confidence=%s, "
             "low_conf=%d, needs_review=%d, time=%.2fs)",
             orig_name,
             len(fields_data),
-            result_data.get("overall_confidence", "N/A"),
+            result_data.get("coverage", "N/A"),
+            result_data.get("confidence", "N/A"),
             low_conf, needs_review,
             result_data.get("processing_time", 0),
         )
@@ -332,11 +351,9 @@ async def _save_to_db(job_dir: Path) -> bool:
             result_json=result_data,
         )
         if not doc_id:
-            print(f"  ❌ DB save: upsert returned empty id (job={job_dir.name})")
-            logger.warning("Auto-save to DB failed (upsert returned empty id) for job %s", job_dir.name)
+            logger.warning("  ❌ DB save: upsert returned empty id (job=%s)", job_dir.name)
             return False
-        print(f"  ✅ DB save: {len(fields_data)} fields, {low_conf} low-conf, row={doc_id}")
-        logger.info("Auto-save to DB succeeded for job %s → row id=%s", job_dir.name, doc_id)
+        logger.info("  ✅ DB save: %d fields, %d low-conf, row=%s", len(fields_data), low_conf, doc_id)
         return True
     except Exception as e:
         _hint = "check DATABASE_URL in .env and verify Supabase DB is accessible"
@@ -346,9 +363,7 @@ async def _save_to_db(job_dir: Path) -> bool:
             _hint = "table 'ocr_documents' missing — run schema migration"
         elif "23505" in str(e).split():
             _hint = "duplicate key violation — check upsert logic"
-        print(f"  ❌ DB save FAILED: {e} | hint={_hint}")
-        logger.warning("Auto-save to DB failed for job %s: %s | hint=%s", job_dir.name, e, _hint)
-        return False
+        logger.error("  ❌ DB save FAILED: %s | hint=%s", e, _hint)
 
 
 async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
@@ -453,6 +468,12 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 pdf_job_dir = job_dir / str(idx)
                 pdf_job_dir.mkdir(parents=True, exist_ok=True)
 
+                # Save original PDF for lazy page rendering in UI
+                try:
+                    shutil.copy2(pdf_info["path"], pdf_job_dir / "original.pdf")
+                except Exception:
+                    logger.warning("Failed to save original PDF for lazy rendering: %s", pdf_name)
+
                 await _set_batch_pdf_status(job_dir, pdf_name, "processing", 0, f"Starting ({idx+1}/{len(pdfs_info)})")
 
                 try:
@@ -548,52 +569,225 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         with open(results_dir / "result.json", "w") as f:
             json.dump(combined, f, indent=2)
 
-        # Re-save each individual PDF's full result to DB using the batch job_id prefix
+        # Save each individual PDF's full result to DB using the batch job_id prefix
         # so the row is discoverable under the batch job rather than subdirectory "0"/"1".
         from src.database import upsert_ocr_document as _batch_upsert
         for r in all_results:
             if "error" in r or not r.get("fields"):
                 continue
-            pdf_result_path = job_dir / str(all_results.index(r)) / "results" / "result.json"
-            if pdf_result_path.exists():
-                with open(pdf_result_path) as f:
-                    pdf_result = json.load(f)
-                pdf_result["processing_time"] = combined.get("processing_time", 0)
-                doc_id = await _batch_upsert(
-                    job_id=f"{job_dir.name}_{all_results.index(r)}",
-                    file_name=r.get("pdf_name", f"file_{all_results.index(r)}"),
-                    status="done",
-                    processing_time=pdf_result.get("processing_time"),
-                    confidence_score=pdf_result.get("overall_confidence"),
-                    result_json=pdf_result,
-                )
-                if doc_id:
-                    print(f"  ✅ Batch-level DB save: job={job_dir.name}_{all_results.index(r)} row={doc_id} fields={len(pdf_result.get('fields',[]))}")
-                else:
-                    print(f"  ❌ Batch-level DB save failed for {r.get('pdf_name','?')}")
+            pdf_result = r.copy()
+            pdf_result["processing_time"] = combined.get("processing_time", 0)
+            doc_id = await _batch_upsert(
+                job_id=f"{job_dir.name}_{all_results.index(r)}",
+                file_name=r.get("pdf_name", f"file_{all_results.index(r)}"),
+                status="done",
+                processing_time=pdf_result.get("processing_time"),
+                confidence_score=pdf_result.get("overall_confidence"),
+                result_json=pdf_result,
+            )
+            if doc_id:
+                logger.info("  ✅ Batch-level DB save: job=%s_%s row=%s fields=%d", job_dir.name, all_results.index(r), doc_id, len(pdf_result.get('fields',[])))
+            else:
+                logger.warning("  ❌ Batch-level DB save failed for %s", r.get('pdf_name','?'))
 
         _progress_store.pop(job_dir.name, None)
         success = sum(1 for r in all_results if 'error' not in r)
         failed = len(pdfs_info) - success
-        print(f"\n{'='*80}")
-        print(f"  BATCH REPORT: {len(pdfs_info)} files processed")
-        print(f"{'='*80}")
+        logger.info("BATCH REPORT: %d files processed", len(pdfs_info))
         for r in all_results:
             name = r.get("pdf_name", r.get("name", "?"))
             if "error" in r:
-                print(f"  ✗ {name}  —  FAILED: {r['error']}")
+                logger.warning("  ✗ %s — FAILED: %s", name, r['error'])
             else:
                 fields = r.get("fields", [])
                 pages = len({f["page"] for f in fields})
-                conf = r.get("overall_confidence", "?")
-                print(f"  ✓ {name}  —  {len(fields)} fields, {pages} pages, {conf}%")
-        print(f"{'─'*80}")
-        print(f"  FILES: {len(pdfs_info)} total  |  SUCCESS: {success}  |  FAILED: {failed}  |  Time: {combined.get('processing_time', '?')}s")
-        print(f"{'='*80}\n")
+                cov = r.get("coverage", "?")
+                conf = r.get("confidence", "?")
+                logger.info("  ✓ %s — %d fields, %d pages, coverage=%s%% confidence=%s%%", name, len(fields), pages, cov, conf)
+        logger.info("FILES: %d total  |  SUCCESS: %d  |  FAILED: %d  |  Time: %ss", len(pdfs_info), success, failed, combined.get('processing_time', '?'))
         await _set_status(job_dir, "done", f"Batch complete: {success}/{len(pdfs_info)} succeeded.")
     except Exception as e:
         logger.exception("Batch pipeline failed")
         await _set_status(job_dir, "error", f"Batch pipeline failed: {e}")
+    finally:
+        _cleanup_intermediate(job_dir)
+
+
+async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) -> None:
+    """Async submit+collect batch pipeline.
+
+    Features:
+    - Phase 1: Submit each PDF to Datalab as it's read (not all at once — memory efficient)
+    - Phase 2: Collect each result in background workers, gated by client's collect semaphore
+    - Phase 3: Save results to DB with per-file SSE status updates
+    """
+    t0 = time.time()
+    try:
+        config = Config()
+        primary = get_model_client("primary")
+
+        if not hasattr(primary, 'submit') or not hasattr(primary, 'collect'):
+            logger.warning("Primary client does not support async submit/collect — falling back to sync batch")
+            await run_batch_pdfs_pipeline(job_dir, pdfs_info)
+            return
+
+        await _set_status(job_dir, "submitted", f"Submitting {len(pdfs_info)} PDFs to Datalab...")
+
+        # Phase 1: Submit each PDF as we read it (streaming, not batch-reading all)
+        jobs: list[tuple[int, dict, DatalabJob | None]] = []
+
+        db_available = False
+        try:
+            from src.database import create_job, update_job_status
+            db_available = True
+        except ImportError:
+            pass
+
+        for idx, pdf_info in enumerate(pdfs_info):
+            pdf_path = pdf_info.get("path", "")
+            pdf_name = pdf_info.get("name", Path(pdf_path).name if pdf_path else f"file_{idx}")
+
+            # Save original PDF for lazy page rendering in UI
+            pdf_job_dir = job_dir / str(idx)
+            pdf_job_dir.mkdir(parents=True, exist_ok=True)
+            original_pdf_path = pdf_job_dir / "original.pdf"
+            if pdf_path and Path(pdf_path).exists() and not original_pdf_path.exists():
+                try:
+                    shutil.copy2(pdf_path, str(original_pdf_path))
+                except Exception as e:
+                    logger.warning("Failed to save original PDF for %s: %s", pdf_name, e)
+
+            pdf_data = None
+            if pdf_path and Path(pdf_path).exists():
+                with open(pdf_path, "rb") as f:
+                    pdf_data = f.read()
+
+            if pdf_data is None:
+                logger.warning("Cannot read PDF for %s — skipping", pdf_name)
+                jobs.append((idx, pdf_info, None))
+                continue
+
+            job = await primary.submit(pdf_data)
+
+            # Free PDF data immediately after submit
+            pdf_data = None
+
+            # Create DB record immediately
+            sub_job_id = f"{job_dir.name}_{idx}"
+            if job and db_available:
+                await create_job(
+                    job_id=sub_job_id,
+                    file_name=pdf_name,
+                    file_path=pdf_path,
+                )
+                await update_job_status(
+                    job_id=sub_job_id,
+                    status="collecting",
+                    datalab_request_id=job.request_id,
+                    datalab_check_url=job.check_url,
+                )
+
+            jobs.append((idx, pdf_info, job))
+
+            # Per-file SSE: submitted
+            await _set_batch_pdf_status(job_dir, pdf_name, "submitted", 10,
+                                         f"Submitted ({idx+1}/{len(pdfs_info)})")
+
+        submitted = sum(1 for _, _, j in jobs if j is not None)
+        logger.info("Async batch: %d/%d PDFs submitted successfully", submitted, len(pdfs_info))
+        await _set_status(job_dir, "primary_extraction",
+                          f"Collecting {submitted} results from Datalab...")
+
+        # Phase 2: Collect results in background workers
+        all_results: list[dict] = []
+
+        async def collect_worker(idx: int, pdf_info: dict, job: DatalabJob | None):
+            if job is None:
+                pdf_name = pdf_info.get("name", f"file_{idx}")
+                return {"name": pdf_name, "error": "Failed to submit to Datalab"}
+
+            pdf_name = pdf_info.get("name", f"file_{idx}")
+            try:
+                await _set_batch_pdf_status(job_dir, pdf_name, "collecting", 50,
+                                             f"Collecting ({idx+1}/{len(pdfs_info)})")
+
+                result = await primary.collect(job)
+                if not result:
+                    return {"name": pdf_name, "error": "Empty result from Datalab"}
+
+                from src.datalab_schema import convert_extract_response
+                data = convert_extract_response(result)
+                data["pdf_name"] = pdf_name
+                data["input_type"] = "batch_pdf"
+
+                sub_job_id = f"{job_dir.name}_{idx}"
+                if db_available:
+                    from src.database import upsert_ocr_document
+                    await upsert_ocr_document(
+                        job_id=sub_job_id,
+                        file_name=pdf_name,
+                        status="done",
+                        result_json=data,
+                    )
+                    await update_job_status(
+                        job_id=sub_job_id,
+                        status="completed",
+                    )
+
+                await _set_batch_pdf_status(job_dir, pdf_name, "done", 100,
+                                             f"Done ({idx+1}/{len(pdfs_info)})")
+                return data
+
+            except Exception as e:
+                logger.exception("Collect failed for pdf=%s: %s", pdf_name, e)
+                sub_job_id = f"{job_dir.name}_{idx}"
+                if db_available:
+                    await update_job_status(
+                        job_id=sub_job_id,
+                        status="failed",
+                        error_detail=str(e),
+                    )
+                await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, str(e))
+                return {"name": pdf_name, "error": str(e)}
+
+        collect_tasks = [
+            asyncio.create_task(collect_worker(idx, pdf_info, job))
+            for idx, pdf_info, job in jobs
+        ]
+        all_results = await asyncio.gather(*collect_tasks)
+
+        # Phase 3: Save combined results
+        await _set_status(job_dir, "saving_results", "Saving batch results...")
+        combined = {
+            "batch": True,
+            "num_pdfs": len(pdfs_info),
+            "pdfs": all_results,
+            "pdf_names": [r.get("pdf_name") or r.get("name", f"file_{i}") for i, r in enumerate(all_results)],
+            "processing_time": round(time.time() - t0, 2),
+        }
+        results_dir = job_dir / "results"
+        results_dir.mkdir(exist_ok=True)
+        with open(results_dir / "result.json", "w") as f:
+            json.dump(combined, f, indent=2)
+
+        success = sum(1 for r in all_results if 'error' not in r)
+        failed = len(pdfs_info) - success
+        logger.info("ASYNC BATCH REPORT: %d files", len(pdfs_info))
+        for r in all_results:
+            name = r.get("pdf_name", r.get("name", "?"))
+            if "error" in r:
+                logger.warning("  ✗ %s — FAILED: %s", name, r['error'])
+            else:
+                fields = r.get("fields", [])
+                cov = r.get("coverage", "?")
+                conf = r.get("confidence", "?")
+                logger.info("  ✓ %s — %d fields, coverage=%s%% confidence=%s%%", name, len(fields), cov, conf)
+        logger.info("FILES: %d total  |  SUCCESS: %d  |  FAILED: %d  |  Time: %ss",
+                     len(pdfs_info), success, failed, combined.get('processing_time', '?'))
+        await _set_status(job_dir, "done", f"Batch complete: {success}/{len(pdfs_info)} succeeded.")
+    except Exception as e:
+        logger.exception("Async batch pipeline failed")
+        await _set_status(job_dir, "error", f"Async batch pipeline failed: {e}")
     finally:
         _cleanup_intermediate(job_dir)
 
@@ -930,7 +1124,7 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     # Page 3
     p3 = pages[3]
     p3.append("3.3. Type of Ceiling")
-    p3.append(f"  {get_check('3.3 Type of Ceiling — Roof')} Roof (Kurai)    {get_check('3.3 Type of Ceiling — Tiled')} Tiled    {get_check('3.3 Type of Ceiling — Asbestos')} Asbestos / Sheet    {get_check('3.3 Type of Ceiling — Concrete')} Concrete")
+    p3.append(f"  {get_check('3.3 Type of Ceiling — Roof (Kurai)')} Roof (Kurai)    {get_check('3.3 Type of Ceiling — Tiled')} Tiled    {get_check('3.3 Type of Ceiling — Asbestos / Sheet')} Asbestos / Sheet    {get_check('3.3 Type of Ceiling — Concrete')} Concrete")
     p3.append("")
     p3.append(f"3.4. Number of Bedrooms:  {get_val('3.4 Number of Bedrooms')}")
     p3.append(f"3.4.1 Type of Bedroom:   {get_radio('3.4.1 Type of Bedroom', 'Separate Bedroom')} Separate Bedroom     {get_radio('3.4.1 Type of Bedroom', 'No Separate Bedroom')} No Separate Bedroom")
