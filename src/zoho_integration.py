@@ -1488,9 +1488,9 @@ async def process_pending_on_startup(base_dir: Path) -> None:
 
     # Trigger batch pipeline
     print(f"  Starting batch pipeline run for {len(pdfs_info)} record(s)...\n")
-    from src.pipeline_runner import run_batch_pdfs_pipeline
+    from src.pipeline_runner import run_batch_pdfs_pipeline_async
     # Put it in a background task so it updates SSE and progress stores properly, but await it
-    await run_batch_pdfs_pipeline(batch_job_dir, pdfs_info)
+    await run_batch_pdfs_pipeline_async(batch_job_dir, pdfs_info)
 
     print(f"\n{'='*70}")
     print(f"  STARTUP AUTO-PROCESSOR — COMPLETE")
@@ -1636,8 +1636,8 @@ async def _process_pending_from_local(base_dir: Path, csv_path: Path, pdf_dir: P
 
     print(f"  Starting batch pipeline run for {total_eligible} file(s)...\n")
     await _set_status(batch_job_dir, "queued", f"Processing {total_eligible} files...")
-    from src.pipeline_runner import run_batch_pdfs_pipeline
-    await run_batch_pdfs_pipeline(batch_job_dir, pdfs_info)
+    from src.pipeline_runner import run_batch_pdfs_pipeline_async
+    await run_batch_pdfs_pipeline_async(batch_job_dir, pdfs_info)
 
     logger.info("LOCAL BATCH COMPLETE | job=%s | files=%d", batch_job_id, total_eligible)
     print(f"\n{'='*70}")

@@ -614,12 +614,14 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
 
 
 async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) -> None:
-    """Async submit+collect batch pipeline.
+    """Async submit+collect batch pipeline with overlapped per-file workers.
 
-    Features:
-    - Phase 1: Submit each PDF to Datalab as it's read (not all at once — memory efficient)
-    - Phase 2: Collect each result in background workers, gated by client's collect semaphore
-    - Phase 3: Save results to DB with per-file SSE status updates
+    Design:
+    - Every PDF gets its own worker that handles submit → collect sequentially.
+    - All workers fire concurrently so submit of file N overlaps with collect of file N-1.
+    - Memory: each worker reads its PDF, submits, then frees the bytes immediately.
+      Peak memory = max(PDF size) × max(concurrent submits via client semaphore).
+    - DB tracking, SSE updates, and error isolation per file preserved.
     """
     t0 = time.time()
     try:
@@ -633,17 +635,17 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
 
         await _set_status(job_dir, "submitted", f"Submitting {len(pdfs_info)} PDFs to Datalab...")
 
-        # Phase 1: Submit each PDF as we read it (streaming, not batch-reading all)
-        jobs: list[tuple[int, dict, DatalabJob | None]] = []
-
         db_available = False
         try:
-            from src.database import create_job, update_job_status
+            from src.database import create_job, update_job_status, upsert_ocr_document
             db_available = True
         except ImportError:
             pass
 
-        for idx, pdf_info in enumerate(pdfs_info):
+        total = len(pdfs_info)
+
+        async def file_worker(idx: int, pdf_info: dict) -> dict:
+            """One PDF: save original → submit → free → collect → save to DB."""
             pdf_path = pdf_info.get("path", "")
             pdf_name = pdf_info.get("name", Path(pdf_path).name if pdf_path else f"file_{idx}")
 
@@ -657,6 +659,7 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
                 except Exception as e:
                     logger.warning("Failed to save original PDF for %s: %s", pdf_name, e)
 
+            # Read PDF
             pdf_data = None
             if pdf_path and Path(pdf_path).exists():
                 with open(pdf_path, "rb") as f:
@@ -664,16 +667,15 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
 
             if pdf_data is None:
                 logger.warning("Cannot read PDF for %s — skipping", pdf_name)
-                jobs.append((idx, pdf_info, None))
-                continue
+                await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, "Cannot read PDF")
+                return {"name": pdf_name, "error": "Cannot read PDF"}
 
+            # Submit
             job = await primary.submit(pdf_data)
+            pdf_data = None  # free memory immediately
 
-            # Free PDF data immediately after submit
-            pdf_data = None
-
-            # Create DB record immediately
             sub_job_id = f"{job_dir.name}_{idx}"
+
             if job and db_available:
                 await create_job(
                     job_id=sub_job_id,
@@ -687,29 +689,16 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
                     datalab_check_url=job.check_url,
                 )
 
-            jobs.append((idx, pdf_info, job))
-
-            # Per-file SSE: submitted
             await _set_batch_pdf_status(job_dir, pdf_name, "submitted", 10,
-                                         f"Submitted ({idx+1}/{len(pdfs_info)})")
+                                         f"Submitted ({idx+1}/{total})")
 
-        submitted = sum(1 for _, _, j in jobs if j is not None)
-        logger.info("Async batch: %d/%d PDFs submitted successfully", submitted, len(pdfs_info))
-        await _set_status(job_dir, "primary_extraction",
-                          f"Collecting {submitted} results from Datalab...")
-
-        # Phase 2: Collect results in background workers
-        all_results: list[dict] = []
-
-        async def collect_worker(idx: int, pdf_info: dict, job: DatalabJob | None):
             if job is None:
-                pdf_name = pdf_info.get("name", f"file_{idx}")
                 return {"name": pdf_name, "error": "Failed to submit to Datalab"}
 
-            pdf_name = pdf_info.get("name", f"file_{idx}")
+            # Collect (starts immediately, overlaps with sibling submits/collects)
             try:
                 await _set_batch_pdf_status(job_dir, pdf_name, "collecting", 50,
-                                             f"Collecting ({idx+1}/{len(pdfs_info)})")
+                                             f"Collecting ({idx+1}/{total})")
 
                 result = await primary.collect(job)
                 if not result:
@@ -720,9 +709,7 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
                 data["pdf_name"] = pdf_name
                 data["input_type"] = "batch_pdf"
 
-                sub_job_id = f"{job_dir.name}_{idx}"
                 if db_available:
-                    from src.database import upsert_ocr_document
                     await upsert_ocr_document(
                         job_id=sub_job_id,
                         file_name=pdf_name,
@@ -735,12 +722,11 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
                     )
 
                 await _set_batch_pdf_status(job_dir, pdf_name, "done", 100,
-                                             f"Done ({idx+1}/{len(pdfs_info)})")
+                                             f"Done ({idx+1}/{total})")
                 return data
 
             except Exception as e:
                 logger.exception("Collect failed for pdf=%s: %s", pdf_name, e)
-                sub_job_id = f"{job_dir.name}_{idx}"
                 if db_available:
                     await update_job_status(
                         job_id=sub_job_id,
@@ -750,17 +736,15 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
                 await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, str(e))
                 return {"name": pdf_name, "error": str(e)}
 
-        collect_tasks = [
-            asyncio.create_task(collect_worker(idx, pdf_info, job))
-            for idx, pdf_info, job in jobs
-        ]
-        all_results = await asyncio.gather(*collect_tasks)
+        # Fire one worker per PDF — submission pipelining with collection happens naturally
+        tasks = [asyncio.create_task(file_worker(idx, pdf_info)) for idx, pdf_info in enumerate(pdfs_info)]
+        all_results = await asyncio.gather(*tasks)
 
-        # Phase 3: Save combined results
+        # Save combined results
         await _set_status(job_dir, "saving_results", "Saving batch results...")
         combined = {
             "batch": True,
-            "num_pdfs": len(pdfs_info),
+            "num_pdfs": total,
             "pdfs": all_results,
             "pdf_names": [r.get("pdf_name") or r.get("name", f"file_{i}") for i, r in enumerate(all_results)],
             "processing_time": round(time.time() - t0, 2),
@@ -771,8 +755,8 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
             json.dump(combined, f, indent=2)
 
         success = sum(1 for r in all_results if 'error' not in r)
-        failed = len(pdfs_info) - success
-        logger.info("ASYNC BATCH REPORT: %d files", len(pdfs_info))
+        failed = total - success
+        logger.info("ASYNC BATCH REPORT: %d files", total)
         for r in all_results:
             name = r.get("pdf_name", r.get("name", "?"))
             if "error" in r:
@@ -783,8 +767,8 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
                 conf = r.get("confidence", "?")
                 logger.info("  ✓ %s — %d fields, coverage=%s%% confidence=%s%%", name, len(fields), cov, conf)
         logger.info("FILES: %d total  |  SUCCESS: %d  |  FAILED: %d  |  Time: %ss",
-                     len(pdfs_info), success, failed, combined.get('processing_time', '?'))
-        await _set_status(job_dir, "done", f"Batch complete: {success}/{len(pdfs_info)} succeeded.")
+                     total, success, failed, combined.get('processing_time', '?'))
+        await _set_status(job_dir, "done", f"Batch complete: {success}/{total} succeeded.")
     except Exception as e:
         logger.exception("Async batch pipeline failed")
         await _set_status(job_dir, "error", f"Async batch pipeline failed: {e}")
