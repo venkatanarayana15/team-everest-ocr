@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS ocr_documents (
     has_other_income            BOOLEAN,
     other_income_sources        JSONB,
     income_type                 TEXT,
-    has_loans                   BOOLEAN,
+    has_loans                   TEXT,
     loan_details                JSONB,
     college_fee                 TEXT,
     manage_higher_fee           TEXT,
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS ocr_documents (
     -- ── Section 6: Student Commitment ──
     study_commitment            TEXT,
     training_program_availability TEXT,
-    ready_for_skill_classes     BOOLEAN,
+    ready_for_skill_classes     TEXT,
 
     -- ── Section 7: Scholarship Information ──
     other_scholarships          TEXT,

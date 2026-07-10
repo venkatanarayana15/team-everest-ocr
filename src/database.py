@@ -63,19 +63,11 @@ FIELD_TO_COLUMN: dict[str, str] = {
     "8.3 Any other comments you want to share?": "volunteer_comments",
 }
 
-BOOLEAN_COLUMNS: set[str] = {
-    "photograph_kept_at_home",
-    "owns_other_assets",
-    "has_other_income",
-    "has_loans",
-    "has_health_issues",
-    "ready_for_skill_classes",
-}
+BOOLEAN_COLUMNS: set[str] = set()
 
 JSONB_ARRAY_COLUMNS: set[str] = {
     "type_of_home",
     "type_of_ceiling",
-    "kitchen_type",
     "assets_at_home",
     "government_id_verified",
 }
@@ -161,87 +153,6 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
             for row_num in sorted(rows.keys())
         ]
         out[col] = json.dumps(sorted_rows)
-
-    # Derive House Ownership from split checkbox fields (3.1)
-    own_label = "3.1 House Ownership — Own"
-    rent_label = "3.1 House Ownership — Rented"
-    own_checked = _is_checked(label_map.get(own_label))
-    rent_checked = _is_checked(label_map.get(rent_label))
-    if "house_ownership" not in out:
-        if own_checked ^ rent_checked:
-            out["house_ownership"] = "Own" if own_checked else "Rented"
-        elif own_checked and rent_checked:
-            out["house_ownership"] = "Own"
-
-    # Derive Type of Bedroom from split checkbox fields (3.4.1)
-    bed_sep_label = "3.4.1 Type of Bedroom — Separate Bedroom"
-    bed_no_label = "3.4.1 Type of Bedroom — No Separate Bedroom"
-    bed_sep_checked = _is_checked(label_map.get(bed_sep_label))
-    bed_no_checked = _is_checked(label_map.get(bed_no_label))
-    if "type_of_bedroom" not in out:
-        if bed_sep_checked ^ bed_no_checked:
-            out["type_of_bedroom"] = "Separate Bedroom" if bed_sep_checked else "No Separate Bedroom"
-        elif bed_sep_checked and bed_no_checked:
-            out["type_of_bedroom"] = "Separate Bedroom"
-
-    # Derive bathroom string from split checkbox fields (3.5)
-    bath_sep_label = "3.5 Bathroom — Separate"
-    bath_common_label = "3.5 Bathroom — Common for Apartment"
-    bath_sep_checked = _is_checked(label_map.get(bath_sep_label))
-    bath_common_checked = _is_checked(label_map.get(bath_common_label))
-    if "bathroom" not in out:
-        if bath_sep_checked ^ bath_common_checked:
-            out["bathroom"] = "Separate" if bath_sep_checked else "Common for Apartment"
-        elif bath_sep_checked and bath_common_checked:
-            out["bathroom"] = "Separate"
-
-    # Derive photograph_kept_at_home boolean from split checkbox fields (2.3)
-    photo_yes_label = "2.3 Is Father/Mother photograph kept at home? — Yes"
-    photo_no_label = "2.3 Is Father/Mother photograph kept at home? — No"
-    photo_yes_checked = _is_checked(label_map.get(photo_yes_label))
-    photo_no_checked = _is_checked(label_map.get(photo_no_label))
-    if "photograph_kept_at_home" not in out:
-        if photo_yes_checked ^ photo_no_checked:
-            out["photograph_kept_at_home"] = photo_yes_checked
-        elif photo_yes_checked and photo_no_checked:
-            out["photograph_kept_at_home"] = True
-
-    # Derive owns_other_assets boolean from split checkbox fields (4.3)
-    assets_yes_label = (
-        "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes"
-    )
-    assets_no_label = (
-        "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No"
-    )
-    assets_yes_checked = _is_checked(label_map.get(assets_yes_label))
-    assets_no_checked = _is_checked(label_map.get(assets_no_label))
-    if "owns_other_assets" not in out:
-        if assets_yes_checked ^ assets_no_checked:
-            out["owns_other_assets"] = assets_yes_checked
-        elif assets_yes_checked and assets_no_checked:
-            out["owns_other_assets"] = True
-
-    # Derive has_other_income boolean from split checkbox fields (4.4)
-    income_yes_label = "4.4 Apart from your job, is there any other source of income? — Yes"
-    income_no_label = "4.4 Apart from your job, is there any other source of income? — No"
-    income_yes_checked = _is_checked(label_map.get(income_yes_label))
-    income_no_checked = _is_checked(label_map.get(income_no_label))
-    if "has_other_income" not in out:
-        if income_yes_checked ^ income_no_checked:
-            out["has_other_income"] = income_yes_checked
-        elif income_yes_checked and income_no_checked:
-            out["has_other_income"] = True
-
-    # Derive has_health_issues boolean from split checkbox fields (5.1)
-    health_yes_label = "5.1 Does the student have any health issues? — Yes"
-    health_no_label = "5.1 Does the student have any health issues? — No"
-    health_yes_checked = _is_checked(label_map.get(health_yes_label))
-    health_no_checked = _is_checked(label_map.get(health_no_label))
-    if "has_health_issues" not in out:
-        if health_yes_checked ^ health_no_checked:
-            out["has_health_issues"] = health_yes_checked
-        elif health_yes_checked and health_no_checked:
-            out["has_health_issues"] = True
 
     return out
 

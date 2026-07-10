@@ -1106,7 +1106,7 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     p2.append("─" * C_WIDTH)
     p2.append("Section 3 — Housing Condition")
     p2.append("")
-    p2.append(f"3.1. House Ownership:   {get_check('3.1 House Ownership — Own')} Own     {get_check('3.1 House Ownership — Rented')} Rented")
+    p2.append(f"3.1. House Ownership:   {get_radio('3.1 House Ownership', 'Own')} Own     {get_radio('3.1 House Ownership', 'Rented')} Rented")
     p2.append(f"3.1.1 If rented, what is the rent amount?  {get_val('3.1.1 If rented, what is the rent amount?')}")
     p2.append("")
     p2.append(f"3.2. Type of Home:   {get_check('3.2 Type of Home — Individual')} Individual   {get_check('3.2 Type of Home — Private Apartment')} Private Apartment   {get_check('3.2 Type of Home — Housing Board')} Housing Board   {get_check('3.2 Type of Home — Line House')} Line House   {get_check('3.2 Type of Home — Others')} Others")
@@ -1117,11 +1117,11 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     p3.append(f"  {get_check('3.3 Type of Ceiling — Roof (Kurai)')} Roof (Kurai)    {get_check('3.3 Type of Ceiling — Tiled')} Tiled    {get_check('3.3 Type of Ceiling — Asbestos / Sheet')} Asbestos / Sheet    {get_check('3.3 Type of Ceiling — Concrete')} Concrete")
     p3.append("")
     p3.append(f"3.4. Number of Bedrooms:  {get_val('3.4 Number of Bedrooms')}")
-    p3.append(f"3.4.1 Type of Bedroom:   {get_check('3.4.1 Type of Bedroom — Separate Bedroom')} Separate Bedroom     {get_check('3.4.1 Type of Bedroom — No Separate Bedroom')} No Separate Bedroom")
+    p3.append(f"3.4.1 Type of Bedroom:   {get_radio('3.4.1 Type of Bedroom', 'Separate Bedroom')} Separate Bedroom     {get_radio('3.4.1 Type of Bedroom', 'No Separate Bedroom')} No Separate Bedroom")
     p3.append("")
     p3.append(f"3.5. Bathroom:   {get_radio('3.5 Bathroom', 'Separate')} Separate     {get_radio('3.5 Bathroom', 'Common for Apartment')} Common for Apartment")
     p3.append("")
-    p3.append(f"3.6. Kitchen Type:   {get_check('3.6 Kitchen Type — Separate Kitchen')} Separate Kitchen     {get_check('3.6 Kitchen Type — Hall with Kitchen')} Hall with Kitchen")
+    p3.append(f"3.6. Kitchen Type:   {get_radio('3.6 Kitchen Type', 'Separate Kitchen')} Separate Kitchen     {get_radio('3.6 Kitchen Type', 'Hall with Kitchen')} Hall with Kitchen")
     p3.append("─" * C_WIDTH)
     p3.append("Section 4 — Financial Background")
     p3.append("")
@@ -1132,7 +1132,7 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     p3.append(f"4.2. Amount of Last Electricity Bill:  {get_val('4.2 Amount of Last Electricity Bill')}")
     p3.append("")
     p3.append("4.3. Do you own any other assets/properties in the name of grandparents, parents, or student?")
-    p3.append(f"  {get_check('4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes')} Yes     {get_check('4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No')} No")
+    p3.append(f"  {get_radio('4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?', 'Yes')} Yes     {get_radio('4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?', 'No')} No")
 
     # Page 4
     p4 = pages[4]

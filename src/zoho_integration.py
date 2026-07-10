@@ -228,6 +228,7 @@ FIELD_TO_ZOHO: dict[str, str] = {
     "3.4 Number of Bedrooms": "Number_of_Bedrooms",
     "3.4.1 Type of Bedroom": "Type_of_Bedroom",
     "3.5 Bathroom": "Bathroom",
+    "3.6 Kitchen Type": "Kitchen_Type",
     # Section 4 — Financial Background
     "4.2 Amount of Last Electricity Bill": "Amount_of_Last_Electricity_Bill",
     "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?": "Do_you_own_any_other_assets_or_properties_in_the_name_of_grandparents_parent_or_student",
