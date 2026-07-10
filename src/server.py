@@ -1394,8 +1394,10 @@ WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 async def webhook_extraction_completed(payload: dict):
     """Webhook endpoint called by Datalab when extraction completes.
 
-    Expects: { request_id, check_url, status, markdown, ... }
-    Returns 200 immediately, processes payload in background.
+    Datalab webhook payload: { request_id, request_check_url, webhook_secret }
+    This is just a notification — no extraction data in the body.
+    We signal the waiting pipeline worker, which fetches the result via
+    a single rate-limited GET to request_check_url.
     """
     auth = payload.get("auth_token", "")
     if WEBHOOK_SECRET and auth != WEBHOOK_SECRET:
@@ -1405,107 +1407,13 @@ async def webhook_extraction_completed(payload: dict):
     if not request_id:
         raise HTTPException(400, "Missing request_id")
 
-    logger.info("Webhook received: request_id=%s status=%s", request_id, payload.get("status"))
+    logger.info("Webhook received: request_id=%s", request_id)
 
-    # Dispatch background processing immediately
-    asyncio.create_task(_process_webhook_payload(request_id, payload))
+    # Wake up the waiting pipeline worker — it fetches the result itself
+    from src.datalab_client import signal_webhook
+    signal_webhook(request_id)
 
     return {"status": "acknowledged"}
-
-
-async def _process_webhook_payload(request_id: str, payload: dict) -> None:
-    """Background process a completed extraction webhook payload.
-
-    Includes retry logic and basic payload validation.
-    """
-    if not DB_AVAILABLE:
-        logger.warning("Webhook: DB not available, skipping processing for request_id=%s", request_id)
-        return
-
-    # Basic payload validation
-    status = payload.get("status", "")
-    if status not in ("completed", "failed", "complete"):
-        logger.warning("Webhook: unexpected status=%s for request_id=%s", status, request_id)
-        return
-
-    for attempt in range(3):
-        try:
-            from src.datalab_schema import convert_extract_response
-
-            if status in ("failed",):
-                error_msg = payload.get("error", "Unknown error")
-                logger.error("Webhook: extraction failed for request_id=%s: %s", request_id, error_msg)
-                from src.database import get_pool
-                pool = get_pool()
-                async with pool.acquire() as conn:
-                    row = await conn.fetchrow(
-                        "SELECT job_id FROM ocr_jobs WHERE datalab_request_id = $1",
-                        request_id,
-                    )
-                    if row:
-                        await update_job_status(
-                            job_id=row["job_id"],
-                            status="failed",
-                            error_detail=error_msg,
-                        )
-                return
-
-            extraction_data = payload.get("extraction_schema_json", payload)
-            if isinstance(extraction_data, str):
-                extraction_data = json.loads(extraction_data)
-            if not isinstance(extraction_data, dict):
-                raise ValueError(f"Expected dict extraction data, got {type(extraction_data).__name__}")
-
-            data = convert_extract_response(extraction_data)
-
-            from src.database import get_pool
-            pool = get_pool()
-            async with pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT job_id, file_name FROM ocr_jobs WHERE datalab_request_id = $1",
-                    request_id,
-                )
-
-            if not row:
-                logger.warning("Webhook: no job found for request_id=%s", request_id)
-                return
-
-            job_id = row["job_id"]
-            file_name = row["file_name"]
-
-            # Idempotency check: skip if already completed
-            async with pool.acquire() as conn:
-                existing = await conn.fetchrow(
-                    "SELECT status FROM ocr_jobs WHERE job_id = $1",
-                    job_id,
-                )
-                if existing and existing["status"] == "completed":
-                    logger.info("Webhook: job=%s already completed (idempotent skip)", job_id)
-                    return
-
-            await upsert_ocr_document(
-                job_id=job_id,
-                file_name=file_name,
-                status="done",
-                result_json=data,
-            )
-
-            await update_job_status(
-                job_id=job_id,
-                status="completed",
-            )
-
-            logger.info("Webhook: processed OK for request_id=%s job=%s fields=%d",
-                         request_id, job_id, len(data.get("fields", [])))
-            return
-
-        except Exception as e:
-            logger.warning("Webhook processing failed (attempt %d/3) for request_id=%s: %s",
-                           attempt + 1, request_id, e)
-            if attempt < 2:
-                await asyncio.sleep(2 ** attempt)
-
-    logger.error("Webhook processing exhausted retries for request_id=%s", request_id)
 
 
 @app.get("/download/{job_id}")

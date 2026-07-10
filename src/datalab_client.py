@@ -28,6 +28,16 @@ from src.model_client import ModelClient, TokenUsage
 
 logger = logging.getLogger(__name__)
 
+# Webhook signal infrastructure — shared across the pipeline workers and server.py
+_webhook_pending: dict[str, asyncio.Event] = {}
+
+
+def signal_webhook(request_id: str) -> None:
+    """Wake up a waiting collect() worker when the webhook fires."""
+    event = _webhook_pending.get(request_id)
+    if event:
+        event.set()
+
 
 class TokenBucket:
     """Async token-bucket rate limiter.
@@ -113,7 +123,11 @@ class DatalabOcrClient(ModelClient):
 
         self._mode = _env("DATALAB_MODE", "balanced")
         self._collect_timeout = _float_env("DATALAB_COLLECT_TIMEOUT", "1200")
-        self._initial_poll_delay = _float_env("DATALAB_INITIAL_POLL_DELAY", "30")
+        self._initial_poll_delay = _float_env("DATALAB_INITIAL_POLL_DELAY", "5")
+
+        # Webhook mode — when set, submit with callback URL and wait for it instead of polling
+        self._webhook_base_url = _env("DATALAB_WEBHOOK_BASE_URL", "")
+        self._webhook_timeout = _float_env("DATALAB_WEBHOOK_TIMEOUT", "60")
 
         from src.datalab_schema import EXTRACT_SCHEMA
         self._schema = EXTRACT_SCHEMA
@@ -162,6 +176,7 @@ class DatalabOcrClient(ModelClient):
                         data={
                             "page_schema": json.dumps(self._schema),
                             "mode": self._mode,
+                            **({"webhook_url": f"{self._webhook_base_url}/api/webhooks/extraction-completed"} if self._webhook_base_url else {}),
                         },
                         timeout=120.0,
                     )
@@ -205,7 +220,29 @@ class DatalabOcrClient(ModelClient):
         last_log_ts = 0.0
         log_interval = 30.0
 
-        # Wait for initial processing before wasting a poll
+        # Phase 1: Wait for webhook callback (if configured)
+        if self._webhook_base_url:
+            event = asyncio.Event()
+            _webhook_pending[job.request_id] = event
+            try:
+                logger.debug("Datalab waiting for webhook: request_id=%s timeout=%.0fs", job.request_id, self._webhook_timeout)
+                await asyncio.wait_for(event.wait(), timeout=self._webhook_timeout)
+                elapsed = time.monotonic() - t_start
+                # Webhook fired — now do a single rate-limited fetch (no polling loop)
+                body = await self._fetch_result(job)
+                if body:
+                    elapsed = time.monotonic() - t_start
+                    logger.info("Datalab collect OK (webhook): request_id=%s (elapsed=%.1fs)", job.request_id, elapsed)
+                    return body
+            except asyncio.TimeoutError:
+                pass
+            finally:
+                _webhook_pending.pop(job.request_id, None)
+
+            elapsed = time.monotonic() - t_start
+            logger.info("Datalab webhook timeout, falling back to polling: request_id=%s (elapsed=%.1fs)", job.request_id, elapsed)
+
+        # Phase 2: Wait for initial processing before wasting a poll
         initial_delay = self._initial_poll_delay
         if initial_delay > 0:
             logger.debug("Datalab waiting initial %.0fs before polling %s", initial_delay, job.request_id)
@@ -234,6 +271,14 @@ class DatalabOcrClient(ModelClient):
                     resp = await client.get(job.check_url, headers=headers)
                     resp.raise_for_status()
                     body = resp.json()
+                    logger.info("Datalab poll response keys: %s", list(body.keys()))
+                    for k in ["markdown", "chunks", "segmentation_results", "json", "images", "metadata", "html"]:
+                        v = body.get(k)
+                        if v is not None:
+                            snippet = str(v)[:400].replace("\n", "\\n")
+                            logger.info("Datalab %s type=%s len=%d snippet=%s", k, type(v).__name__, len(v) if isinstance(v, (str, list, dict)) else -1, snippet)
+                        else:
+                            logger.info("Datalab %s is None", k)
 
                     status = body.get("status", "processing")
 
@@ -259,6 +304,34 @@ class DatalabOcrClient(ModelClient):
                     raise
 
                 await asyncio.sleep(interval)
+
+    async def _fetch_result(self, job: DatalabJob) -> dict | None:
+        """Single rate-limited GET to fetch extraction result (used after webhook signal)."""
+        headers = {"X-API-Key": self.api_key}
+        await self._rate_limiter.acquire()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                resp = await client.get(job.check_url, headers=headers)
+                resp.raise_for_status()
+                body = resp.json()
+                logger.info("Datalab response keys: %s", list(body.keys()))
+                for k in ["markdown", "chunks", "segmentation_results", "json", "images", "metadata", "html"]:
+                    v = body.get(k)
+                    if v is not None:
+                        snippet = str(v)[:400].replace("\n", "\\n")
+                        logger.info("Datalab %s type=%s len=%d snippet=%s", k, type(v).__name__, len(v) if isinstance(v, (str, list, dict)) else -1, snippet)
+                    else:
+                        logger.info("Datalab %s is None", k)
+                status = body.get("status", "processing")
+                if status == "complete" and body.get("success"):
+                    return body
+                if status == "failed":
+                    raise RuntimeError(f"Datalab processing failed: {body.get('error', 'unknown')}")
+                return None
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429:
+                    logger.warning("Datalab rate limited during webhook fetch for %s", job.request_id)
+                return None
 
     async def _get_pdf_data(self, pdf_path: str, page_images: dict[int, str]) -> bytes | None:
         if pdf_path and Path(pdf_path).exists():

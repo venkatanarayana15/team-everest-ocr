@@ -646,6 +646,7 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
 
         async def file_worker(idx: int, pdf_info: dict) -> dict:
             """One PDF: save original → submit → free → collect → save to DB."""
+            t_file = time.time()
             pdf_path = pdf_info.get("path", "")
             pdf_name = pdf_info.get("name", Path(pdf_path).name if pdf_path else f"file_{idx}")
 
@@ -709,12 +710,17 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
                 data["pdf_name"] = pdf_name
                 data["input_type"] = "batch_pdf"
 
+                processing_time = round(time.time() - t_file, 2)
+                confidence_score = data.get("overall_confidence")
+
                 if db_available:
                     await upsert_ocr_document(
                         job_id=sub_job_id,
                         file_name=pdf_name,
                         status="done",
                         result_json=data,
+                        processing_time=processing_time,
+                        confidence_score=confidence_score,
                     )
                     await update_job_status(
                         job_id=sub_job_id,

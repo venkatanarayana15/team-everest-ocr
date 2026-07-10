@@ -32,15 +32,17 @@ EXTRACT_SCHEMA: dict = {
     "application_id": {"type": "string", "description": "1.1 Application ID"},
     "student_full_name": {"type": "string", "description": "1.2 Student Full Name"},
     "gender": {"type": "string", "description": "1.3 Gender: Male | Female | Others"},
-    "family_status": {"type": "string", "description": "2.1 Family Status: Single Parent | Parentless | Having both parents"},
+    "family_status": {"type": "string", "description": "2.1 Family Status: Single Parent | Parentless | Having both parents. If any additional notes are written below these checkbox options, capture them in the 'Relationship Details — Reason for Death / Separation' field (2.2)."},
     "relationship_death_year": {"type": "string", "description": "2.2 Relationship Details — Year of Death / Separation"},
-    "relationship_death_reason": {"type": "string", "description": "2.2 Relationship Details — Reason for Death / Separation"},
-    "photograph_kept_at_home": {"type": "string", "description": "2.3 Is Father/Mother photograph kept at home?: Yes | No"},
+    "relationship_death_reason": {"type": "string", "description": "2.2 Relationship Details — Reason for Death / Separation. ALSO: capture any free-text notes written by the applicant in the blank space below the 2.1 (Family Status) checkbox options here — e.g. 'Mother passed away in 2020, father is daily wage laborer'."},
+    "photograph_kept_at_home_yes": {"type": "boolean", "description": "2.3 Is Father/Mother photograph kept at home? — Yes (checkbox)"},
+    "photograph_kept_at_home_no": {"type": "boolean", "description": "2.3 Is Father/Mother photograph kept at home? — No (checkbox)"},
     "govt_id_aadhaar": {"type": "boolean", "description": "2.4 Government ID Verified — Aadhaar Card (checked=true)"},
     "govt_id_ration": {"type": "boolean", "description": "2.4 Government ID Verified — Ration Card"},
     "govt_id_driving_licence": {"type": "boolean", "description": "2.4 Government ID Verified — Driving Licence"},
     "govt_id_voter": {"type": "boolean", "description": "2.4 Government ID Verified — Voter ID"},
     "govt_id_other": {"type": "boolean", "description": "2.4 Government ID Verified — Other"},
+    "govt_id_other_text": {"type": "string", "description": "2.4 Government ID Verified — Other (text written on the blank line next to Other checkbox, e.g. 'Pan Card', 'Senior Citizen ID')"},
     "family_members": {
         "type": "array",
         "items": {
@@ -70,19 +72,20 @@ EXTRACT_SCHEMA: dict = {
     "number_of_bedrooms": {"type": "string", "description": "3.4 Number of Bedrooms"},
     "bedroom_separate": {"type": "boolean", "description": "3.4.1 Type of Bedroom — Separate Bedroom"},
     "bedroom_no_separate": {"type": "boolean", "description": "3.4.1 Type of Bedroom — No Separate Bedroom"},
-    "bathroom": {"type": "string", "description": "3.5 Bathroom: Separate | Common for Apartment"},
+    "bathroom_separate": {"type": "boolean", "description": "3.5 Bathroom — Separate (checkbox)"},
+    "bathroom_common": {"type": "boolean", "description": "3.5 Bathroom — Common for Apartment (checkbox)"},
     "kitchen_separate": {"type": "boolean", "description": "3.6 Kitchen Type — Separate Kitchen"},
     "kitchen_hall": {"type": "boolean", "description": "3.6 Kitchen Type — Hall with Kitchen"},
-    "asset_washing_machine": {"type": "boolean", "description": "4.1 Assets at Home — Washing Machine"},
-    "asset_fridge": {"type": "boolean", "description": "4.1 Assets at Home — Fridge"},
-    "asset_ac": {"type": "boolean", "description": "4.1 Assets at Home — AC"},
-    "asset_led_tv": {"type": "boolean", "description": "4.1 Assets at Home — LED TV"},
-    "asset_two_wheeler": {"type": "boolean", "description": "4.1 Assets at Home — Two-Wheeler"},
-    "asset_car": {"type": "boolean", "description": "4.1 Assets at Home — Car"},
-    "asset_smartphone": {"type": "boolean", "description": "4.1 Assets at Home — Smartphone"},
-    "asset_separate_wifi": {"type": "boolean", "description": "4.1 Assets at Home — Separate Wi-Fi"},
-    "asset_others": {"type": "string", "description": "4.1 Assets at Home — Others (capture full text if user wrote something after 'Others', e.g. 'Others: computer'). IMPORTANT: include the 'Others:' prefix"},
-    "last_electricity_bill": {"type": "string", "description": "4.2 Amount of Last Electricity Bill"},
+    "asset_washing_machine": {"type": "boolean", "description": "4.1 Assets at Home — Washing Machine. Return true ONLY if the mark inside the checkbox is a tick/forward-slash (/). Return false if the mark is an X/cross. Omit if blank."},
+    "asset_fridge": {"type": "boolean", "description": "4.1 Assets at Home — Fridge. Return true ONLY if the mark inside the checkbox is a tick/forward-slash (/). Return false if the mark is an X/cross. Omit if blank."},
+    "asset_ac": {"type": "boolean", "description": "4.1 Assets at Home — AC. Return true ONLY if the mark inside the checkbox is a tick/forward-slash (/). Return false if the mark is an X/cross. Omit if blank."},
+    "asset_led_tv": {"type": "boolean", "description": "4.1 Assets at Home — LED TV. Return true ONLY if the mark inside the checkbox is a tick/forward-slash (/). Return false if the mark is an X/cross. Omit if blank."},
+    "asset_two_wheeler": {"type": "boolean", "description": "4.1 Assets at Home — Two-Wheeler. Return true ONLY if the mark inside the checkbox is a tick/forward-slash (/). Return false if the mark is an X/cross. Omit if blank."},
+    "asset_car": {"type": "boolean", "description": "4.1 Assets at Home — Car. Return true ONLY if the mark inside the checkbox is a tick/forward-slash (/). Return false if the mark is an X/cross. Omit if blank."},
+    "asset_smartphone": {"type": "boolean", "description": "4.1 Assets at Home — Smartphone. Return true ONLY if the mark inside the checkbox is a tick/forward-slash (/). Return false if the mark is an X/cross. Omit if blank."},
+    "asset_separate_wifi": {"type": "boolean", "description": "4.1 Assets at Home — Separate Wi-Fi. Return true ONLY if the mark inside the checkbox is a tick/forward-slash (/). Return false if the mark is an X/cross. Omit if blank."},
+    "asset_others": {"type": "string", "description": "4.1 Assets at Home — Others. CRITICAL: Always return any text written on the blank line after 'Others' even if the checkbox is not ticked. Prefix it with 'Others: ' — e.g. 'Others: normal tv'. If the checkbox has a mark with no text, return '✓' for tick, 'x' or '✗' for cross."},
+    "last_electricity_bill": {"type": "string", "description": "4.2 Last Electricity Bill Amount — extract the monthly electricity bill amount written on the form (e.g. '700', 'Rs.700/-', '700/-'). This is a handwritten amount in the electricity bill field — ignore any other numbers printed on the page."},
     "owns_other_assets_yes": {"type": "boolean", "description": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes"},
     "owns_other_assets_no": {"type": "boolean", "description": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No"},
     "other_assets_table": {
@@ -90,14 +93,15 @@ EXTRACT_SCHEMA: dict = {
         "items": {
             "type": "object",
             "properties": {
-                "property_description": {"type": "string", "description": "Property description"},
+                "property_description": {"type": "string", "description": "Property description. ALSO: capture any handwritten notes that appear in the blank space below the 4.3.1 table rows but before the 4.4 question — put that text here as an additional row."},
                 "owner_name": {"type": "string", "description": "Owner name"},
                 "approximate_value": {"type": "string", "description": "Approximate value"},
             },
         },
-        "description": "4.3.1 Other assets/properties table",
+        "description": "4.3.1 Other assets/properties table. The table typically has 1-2 structured rows. BELOW those table rows there is blank space before the 4.4 question — if any handwritten notes appear in that space, include them as an extra row with the text in 'property_description' and leave owner_name and approximate_value blank.",
     },
-    "has_other_income": {"type": "string", "description": "4.4 Apart from job, other income?: Yes | No"},
+    "has_other_income_yes": {"type": "boolean", "description": "4.4 Apart from job, other income? — Yes (checkbox)"},
+    "has_other_income_no": {"type": "boolean", "description": "4.4 Apart from job, other income? — No (checkbox)"},
     "other_income_table": {
         "type": "array",
         "items": {
@@ -116,6 +120,7 @@ EXTRACT_SCHEMA: dict = {
         "items": {
             "type": "object",
             "properties": {
+                "serial_number": {"type": "string", "description": "S.No"},
                 "loan_purpose": {"type": "string", "description": "Loan purpose"},
                 "loan_amount_taken": {"type": "string", "description": "Loan amount taken"},
                 "pending_loan_amount": {"type": "string", "description": "Pending loan amount"},
@@ -126,7 +131,8 @@ EXTRACT_SCHEMA: dict = {
     "college_fee": {"type": "string", "description": "4.7 If you choose college, how much is the college fee?"},
     "manage_higher_fee": {"type": "string", "description": "4.8 If the college fee is higher, how will you manage it?"},
     "manage_without_scholarship": {"type": "string", "description": "4.9 If you do not receive this scholarship, how will you pay the fees?"},
-    "has_health_issues": {"type": "string", "description": "5.1 Does the student have any health issues?: Yes | No"},
+    "has_health_issues_yes": {"type": "boolean", "description": "5.1 Does the student have any health issues? — Yes (checkbox)"},
+    "has_health_issues_no": {"type": "boolean", "description": "5.1 Does the student have any health issues? — No (checkbox)"},
     "health_issues_description": {"type": "string", "description": "5.2 If yes, list the health issues"},
     "study_commitment": {"type": "string", "description": "6.1 Will you study college for three years without any obstacle?"},
     "training_program_availability": {"type": "string", "description": "6.2 Training program within 15 km?: Yes | No | Maybe"},
@@ -148,12 +154,14 @@ SCHEMA_KEY_MAP = {
     "family_status": {"label": "2.1 Family Status", "page": 1, "section": 2},
     "relationship_death_year": {"label": "2.2 Relationship Details — Year of Death / Separation", "page": 1, "section": 2},
     "relationship_death_reason": {"label": "2.2 Relationship Details — Reason for Death / Separation", "page": 1, "section": 2},
-    "photograph_kept_at_home": {"label": "2.3 Is Father/Mother photograph kept at home?", "page": 2, "section": 2},
+    "photograph_kept_at_home_yes": {"label": "2.3 Is Father/Mother photograph kept at home? — Yes", "page": 2, "section": 2},
+    "photograph_kept_at_home_no": {"label": "2.3 Is Father/Mother photograph kept at home? — No", "page": 2, "section": 2},
     "govt_id_aadhaar": {"label": "2.4 Government ID Verified — Aadhaar Card", "page": 2, "section": 2},
     "govt_id_ration": {"label": "2.4 Government ID Verified — Ration Card", "page": 2, "section": 2},
     "govt_id_driving_licence": {"label": "2.4 Government ID Verified — Driving Licence", "page": 2, "section": 2},
     "govt_id_voter": {"label": "2.4 Government ID Verified — Voter ID", "page": 2, "section": 2},
     "govt_id_other": {"label": "2.4 Government ID Verified — Other", "page": 2, "section": 2},
+    "govt_id_other_text": {"label": "2.4 Government ID Verified — Other (specify)", "page": 2, "section": 2},
     "house_ownership_own": {"label": "3.1 House Ownership — Own", "page": 2, "section": 3},
     "house_ownership_rented": {"label": "3.1 House Ownership — Rented", "page": 2, "section": 3},
     "rent_amount": {"label": "3.1.1 If rented, what is the rent amount?", "page": 2, "section": 3},
@@ -169,7 +177,8 @@ SCHEMA_KEY_MAP = {
     "number_of_bedrooms": {"label": "3.4 Number of Bedrooms", "page": 3, "section": 3},
     "bedroom_separate": {"label": "3.4.1 Type of Bedroom — Separate Bedroom", "page": 3, "section": 3},
     "bedroom_no_separate": {"label": "3.4.1 Type of Bedroom — No Separate Bedroom", "page": 3, "section": 3},
-    "bathroom": {"label": "3.5 Bathroom", "page": 3, "section": 3},
+    "bathroom_separate": {"label": "3.5 Bathroom — Separate", "page": 3, "section": 3},
+    "bathroom_common": {"label": "3.5 Bathroom — Common for Apartment", "page": 3, "section": 3},
     "kitchen_separate": {"label": "3.6 Kitchen Type — Separate Kitchen", "page": 3, "section": 3},
     "kitchen_hall": {"label": "3.6 Kitchen Type — Hall with Kitchen", "page": 3, "section": 3},
     "asset_washing_machine": {"label": "4.1 Assets at Home — Washing Machine", "page": 3, "section": 4},
@@ -184,13 +193,15 @@ SCHEMA_KEY_MAP = {
     "last_electricity_bill": {"label": "4.2 Amount of Last Electricity Bill", "page": 4, "section": 4},
     "owns_other_assets_yes": {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes", "page": 4, "section": 4},
     "owns_other_assets_no": {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No", "page": 4, "section": 4},
-    "has_other_income": {"label": "4.4 Apart from your job, is there any other source of income?", "page": 4, "section": 4},
+    "has_other_income_yes": {"label": "4.4 Apart from your job, is there any other source of income? — Yes", "page": 4, "section": 4},
+    "has_other_income_no": {"label": "4.4 Apart from your job, is there any other source of income? — No", "page": 4, "section": 4},
     "income_type": {"label": "4.5 Income Type", "page": 4, "section": 4},
     "has_loans": {"label": "4.6 Do you have any loans?", "page": 4, "section": 4},
     "college_fee": {"label": "4.7 If you choose any college, how much is the college fee?", "page": 5, "section": 4},
     "manage_higher_fee": {"label": "4.8 If the college fee is higher, how will you manage it?", "page": 5, "section": 4},
     "manage_without_scholarship": {"label": "4.9 If you do not receive this scholarship, how will you pay the fees?", "page": 5, "section": 4},
-    "has_health_issues": {"label": "5.1 Does the student have any health issues?", "page": 5, "section": 5},
+    "has_health_issues_yes": {"label": "5.1 Does the student have any health issues? — Yes", "page": 5, "section": 5},
+    "has_health_issues_no": {"label": "5.1 Does the student have any health issues? — No", "page": 5, "section": 5},
     "health_issues_description": {"label": "5.2 If yes, list the health issues", "page": 5, "section": 5},
     "study_commitment": {"label": "6.1 Will you study college for three years without any obstacle?", "page": 5, "section": 6},
     "training_program_availability": {"label": "6.2 If we have a training program within 15 km from your home, can you come?", "page": 5, "section": 6},
@@ -227,8 +238,8 @@ TABLE_MAP = {
     },
     "loans_table": {
         "label_prefix": "4.6.1",
-        "columns": ["Loan Purpose", "Loan Amount Taken", "Pending Loan Amount"],
-        "col_key": ["loan_purpose", "loan_amount_taken", "pending_loan_amount"],
+        "columns": ["Sr. No.", "Loan Purpose", "Loan Amount Taken", "Pending Loan Amount"],
+        "col_key": ["serial_number", "loan_purpose", "loan_amount_taken", "pending_loan_amount"],
         "section": 4,
         "page": 4,
     },
@@ -247,6 +258,11 @@ def convert_extract_response(response: dict) -> dict:
 
     extracted = {k: v for k, v in raw.items() if not k.endswith("_citations") and not k.endswith("_meta")}
 
+    import logging
+    _logger = logging.getLogger(__name__)
+    _asset_raw = {k: extracted.get(k) for k in extracted if k.startswith("asset_") if k != "asset_others"}
+    _logger.info("DEBUG raw asset values from extraction_schema_json: %s", _asset_raw)
+
     fields = []
 
     for key, meta in SCHEMA_KEY_MAP.items():
@@ -254,7 +270,9 @@ def convert_extract_response(response: dict) -> dict:
         if raw_value is None:
             continue
         if isinstance(raw_value, bool):
-            value = "\u2713" if raw_value else "\u2717"
+            if not raw_value:
+                continue
+            value = "\u2713"
         else:
             value = str(raw_value).strip()
             clean, had_tick, had_cross = sanitize_checkbox_text(value)
@@ -264,9 +282,16 @@ def convert_extract_response(response: dict) -> dict:
                 continue
             elif clean != value:
                 continue
-        if key in ("home_type_others", "asset_others") and value and value not in ("\u2713", "\u2717", ""):
-            if not value.lower().startswith("others"):
-                value = f"Others: {value}"
+        if key.startswith("asset_") and key != "asset_others":
+            norm = value.strip().lower()
+            if norm in ("\u2713", "/", "1", "yes", "y", "true"):
+                value = "\u2713"
+            else:
+                continue
+        elif key == "asset_others":
+            if value and value not in ("\u2713", "\u2717", ""):
+                if not value.lower().startswith("others"):
+                    value = f"Others: {value}"
 
         fields.append({
             "label": meta["label"],
