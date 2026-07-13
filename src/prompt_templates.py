@@ -24,6 +24,21 @@ inside the box/circle, then resolve it deterministically:
   FORWARD-SLASH. A CROSS (X) means the option is NOT chosen — treat X as "No".
   An empty box is "No". Only tick / slash / checkmark → "Yes".
 
+  CONFLICT RULE: If a SINGLE box contains BOTH a tick (✓) AND a cross (X/✗),
+  the TICK WINS → output "Yes". (e.g. 3.6 Kitchen Type: a ticked option is the
+  chosen one; a crossed-only option is not.)
+
+  WHERE THE MARK LIVES (critical):
+    - The selection mark must be INSIDE or DIRECTLY NEXT TO the [ ] box. That is
+      the only authoritative selector.
+    - A tick/slash drawn ON TOP OF the option TEXT (over the words, not the box)
+      is a stray handwritten annotation — IGNORE it for selection. The box is the
+      source of truth. (e.g. 4.1 Assets: "[ ] fridge" with a / or ✓ scribbled on
+      the word "fridge" but an EMPTY box = UNSELECTED → "No".)
+    - A CROSS (X/✗) marked UNDER or BESIDE the checkbox means the option is
+      explicitly DESELECTED → "No". (e.g. 3.6 Kitchen Type: an X under the box =
+      that option is NOT chosen.)
+
 Apply this identical rule to all checkbox groups (2.4, 3.2, 3.3, 4.1, 3.6),
 mutually-exclusive pairs (3.1, 3.4.1, 3.5, 4.3) and yes/no/enum radios
 (1.3, 2.3, 4.4, 4.5, 4.6, 5.1, 6.2, 6.3, 8.2, 2.1).
@@ -68,6 +83,15 @@ For EVERY field, before writing the output, mentally:
           shows every box empty, re-examine carefully for faint ticks/slashes first.
   STEP 4: Multiple "Yes" allowed and common. Examine each box closely.
   STEP 5: For "Others:" fields, also capture the handwritten text.
+  STEP 6: If a SINGLE box contains BOTH a tick (✓) AND a cross (X/✗) — the tick
+          wins. Output "Yes". A box with only a cross means "No". (e.g. 3.6 Kitchen
+          Type: a ticked option is the chosen one, a crossed option is not.)
+  STEP 7: The selection mark must be IN or BESIDE the [ ] box. A tick/slash drawn
+          ON TOP OF the option TEXT (over the words) is a STRAY annotation — IGNORE
+          it; if the box is empty the option is unselected ("No"). A cross (X)
+          drawn UNDER/BESIDE the box explicitly DESELECTS the option ("No").
+          (e.g. 4.1 "[ ] fridge" with a / on the word but empty box = "No";
+           3.6 an X under the box = deselected.)
 
 ### Radio buttons (exactly ONE selected — output the option TEXT, not "Yes"/"No"):
   1.3 Gender (Male | Female | Others)
@@ -98,6 +122,7 @@ For EVERY field, before writing the output, mentally:
   STEP 3: If the value ends with ".00", keep the decimal. If it's a clean integer, output without decimal.
   STEP 4: If the value looks like "1200/" → extract "1200".
   STEP 5: OCR may confuse l/1 and O/0 — reason about context.
+  EXCEPTION — 3.1.1 rent amount: preserve the ORIGINAL text exactly as written including "Rs", "/-", "/month", and commas. Do NOT strip these.
 
 ### Table fields (count pre-printed rows, fill every cell):
   2.5 Family Members (Name, Age, Education, Occupation, Annual Income) — 5 cols
@@ -105,11 +130,14 @@ For EVERY field, before writing the output, mentally:
   4.4.1 Other Income (Source of Income, Amount) — 2 cols
   4.6.1 Loans (Loan Purpose, Loan Amount Taken, Pending Loan Amount) — 3 cols
 
-  STEP 1: Count the NUMBER OF PRE-PRINTED ROWS in the table. These are rows printed on the form, NOT rows with data filled in.
+  STEP 1: Count the NUMBER OF PRE-PRINTED ROWS in the table. These are rows printed on the form, NOT rows with data filled in. (2.5 Family Members: usually 4 pre-printed rows; 4.3.1: usually 2 pre-printed rows).
   STEP 2: For each row n (1, 2, 3, ...), output every column: "{Table label} — Row {n} — {Column name}".
   STEP 3: If a cell is blank (no data filled), output value="" — do NOT skip the row.
   STEP 4: If parent conditional field is "No", output "N/A" for ALL cells in ALL rows.
   STEP 5: For 4.6.1 Loans: Sr.No. is typically pre-printed (1, 2, 3). Check if there's handwriting in the Loan Purpose column to confirm data presence.
+  STEP 6: If any cell's text has a strikethrough line (horizontal line drawn through the text) or is visibly crossed out (X over the text), treat the value as empty (value="") — struck-through/crossed-out text is invalid and should NOT be extracted.
+  STEP 7: For 2.5 Family Members: after counting the pre-printed rows, scan for any handwritten text AFTER the last pre-printed row and include it as an extra row with the text in the Name column.
+  STEP 7: For 2.5 Family Members: after counting the pre-printed rows, scan for any handwritten text AFTER the last pre-printed row and include it as an extra row with the text in the Name column.
 
 ### Conditional dependency reasoning:
   For ANY field that depends on a parent Yes/No field:
@@ -220,7 +248,8 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
 --- Section 2 — Family Background (Pages 1-2) — 5 fields + (5 × N) table ---
   2.1 Family Status                                    [radio → Single Parent | Parentless | Having both parents]
   2.2 Relationship Details — Year of Death / Separation [text]      ← pg 2
-  2.2 Relationship Details — Reason for Death / Separation [text]   ← pg 2
+  2.2 Relationship Details — Reason for Death / Separation [text]   ← pg 2 — ALSO look carefully at the blank area BELOW 2.1 Family Status options on page 1 for any handwritten notes/annotations and include them here
+  blank_text_below_2_1 [text — hidden helper, capture handwriting in the blank area between 2.1 and 2.2 on page 1, then output empty string]
   2.3 Is Father/Mother photograph kept at home?         [radio → Yes | No]
   2.4 Government ID Verified — Aadhaar Card      [checkbox]
   2.4 Government ID Verified — Ration Card       [checkbox]
@@ -237,7 +266,7 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
   3.2 Type of Home — Private Apartment    [checkbox]
   3.2 Type of Home — Housing Board        [checkbox]
   3.2 Type of Home — Line House           [checkbox]
-  3.2 Type of Home — Others               [checkbox]
+  3.2 Type of Home — Others               [text — capture free-text from "Others:" line]
   3.3 Type of Ceiling — Roof (Kurai)     [checkbox]                      ← pg 3
   3.3 Type of Ceiling — Tiled             [checkbox]
   3.3 Type of Ceiling — Asbestos / Sheet   [checkbox]
@@ -399,8 +428,11 @@ RULES
 
 2. Only set is_correct=false when you are CERTAIN the value is wrong.
    - Radio: wrong option selected (not the option marked with a tick/slash).
-   - Checkbox: MARK SHAPE — a tick (✓) or forward-slash (/) means "Yes"; a cross (X),
-     dot, scribble, or empty box means "No". Flag if this rule was applied wrong.
+    - Checkbox: MARK SHAPE — a tick (✓) or forward-slash (/) INSIDE/BESIDE the box
+      means "Yes"; a cross (X), dot, scribble, or empty box means "No". A tick/slash
+      drawn ON TOP OF the option TEXT is a stray annotation — IGNORE it (empty box =
+      unselected). A cross under/beside the box = explicitly deselected. If a box has
+      BOTH tick and cross, the tick wins (Yes). Flag if this rule was applied wrong.
    - Text: clearly misread.
    - Do NOT flag fields just because value="" — the primary prompt may have correctly found a blank.
 
@@ -432,10 +464,11 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   1.2 Student Full Name                   [text — full name, exactly as written]
   1.3 Gender                              [radio → Male | Female | Others — pick the single EXACT option text]
 
---- Section 2 — Family Background (Page 1) — 3 fields ---
+--- Section 2 — Family Background (Page 1) — 4 fields ---
   2.1 Family Status                                    [radio → Single Parent | Parentless | Having both parents — pick the single EXACT option text]
+  blank_text_below_2_1 [hidden helper — capture ANY handwriting in the blank area BETWEEN the 2.1 options and the 2.2 header. Common: parenthetical notes like "(step-father)", death annotations, etc. Output the text here; it will be merged into 2.2 Reason automatically.]
   2.2 Relationship Details — Year of Death / Separation [text]
-  2.2 Relationship Details — Reason for Death / Separation [text]
+  2.2 Relationship Details — Reason for Death / Separation [text — ALSO scan blank_text_below_2_1 region above and include any text found there]
 """,
     2: """
 --- Section 2 — Family Background (Page 2) — 2 fields + (5 × N) table ---
@@ -445,8 +478,8 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   2.4 Government ID Verified — Driving Licence   [checkbox — ✓ if checked, ✗ if empty]
   2.4 Government ID Verified — Voter ID          [checkbox — ✓ if checked, ✗ if empty]
   2.4 Government ID Verified — Other              [checkbox — ✓ if checked, ✗ if empty]
-  2.4 Government ID Verified — Other (specify)   [text — free-text written next to "Other", EXACTLY as written]
-  2.5 Family Members                                    [table — count ALL pre-printed rows (usually 5), then for each row output: "2.5 Family Members — Row {n} — Name|Age|Education|Occupation|Annual Income"]
+  2.4 Government ID Verified — Other (specify)   [text — free-text written next to "Other", EXACTLY as written. If the "Other" box is unchecked OR nothing is written, output empty string ""]
+  2.5 Family Members                                    [table — count ALL pre-printed rows (usually 4), then for each row output: "2.5 Family Members — Row {n} — Name|Age|Education|Occupation|Annual Income". ALSO scan for any handwritten text AFTER the last pre-printed row and include it as an extra row ("2.5 Family Members — Row {n+1} — Name") with the text in the Name column.]
 
 --- Section 3 — Housing Condition (Page 2) — 7 fields ---
   3.1 House Ownership — Own               [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
@@ -456,7 +489,7 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   3.2 Type of Home — Private Apartment    [checkbox — ✓ or ✗ — independent, can be ✓ with others]
   3.2 Type of Home — Housing Board        [checkbox — ✓ or ✗ — independent, can be ✓ with others]
   3.2 Type of Home — Line House           [checkbox — ✓ or ✗ — independent, can be ✓ with others]
-  3.2 Type of Home — Others               [checkbox — ✓ or ✗ — if ✓, also capture free-text value from "Others:______" line]
+  3.2 Type of Home — Others               [text — ALWAYS capture free-text from "Others:______" line even if checkbox is empty. Prefix with "Others: " if the text is present.]
 """,
     3: """
 --- Section 3 — Housing Condition (Page 3) — 9 fields ---
@@ -481,18 +514,20 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   4.1 Assets at Home(tick all that apply) - Car                [checkbox — ✓ or ✗ — independent]
   4.1 Assets at Home(tick all that apply) - Smartphone         [checkbox — ✓ or ✗ — independent]
   4.1 Assets at Home(tick all that apply) - Separate Wi-Fi     [checkbox — ✓ or ✗ — independent]
-  4.1 Assets at Home(tick all that apply) - Others:            [checkbox — ✓ or ✗ — if ✓, also capture free-text from "Others:______"]
+  4.1 Assets at Home(tick all that apply) - Others:            [text — ALWAYS capture free-text from "Others:______" line even if checkbox is empty; prefix with "Others: " if the text is present]
    4.2 Amount of Last Electricity Bill     [text — preserve original text including ₹, Rs, /month]
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No   [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
+  blank_text_below_4_3 [hidden helper — capture ANY handwriting in the blank area BELOW the 4.3 checkbox and ABOVE the 4.3.1 table header on page 3. Output verbatim; it is auto-merged into 4.3.1 Property Description.]
 """,
     4: """
 --- Section 4 — Financial Background (Page 4) — 10 fields ---
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox — ✓ or ✗ — IF ✓ THEN fill 4.3.1 fields below; IF ✗ THEN all 4.3.1 = "N/A"]
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No   [checkbox — ✓ or ✗]
-  4.3.1 If Yes, list their properties: - Property Description [text — if 4.3=✓, extract text; if 4.3=✗, output "N/A"]
+  4.3.1 If Yes, list their properties: - Property Description [text — if 4.3=✓, extract text; if 4.3=✗, output "N/A". Free-text notes below the table are captured by hidden helper blank_text_below_4_3_1_table and auto-merged.]
   4.3.1 If Yes, list their properties: - Owner Name           [text — if 4.3=✓, extract text; if 4.3=✗, output "N/A"]
   4.3.1 If Yes, list their properties: - Approximate Value    [text — if 4.3=✓, extract text; if 4.3=✗, output "N/A"]
+  blank_text_below_4_3_1_table [hidden helper — capture ANY handwriting in the blank area BELOW the last 4.3.1 table row and ABOVE the 4.4 question. Output verbatim; it is auto-merged into 4.3.1 Property Description.]
   4.4 Apart from your job, is there any other source of income? [radio → Yes | No — IF Yes THEN fill 4.4.1 fields below; IF No THEN all 4.4.1 = "N/A"]
   4.4.1 If Yes, list other sources of income: - Source of Income [text — if 4.4=Yes, extract; if 4.4=No, "N/A"]
   4.4.1 If Yes, list other sources of income: - Amount           [text — numbers only; if 4.4=Yes, extract; if 4.4=No, "N/A"]
@@ -539,7 +574,7 @@ TEXT_EXTRACTION_PROMPT = """You are a structured data extraction engine. Below i
 GROUND RULES:
 1. Extract EVERY field listed below. Never skip.
 2. value="" for unreadable/missing. value="N/A" for conditionals when parent="No".
-3. Checkbox → "Yes" if marked with a tick (✓) or forward-slash (/); "No" if empty or marked with a cross (X).
+ 3. Checkbox → "Yes" if a tick (✓) or forward-slash (/) is INSIDE/BESIDE the box; "No" if the box is empty or marked with a cross (X). A tick/slash drawn ON TOP OF the option TEXT is a stray annotation — ignore it (empty box = unselected). A cross under/beside the box = deselected. If a box has BOTH tick and cross, the tick wins → "Yes".
 4. Radio → exact option text shown (e.g. "Male", "Yes", "Separate").
 5. Table → "{{Table}} — Row {{n}} — {{Column}}".
 6. Numeric → digits only, strip ₹, commas, Rs.

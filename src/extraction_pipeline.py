@@ -101,7 +101,7 @@ TEXT_FIELD_TIPS: dict[str, str] = {
     "1.2 Student Full Name": "The student's full name. Common misreads: 'n'↔'u', 'a'↔'o'. Read each character.",
     "2.2 Relationship Details — Year of Death / Separation": "A year (e.g. '2020'). ONLY the year digits.",
     "2.2 Relationship Details — Reason for Death / Separation": "Free-text description. Capture ALL text verbatim.",
-    "2.4 Government ID Verified — Other (specify)": "Short text written on the line next to 'Other', e.g. 'Pan Card'.",
+    "2.4 Government ID Verified — Other (specify)": "Short text written on the line next to 'Other', e.g. 'Pan Card'. If the 'Other' box is unchecked or nothing is written, output empty string.",
     "3.1.1 If rented, what is the rent amount?": "Rent amount. Preserve the original text as written including comma, ₹, Rs, /month. If you see '4,100', output '4,100' not '4100' or '41000'. If you see '4000/month', output '4000/month'. 'l'/'I'→'1', 'O'/'o'→'0', 'S'→'5', 'Z'→'2'.",
     "3.2 Type of Home — Others": "Free text written next to 'Others'. Capture verbatim.",
     "3.4 Number of Bedrooms": "A small number (1-5). Strip words like 'bedroom'.",
@@ -131,6 +131,7 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "1.3 Gender", "section_number": 1, "page": 1},
     # Section 2 — Family Background (Page 1: 2.1-2.2)
     {"label": "2.1 Family Status", "section_number": 2, "page": 1},
+    {"label": "blank_text_below_2_1", "section_number": 2, "page": 1},
     {"label": "2.2 Relationship Details — Year of Death / Separation", "section_number": 2, "page": 1},
     {"label": "2.2 Relationship Details — Reason for Death / Separation", "section_number": 2, "page": 1},
     # ── Page 2 ──
@@ -183,11 +184,13 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "4.2 Amount of Last Electricity Bill", "section_number": 4, "page": 3},
     {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes", "section_number": 4, "page": 3},
     {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No", "section_number": 4, "page": 3},
+    {"label": "blank_text_below_4_3", "section_number": 4, "page": 3},
     # ── Page 4 ──
     # Section 4 — Financial Background (Page 4: 4.4-4.7)
     {"label": "4.3.1 If Yes, list their properties: - Property Description", "section_number": 4, "page": 4},
      {"label": "4.3.1 If Yes, list their properties: - Owner Name", "section_number": 4, "page": 4},
       {"label": "4.3.1 If Yes, list their properties: - Approximate Value", "section_number": 4, "page": 4},
+    {"label": "blank_text_below_4_3_1_table", "section_number": 4, "page": 4},
     {"label": "4.4 Apart from your job, is there any other source of income?", "section_number": 4, "page": 4},
      {"label": "4.4.1 If Yes, list other sources of income: - Source of Income", "section_number": 4, "page": 4},
           {"label": "4.4.1 If Yes, list other sources of income: - Amount", "section_number": 4, "page": 4},
@@ -830,7 +833,7 @@ GROUND RULES:
 1. Extract EVERY field listed in FIELD LIST BY PAGE below. Every label must appear in output, even if empty.
 2. Labels MUST EXACTLY match the field list including numbers (e.g. "1.2 Student Full Name"). Do NOT alter.
 3. value="" for unreadable/missing. value="N/A" when parent="No". Never "null".
-4. Checkbox → "Yes" if marked (tick ✓ or slash /), "No" if empty/cross/scribble/dot.
+ 4. Checkbox → "Yes" if a tick (✓) or slash (/) is INSIDE/BESIDE the box; "No" if empty/cross/scribble/dot. If a box has BOTH tick and cross, the tick wins → "Yes". A tick/slash drawn ON TOP OF the option text is a stray annotation — ignore it (empty box = unselected); a cross under/beside the box = deselected.
 5. Radio → exact option text (e.g. "Male", "Having both parents"). Never "✓" or "✗".
 6. Table → "{{Table}} — Row {{n}} — {{Column}}" (e.g. "2.5 Family Members — Row 1 — Name").
 7. Conditionals: parent="No" → child="N/A". Dependencies: rent→3.1, 4.3/4.4/4.6→4.3.1/4.4.1/4.6.1, health→5.1.
@@ -1291,8 +1294,7 @@ FIELD LIST BY PAGE:
         "2.4 Government ID Verified — Other",
         "3.1 House Ownership — Own", "3.1 House Ownership — Rented",
         "3.2 Type of Home — Individual", "3.2 Type of Home — Private Apartment",
-        "3.2 Type of Home — Housing Board", "3.2 Type of Home — Line House",
-        "3.2 Type of Home — Others",
+        "3.2 Type of Home — Housing Board",         "3.2 Type of Home — Line House",
         "3.3 Type of Ceiling — Roof (Kurai)", "3.3 Type of Ceiling — Tiled",
         "3.3 Type of Ceiling — Asbestos / Sheet", "3.3 Type of Ceiling — Concrete",
         "3.4.1 Type of Bedroom — Separate Bedroom", "3.4.1 Type of Bedroom — No Separate Bedroom",
@@ -1306,7 +1308,6 @@ FIELD LIST BY PAGE:
         "4.1 Assets at Home(tick all that apply) - Car",
         "4.1 Assets at Home(tick all that apply) - Smartphone",
         "4.1 Assets at Home(tick all that apply) - Separate Wi-Fi",
-        "4.1 Assets at Home(tick all that apply) - Others:",
         "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes",
         "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No",
     }
@@ -1338,11 +1339,11 @@ FIELD LIST BY PAGE:
         return fields
 
     @staticmethod
-    def fill_missing_template_fields(fields: list[StructuredField], pdf_path: str | None = None) -> list[StructuredField]:
+    def fill_missing_template_fields(fields: list[StructuredField], pdf_path: str | None = None, provider: str = "") -> list[StructuredField]:
         fields = ExtractionPipeline._sanitize_checkbox_values(fields)
         fields = ExtractionPipeline._fix_concatenated_parents(fields)
         fields = ExtractionPipeline._detect_concatenated_parents(fields)
-        if pdf_path:
+        if pdf_path and provider != "gemini":
             try:
                 fields = ExtractionPipeline._cv_checkbox_verify(fields, pdf_path)
             except Exception as e:
@@ -1367,6 +1368,80 @@ FIELD LIST BY PAGE:
                 extracted_by="template_fill",
             ))
         return fields
+
+    @staticmethod
+    def _gemini_post_process(fields: list[StructuredField]) -> list[StructuredField]:
+        for f in fields:
+            label = f.label or ""
+            val = (f.value or "").strip()
+
+            # 3.1.1 rent amount: if LLM stripped currency, restore full format
+            if "rent amount" in label.lower() and val and val not in ("N/A", ""):
+                has_currency = any(c in val for c in ("₹", "Rs", "rs", "/-", "$"))
+                if not has_currency and re.match(r'^[\d,.\s]+$', val):
+                    clean = val.strip().rstrip('/').strip()
+                    wrapped = f"Rs {clean}/-"
+                    if wrapped != val:
+                        logger.info("Gemini rent format: %r → %r", val, wrapped)
+                        f.original_value = val
+                        f.value = wrapped
+
+            # Merge blank_text_below_2_1 into 2.2 Reason for Death / Separation
+            if label == "blank_text_below_2_1" and val:
+                reason_field = next(
+                    (x for x in fields
+                     if x.label == "2.2 Relationship Details — Reason for Death / Separation"),
+                    None
+                )
+                if reason_field:
+                    current = (reason_field.value or "").strip()
+                    if val not in current:
+                        merged = f"{current} — {val}" if current else val
+                        logger.info("Gemini 2.2 merge: blank_text_below_2_1 → Reason for Death / Separation")
+                        reason_field.original_value = reason_field.value
+                        reason_field.value = merged
+                # Clear the blank_text field since it's merged
+                f.value = ""
+                f.confidence = 100
+                f.needs_clarification = False
+
+            # Merge blank_text_below_4_3 / blank_text_below_4_3_1_table into
+            # 4.3.1 Property Description as extra table rows.
+            if label in ("blank_text_below_4_3", "blank_text_below_4_3_1_table") and val:
+                ExtractionPipeline._merge_blank_into_4_3_1(fields, val)
+                f.value = ""
+                f.confidence = 100
+                f.needs_clarification = False
+
+        return fields
+
+    @staticmethod
+    def _merge_blank_into_4_3_1(fields: list[StructuredField], text: str) -> None:
+        """Append handwritten free-text (from below 4.3 / below 4.3.1 table)
+        as a new 4.3.1 table row with the text in Property Description."""
+        base = "4.3.1 If Yes, list their properties:"
+        max_row = 0
+        has_flat = False
+        for f in fields:
+            if f.label.startswith("4.3.1"):
+                m = re.search(r"Row\s+(\d+)", f.label)
+                if m:
+                    max_row = max(max_row, int(m.group(1)))
+                else:
+                    has_flat = True
+        if has_flat:
+            max_row = max(max_row, 1)
+        new_row = max_row + 1
+        logger.info("Gemini 4.3.1 merge: blank area → Row %d Property Description", new_row)
+        for col in ("Property Description", "Owner Name", "Approximate Value"):
+            fields.append(StructuredField(
+                label=f"{base} — Row {new_row} — {col}",
+                value=text if col == "Property Description" else "",
+                confidence=80,
+                page=4,
+                section_number=4,
+                extracted_by="gemini_post_process",
+            ))
 
     @staticmethod
     def _cv_checkbox_verify(fields: list[StructuredField], pdf_path: str) -> list[StructuredField]:
@@ -1692,6 +1767,7 @@ FIELD LIST BY PAGE:
                 f"- 'n'↔'u', 'a'↔'o', 'l'↔'t', 'r'↔'v'\n"
                 f"- Printed question text = LABEL, NOT the value\n"
                 f"- Look at the blank AFTER the label — that is the handwritten answer\n"
+                f"- For 4.7 (college fee): capture the COMPLETE handwritten answer including college name AND fee amount together (e.g. \"guru nanak college rs 30000/-per year\"). Do NOT drop any part.\n"
                 f"- If truly empty → value=\"\"\n\n"
                 f"Output ONLY valid JSON:\n"
                 f"{{\"fields\": [{{\"label\": \"exact label from above\", \"value\": \"extracted text\"}}, ...]}}"

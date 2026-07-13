@@ -406,7 +406,9 @@ class GeminiClient(ModelClient):
         self._genai = _genai
         self.model_name = model
         self.provider = "gemini"
-        self._rl = RateLimiter()
+        _gemini_conc = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "6"))
+        _gemini_rpm = int(os.environ.get("GEMINI_RATE_LIMIT_RPM", "14"))
+        self._rl = RateLimiter(rpm=_gemini_rpm, max_concurrency=_gemini_conc)
 
     @staticmethod
     def _extract_token_usage(response) -> TokenUsage:
@@ -423,29 +425,7 @@ class GeminiClient(ModelClient):
     async def extract_structured(self, pdf_path: str, page_images: dict[int, str], prompt: str) -> tuple[dict | None, TokenUsage]:
         from PIL import Image
 
-        logger.info("Uploading PDF to Gemini...")
-
-        try:
-            sample_file = await call_with_retry_async(
-                lambda: self._client.aio.files.upload(
-                    file=pdf_path,
-                    config={"mime_type": "application/pdf"},
-                ),
-                rl=self._rl,
-            )
-            logger.info("Uploaded: %s", sample_file.name)
-            response = await call_with_retry_async(
-                lambda: self._client.aio.models.generate_content(
-                    model=self.model_name,
-                    contents=[sample_file, prompt],
-                    config=self._genai.types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                    ),
-                ),
-                rl=self._rl,
-            )
-        except Exception as e:
-            logger.warning("Gemini PDF upload failed (%s), falling back to page images", e)
+        if page_images:
             pages = sorted(page_images.keys())
             contents: list = [prompt]
             for p in pages:
@@ -461,6 +441,33 @@ class GeminiClient(ModelClient):
                 ),
                 rl=self._rl,
             )
+        elif pdf_path:
+            logger.debug("Uploading PDF to Gemini...")
+            try:
+                sample_file = await call_with_retry_async(
+                    lambda: self._client.aio.files.upload(
+                        file=pdf_path,
+                        config={"mime_type": "application/pdf"},
+                    ),
+                    rl=self._rl,
+                )
+                logger.debug("Uploaded: %s", sample_file.name)
+                response = await call_with_retry_async(
+                    lambda: self._client.aio.models.generate_content(
+                        model=self.model_name,
+                        contents=[sample_file, prompt],
+                        config=self._genai.types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                        ),
+                    ),
+                    rl=self._rl,
+                )
+            except Exception as e:
+                logger.warning("Gemini PDF generation failed (%s)", e)
+                return None, {}
+        else:
+            logger.warning("Gemini extract_structured called with no PDF and no page images")
+            return None, {}
 
         token_usage = self._extract_token_usage(response)
         text = _strip_json_fence(response.text)
@@ -518,5 +525,5 @@ def get_model_client(role: str = "primary") -> ModelClient:
         logger.info("[%s] Using Gemini: %s  base_url=%s", role, model, base_url)
         return GeminiClient(api_key=api_key, model=model, base_url=base_url)
 
-    logger.info("[%s] Using OpenAI-Compatible Client (%s): %s", role, provider, model)
+    logger.debug("[%s] Using OpenAI-Compatible Client (%s): %s", role, provider, model)
     return OpenAICompatibleClient(api_key=api_key, model=model, base_url=base_url, provider=provider)

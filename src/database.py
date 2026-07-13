@@ -266,7 +266,9 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
                     array_checked[acol].append(item)
 
     for col, text in array_specify_texts.items():
-        if text:
+        # Ignore specify text if it's a negation (e.g. "No") — that means the
+        # "Other" option was not actually chosen, so don't store "Other: No".
+        if text and text.strip().lower() not in _NEG_VALUES:
             checked = array_checked.get(col, [])
             if "Other" in checked:
                 checked.remove("Other")
@@ -395,7 +397,7 @@ async def upsert_ocr_document(
             for col, val in structured.items():
                 if val is not None:
                     data[col] = val
-            logger.info(
+            logger.debug(
                 "upsert_ocr_document: mapped %d structured columns from %d fields",
                 len(structured), len(raw_fields),
             )
@@ -418,7 +420,7 @@ async def upsert_ocr_document(
         f"RETURNING id"
     )
 
-    logger.info(
+    logger.debug(
         "upsert_ocr_document: upserting %d columns: %s",
         len(cols), cols,
     )

@@ -13,6 +13,7 @@ from src.server import detect_input_type, detect_item_type, is_image, is_pdf, is
 from src.page_classifier import PageClassifier, PageClassification
 from src.datalab_schema import resolve_checkbox_marks, _validate_field_patterns, _resolve_single_checkbox_marks
 from src.database import _extract_structured_fields
+from src.extraction_pipeline import ExtractionPipeline, StructuredField
 
 
 @dataclass
@@ -687,6 +688,36 @@ def test_docstring_inference():
     print("PASS: test_docstring_inference")
 
 
+def test_gemini_post_process_4_3_blank_merge():
+    """Free-text below 4.3 (Zone A) and below the 4.3.1 table (Zone B) must be
+    appended as extra 4.3.1 Property Description rows, and the helpers cleared."""
+    fields = [
+        StructuredField(label="4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes", value="Yes", page=3, section_number=4),
+        StructuredField(label="4.3.1 If Yes, list their properties: — Row 1 — Property Description", value="Land", page=4, section_number=4),
+        StructuredField(label="4.3.1 If Yes, list their properties: — Row 1 — Owner Name", value="Father", page=4, section_number=4),
+        StructuredField(label="4.3.1 If Yes, list their properties: — Row 2 — Property Description", value="House", page=4, section_number=4),
+        StructuredField(label="blank_text_below_4_3", value="grandparents asset", page=3, section_number=4),
+        StructuredField(label="blank_text_below_4_3_1_table", value="no chance of getting share from brother", page=4, section_number=4),
+    ]
+    out = ExtractionPipeline._gemini_post_process(fields)
+
+    prop_rows = [f for f in out if f.label.endswith("— Property Description")]
+    # 2 printed + 2 free-text zones = 4 rows
+    assert len(prop_rows) == 4, [f.label for f in prop_rows]
+    texts = [f.value for f in prop_rows]
+    assert "grandparents asset" in texts
+    assert "no chance of getting share from brother" in texts
+
+    # Helpers cleared
+    helpers = [f for f in out if f.label in ("blank_text_below_4_3", "blank_text_below_4_3_1_table")]
+    assert all(f.value == "" for f in helpers), [f.value for f in helpers]
+
+    # New rows tagged page 4, section 4
+    new_rows = [f for f in out if "Row 3" in f.label or "Row 4" in f.label]
+    assert all(f.page == 4 and f.section_number == 4 for f in new_rows)
+    print("PASS: test_gemini_post_process_4_3_blank_merge")
+
+
 def test_resolve_checkbox_marks():
     extracted = {
         "kitchen_type_separate_mark": "✗",
@@ -804,4 +835,5 @@ if __name__ == "__main__":
     test_resolve_order_shuffled()
     test_resolve_order_missing_page()
     test_docstring_inference()
+    test_gemini_post_process_4_3_blank_merge()
     print("\n=== All tests passed! ===")

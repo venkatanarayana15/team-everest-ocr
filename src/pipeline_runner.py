@@ -298,7 +298,8 @@ async def _run_core_extraction(
     }
 
     await status_func("template_fill", "Filling missing template fields...")
-    fields = ExtractionPipeline.fill_missing_template_fields(fields, pdf_path=pdf_path)
+    _provider = getattr(pipeline.primary_client, 'provider', '') if pipeline else ''
+    fields = ExtractionPipeline.fill_missing_template_fields(fields, pdf_path=pdf_path, provider=_provider)
 
     all_no_groups = ExtractionPipeline._find_all_no_groups(fields)
     if all_no_groups and pipeline and pipeline.primary_client and pipeline.primary_client.needs_images:
@@ -313,6 +314,10 @@ async def _run_core_extraction(
         fields = await ExtractionPipeline._refine_text_fields(
             fields, pdf_path, processed_images, pipeline.primary_client
         )
+
+    if _provider == "gemini":
+        await status_func("gemini_post_process", "Applying Gemini-specific post-processing...")
+        fields = ExtractionPipeline._gemini_post_process(fields)
 
     sections_data = _derive_sections(fields, raw_text or "")
 
@@ -663,7 +668,7 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
 
         from src.model_client import ModelClient
         if primary.__class__.submit is ModelClient.submit or primary.__class__.collect is ModelClient.collect:
-            logger.warning("Primary client does not support async submit/collect — falling back to sync batch")
+            logger.info("Primary client does not support async submit/collect — falling back to sync batch")
             await run_batch_pdfs_pipeline(job_dir, pdfs_info)
             return
 

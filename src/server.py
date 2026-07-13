@@ -212,6 +212,9 @@ handler = logging.StreamHandler(sys.stdout)
 handler.setFormatter(BeautifulColorFormatter())
 root_logger.addHandler(handler)
 
+for _noisy in ("httpx", "httpcore", "google.genai", "google_genai", "google.api_core", "google.auth", "urllib3"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 
 
 def _validate_env() -> None:
