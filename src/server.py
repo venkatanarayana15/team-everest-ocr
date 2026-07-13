@@ -7,23 +7,9 @@ import sys
 import threading
 import time
 import uuid
-import signal
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-
-def _suppress_interrupt_signals():
-    def handler(sig, frame):
-        import os as _os
-        print("\nINFO:     Server stopped gracefully.")
-        _os._exit(0)
-    try:
-        signal.signal(signal.SIGINT, handler)
-        signal.signal(signal.SIGTERM, handler)
-    except ValueError:
-        pass
-
-_suppress_interrupt_signals()
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,11 +30,28 @@ from src.status import (
 import zipfile
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tiff", ".tif"}
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
 def is_pdf(file_path: str | Path) -> bool:
     return Path(file_path).suffix.lower() == ".pdf"
 
+
+def _create_task(coro, name=None):
+    """Wrap asyncio.create_task with exception logging for fire-and-forget tasks."""
+    task = asyncio.create_task(coro, name=name)
+    task.add_done_callback(_log_task_exception)
+    return task
+
+def _log_task_exception(task):
+    try:
+        exc = task.exception()
+        if exc:
+            logger.error("Background task '%s' failed: %s", task.get_name(), exc, exc_info=exc)
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.error("Error retrieving task result: %s", e, exc_info=True)
 
 def is_image(file_path: str | Path) -> bool:
     return Path(file_path).suffix.lower() in IMAGE_EXTENSIONS
@@ -144,6 +147,8 @@ from src.zoho_integration import (
     process_pending_on_startup,
 )
 
+logger = logging.getLogger(__name__)
+
 try:
     from src.database import (
         init_pool,
@@ -153,14 +158,13 @@ try:
         get_pool,
         close_pool,
         upsert_ocr_document,
+        get_result_by_file_hash,
 
     )
     DB_AVAILABLE = True
 except ImportError as e:
     logger.warning("Database module not available: %s — DB save/webhook disabled", e)
     DB_AVAILABLE = False
-    logger = logging.getLogger(__name__)
-    logger.warning("Database module not available (%s). Dedup + DB features disabled.", e)
 
 class BeautifulColorFormatter(logging.Formatter):
     COLORS = {
@@ -208,7 +212,6 @@ handler = logging.StreamHandler(sys.stdout)
 handler.setFormatter(BeautifulColorFormatter())
 root_logger.addHandler(handler)
 
-logger = logging.getLogger(__name__)
 
 
 def _validate_env() -> None:
@@ -220,7 +223,7 @@ def _validate_env() -> None:
 
     if not provider:
         logger.warning("PRIMARY_PROVIDER not set — extraction will fail at runtime")
-    elif provider in ("datalab", "chandra-2") and not api_key:
+    elif provider == "datalab" and not api_key:
         logger.warning("PRIMARY_API_KEY not set — %s extraction will fail at runtime", provider)
 
     if provider == "datalab":
@@ -253,8 +256,8 @@ async def lifespan(app: FastAPI):
             DB_AVAILABLE = False
     _start_cleanup_thread()
     logger.info("Auto-cleanup thread started (every %ds, max age %ds)", CLEANUP_INTERVAL_SEC, JOB_MAX_AGE_SEC)
-    asyncio.create_task(_safe_startup_poller())
-    asyncio.create_task(_reconcile_stuck_jobs_on_startup())
+    _create_task(_safe_startup_poller())
+    _create_task(_reconcile_stuck_jobs_on_startup())
     yield
     _stop_cleanup_thread()
     if DB_AVAILABLE:
@@ -319,6 +322,19 @@ async def _reconcile_stuck_jobs_on_startup() -> None:
                         extraction_data = body.get("extraction_schema_json", body)
                         if isinstance(extraction_data, str):
                             extraction_data = json.loads(extraction_data)
+
+                        # ── CV verification on RAW extraction data (before convert_extract_response) ──
+                        pdf_path = job.get("file_path", "")
+                        if pdf_path and Path(pdf_path).exists():
+                            from src.checkbox_vision import verify_all, load_page_images
+                            try:
+                                page_images = load_page_images(pdf_path)
+                                extraction_data = verify_all(page_images, extraction_data)
+                            except Exception as e:
+                                logger.warning("CV checkbox verification failed during reconciliation for job=%s: %s — continuing without CV", job_id, e)
+                        else:
+                            logger.info("CV verify: no PDF for job=%s at path=%r — skipping", job_id, pdf_path)
+
                         data = convert_extract_response(extraction_data)
 
                         await upsert_ocr_document(
@@ -360,11 +376,7 @@ app = FastAPI(title="OCR Extraction Pipeline", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173", "http://127.0.0.1:5173",
-        "http://localhost:5174", "http://127.0.0.1:5174",
-        "http://localhost:5175", "http://127.0.0.1:5175"
-    ],
+    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174,http://localhost:5175").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -376,6 +388,7 @@ BASE_DIR.mkdir(exist_ok=True)
 logger.info("Output dir: %s", BASE_DIR)
 
 MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "15"))
+# Note: no timeout on semaphore — jobs wait indefinitely in queue
 _job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
 
@@ -584,8 +597,16 @@ async def _create_job_dir(original_name: str, status_msg: str, initial_stage: st
 
 
 async def _run_pipeline_task(job_dir: Path, pdf_path: str) -> None:
-    async with _job_semaphore:
+    try:
+        await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
+    except asyncio.TimeoutError:
+        logger.error("Job %s waited too long for semaphore", job_dir.name)
+        _set_status(job_dir, "error", "Job timed out waiting in queue")
+        return
+    try:
         await run_pipeline(job_dir, pdf_path)
+    finally:
+        _job_semaphore.release()
 
 
 async def _run_batch_task(job_dir: Path, pdfs_info: list[dict]) -> None:
@@ -594,18 +615,42 @@ async def _run_batch_task(job_dir: Path, pdfs_info: list[dict]) -> None:
         # Async submit+collect: no semaphore needed, all PDFs submitted instantly
         await run_batch_pdfs_pipeline_async(job_dir, pdfs_info)
     else:
-        async with _job_semaphore:
+        try:
+            await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
+        except asyncio.TimeoutError:
+            logger.error("Job %s waited too long for semaphore", job_dir.name)
+            _set_status(job_dir, "error", "Job timed out waiting in queue")
+            return
+        try:
             await run_batch_pdfs_pipeline(job_dir, pdfs_info)
+        finally:
+            _job_semaphore.release()
 
 
 async def _run_image_task(job_dir: Path, image_paths) -> None:
-    async with _job_semaphore:
+    try:
+        await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
+    except asyncio.TimeoutError:
+        logger.error("Job %s waited too long for semaphore", job_dir.name)
+        _set_status(job_dir, "error", "Job timed out waiting in queue")
+        return
+    try:
         await run_image_pipeline_from_zip(job_dir, image_paths)
+    finally:
+        _job_semaphore.release()
 
 
 async def _run_ocr_extract_task(job_dir: Path, req: OcrExtractRequest) -> None:
-    async with _job_semaphore:
+    try:
+        await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
+    except asyncio.TimeoutError:
+        logger.error("Job %s waited too long for semaphore", job_dir.name)
+        _set_status(job_dir, "error", "Job timed out waiting in queue")
+        return
+    try:
         await _run_ocr_extract_pipeline(job_dir, req)
+    finally:
+        _job_semaphore.release()
 
 
 @app.post("/upload")
@@ -619,6 +664,8 @@ async def upload(file: UploadFile = File(...)):
         content = await file.read()
         if len(content) == 0:
             raise HTTPException(400, "Empty file uploaded")
+        if len(content) > MAX_UPLOAD_SIZE:
+            raise HTTPException(413, f"File too large ({len(content)} bytes). Maximum: {MAX_UPLOAD_SIZE} bytes")
 
         file_hash = hashlib.sha256(content).hexdigest()
         file_size = len(content)
@@ -659,7 +706,7 @@ async def upload(file: UploadFile = File(...)):
         with open(job_dir / "file_hash.txt", "w") as f:
             f.write(file_hash)
 
-        asyncio.create_task(_run_pipeline_task(job_dir, str(pdf_path)))
+        _create_task(_run_pipeline_task(job_dir, str(pdf_path)))
         return {"job_id": job_id, "status": "queued", "input_type": "pdf"}
 
     if ext in IMAGE_EXTENSIONS:
@@ -695,7 +742,7 @@ async def upload(file: UploadFile = File(...)):
             raise HTTPException(400, "No supported images found in ZIP")
 
         await _set_status(job_dir, "queued", f"ZIP extracted: {len(image_paths)} images. Classifying pages...")
-        asyncio.create_task(_run_image_task(job_dir, image_paths))
+        _create_task(_run_image_task(job_dir, image_paths))
         return {
             "job_id": job_id,
             "status": "queued",
@@ -732,7 +779,7 @@ async def upload_images(files: list[UploadFile] = File(...)):
             fout.write(content)
         saved_paths.append(str(path.resolve()))
 
-    asyncio.create_task(_run_image_task(job_dir, saved_paths))
+    _create_task(_run_image_task(job_dir, saved_paths))
 
     return {
         "job_id": job_id,
@@ -772,7 +819,7 @@ async def upload_batch(files: list[UploadFile] = File(...)):
                 fout.write(content)
             pdfs_info.append({"filename": f.filename, "path": str(pdf_path.resolve())})
 
-        asyncio.create_task(_run_batch_task(job_dir, pdfs_info))
+        _create_task(_run_batch_task(job_dir, pdfs_info))
         pdf_names = [f.filename for f in pdf_files]
         results.append({"job_id": job_id, "filename": f"Batch: {names}", "type": "pdf", "status": "queued", "pdf_names": pdf_names})
 
@@ -793,7 +840,7 @@ async def upload_batch(files: list[UploadFile] = File(...)):
                 fout.write(content)
             saved_paths.append(str(path.resolve()))
 
-        asyncio.create_task(_run_image_task(job_dir, saved_paths))
+        _create_task(_run_image_task(job_dir, saved_paths))
         results.append({"job_id": job_id, "filename": f"images_{len(image_files)}", "type": "image_set", "status": "queued"})
 
     for f in zip_files:
@@ -809,7 +856,7 @@ async def upload_batch(files: list[UploadFile] = File(...)):
         image_paths = extract_zip(str(zip_path), str(extract_dir))
 
         await _set_status(job_dir, "queued", f"ZIP batch: {f.filename} ({len(image_paths)} images)")
-        asyncio.create_task(_run_image_task(job_dir, image_paths))
+        _create_task(_run_image_task(job_dir, image_paths))
         results.append({"job_id": job_id, "filename": f.filename, "type": "zip", "status": "queued"})
 
     return {
@@ -849,7 +896,8 @@ async def process_folder(data: dict):
     for item in items:
         try:
             if item["type"] == "pdf":
-                content = open(item["path"], "rb").read()
+                with open(item["path"], "rb") as f:
+                    content = f.read()
                 file_hash = hashlib.sha256(content).hexdigest()
 
                 job_id, job_dir = await _create_job_dir(item["name"], f"Folder batch: {item['name']}")
@@ -860,7 +908,7 @@ async def process_folder(data: dict):
                 with open(job_dir / "file_hash.txt", "w") as f:
                     f.write(file_hash)
 
-                asyncio.create_task(_run_pipeline_task(job_dir, str(pdf_path)))
+                _create_task(_run_pipeline_task(job_dir, str(pdf_path)))
                 results.append({"job_id": job_id, "name": item["name"], "type": "pdf", "status": "queued"})
 
             elif item["type"] == "image_set":
@@ -873,7 +921,7 @@ async def process_folder(data: dict):
 
                 job_id, job_dir = await _create_job_dir(item["name"], f"Image set: {item['name']} ({len(item['images'])} images)")
 
-                asyncio.create_task(_run_image_task(job_dir, item["images"]))
+                _create_task(_run_image_task(job_dir, item["images"]))
                 results.append({"job_id": job_id, "name": item["name"], "type": "image_set", "status": "queued"})
 
         except Exception as e:
@@ -902,7 +950,7 @@ async def retry_job(job_id: str):
         valid, err = _validate_pdf(str(pdf_path))
         if not valid:
             raise HTTPException(400, f"Cannot retry: {err}")
-        asyncio.create_task(_run_pipeline_task(job_dir, str(pdf_path)))
+        _create_task(_run_pipeline_task(job_dir, str(pdf_path)))
         return {"job_id": job_id, "status": "restarted", "input_type": "pdf"}
 
     if img_dir.exists():
@@ -911,7 +959,7 @@ async def retry_job(job_id: str):
             if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
         ])
         if image_paths:
-            asyncio.create_task(_run_image_task(job_dir, image_paths))
+            _create_task(_run_image_task(job_dir, image_paths))
             return {"job_id": job_id, "status": "restarted", "input_type": "image_set"}
 
     raise HTTPException(400, "No input files found for this job")
@@ -958,7 +1006,7 @@ async def get_tesseract_data(job_id: str):
 
 
 @app.get("/pages/{job_id}/{page_num}")
-async def get_page_image(job_id: str, page_num: int, width: int = 0, original: int = 0, pdf_name: str = None):
+async def get_page_image(job_id: str, page_num: int, width: int = 0, original: int = 0, pdf_name: str | None = None):
     job_dir = BASE_DIR / job_id
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
@@ -1116,8 +1164,10 @@ async def correct_field(job_id: str, body: dict):
             corrections = json.load(f)
 
     corrections.append({"label": label, "correct_value": correct_value})
-    with open(corrections_path, "w") as f:
+    tmp = corrections_path.with_suffix(".tmp")
+    with open(tmp, "w") as f:
         json.dump(corrections, f, indent=2)
+    os.replace(tmp, corrections_path)
 
     result_path = job_dir / "results" / "result.json"
     if result_path.exists():
@@ -1131,8 +1181,10 @@ async def correct_field(job_id: str, body: dict):
                 field["confidence"] = 100
                 field["needs_clarification"] = False
                 break
-        with open(result_path, "w") as f:
+        tmp = result_path.with_suffix(".tmp")
+        with open(tmp, "w") as f:
             json.dump(result_data, f, indent=2)
+        os.replace(tmp, result_path)
 
     return {"status": "saved"}
 
@@ -1285,6 +1337,20 @@ async def delete_job(job_id: str):
     job_dir = BASE_DIR / job_id
     if job_dir.exists() and job_dir.is_dir():
         shutil.rmtree(job_dir, ignore_errors=True)
+    if DB_AVAILABLE:
+        try:
+            pool = get_pool()
+            if pool:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        "DELETE FROM ocr_documents WHERE job_id = $1", job_id
+                    )
+                    await conn.execute(
+                        "DELETE FROM ocr_jobs WHERE job_id = $1", job_id
+                    )
+        except Exception as e:
+            logger.warning("Failed to clean up DB records for job %s: %s", job_id, e)
+    if not job_dir.exists():
         return {"status": "deleted"}
     raise HTTPException(status_code=404, detail="Job not found")
 
@@ -1477,7 +1543,7 @@ async def ocr_extract(req: OcrExtractRequest):
 
     await _set_status(job_dir, "oauth",
         f"OCR extract queued for {req.record_id} ({len(req.file_names)} files)")
-    asyncio.create_task(_run_ocr_extract_task(job_dir, req))
+    _create_task(_run_ocr_extract_task(job_dir, req))
 
     return {"success": True, "status": "queued", "job_id": job_id}
 
@@ -1487,8 +1553,8 @@ async def test_zoho_update(req: OcrExtractRequest):
     if not ZOHO_CLIENT_ID or not ZOHO_CLIENT_SECRET or not ZOHO_REFRESH_TOKEN:
         raise HTTPException(500, "Zoho OAuth credentials not configured")
     try:
-        token = _get_zoho_access_token()
-        _update_zoho_creator(token, req)
+        token = await asyncio.to_thread(_get_zoho_access_token)
+        await asyncio.to_thread(_update_zoho_creator, token, req)
         return {"success": True, "message": f"OCR_Status=Yes set on {req.zoho_record_id}"}
     except Exception as e:
         raise HTTPException(500, f"Zoho update failed: {e}")

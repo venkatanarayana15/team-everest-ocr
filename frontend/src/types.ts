@@ -14,6 +14,7 @@ export interface Field {
   extracted_by: string | null;
   verified_by: string | null;
   original_value: string | null;
+  position_hint?: string;
 }
 
 export interface Section {
@@ -45,7 +46,7 @@ export interface JobResult {
   coverage?: number;
   confidence?: number;
   num_pages: number;
-  processing_time: number;
+  processing_time?: number;
   fields: Field[];
   sections: Section[];
   raw_text: string;

@@ -77,6 +77,9 @@ CREATE TABLE IF NOT EXISTS ocr_documents (
     recommend_student           TEXT,
     volunteer_comments          TEXT,
 
+    -- Ambiguity tracking
+    ambiguous_fields            JSONB DEFAULT '{}',
+
     -- Timestamps
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),

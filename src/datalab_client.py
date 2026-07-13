@@ -121,7 +121,7 @@ class DatalabOcrClient(ModelClient):
         max_concurrent = _int_env("DATALAB_MAX_CONCURRENCY", "3")
         self._api_semaphore = asyncio.Semaphore(max_concurrent)
 
-        self._mode = _env("DATALAB_MODE", "balanced")
+        self._mode = _env("DATALAB_MODE", "fast")
         self._collect_timeout = _float_env("DATALAB_COLLECT_TIMEOUT", "1200")
         self._initial_poll_delay = _float_env("DATALAB_INITIAL_POLL_DELAY", "5")
 
@@ -176,6 +176,7 @@ class DatalabOcrClient(ModelClient):
                         data={
                             "page_schema": json.dumps(self._schema),
                             "mode": self._mode,
+                            "extraction_mode": self._mode,
                             **({"webhook_url": f"{self._webhook_base_url}/api/webhooks/extraction-completed"} if self._webhook_base_url else {}),
                         },
                         timeout=120.0,
@@ -271,20 +272,14 @@ class DatalabOcrClient(ModelClient):
                     resp = await client.get(job.check_url, headers=headers)
                     resp.raise_for_status()
                     body = resp.json()
-                    logger.info("Datalab poll response keys: %s", list(body.keys()))
-                    for k in ["markdown", "chunks", "segmentation_results", "json", "images", "metadata", "html"]:
-                        v = body.get(k)
-                        if v is not None:
-                            snippet = str(v)[:400].replace("\n", "\\n")
-                            logger.info("Datalab %s type=%s len=%d snippet=%s", k, type(v).__name__, len(v) if isinstance(v, (str, list, dict)) else -1, snippet)
-                        else:
-                            logger.info("Datalab %s is None", k)
-
                     status = body.get("status", "processing")
 
                     if status == "complete":
                         if body.get("success"):
-                            logger.info("Datalab collect OK: request_id=%s (elapsed=%.1fs)", job.request_id, elapsed)
+                            fields_json = body.get("extraction_schema_json", {})
+                            field_count = len(fields_json) if isinstance(fields_json, dict) else 0
+                            score = body.get("extraction_score_average", "N/A")
+                            logger.info("Datalab OK: request_id=%s elapsed=%.1fs fields=%d score=%s", job.request_id, elapsed, field_count, score)
                             return body
                         else:
                             raise RuntimeError(f"Datalab processing failed: {body.get('error', 'unknown')}")
@@ -293,7 +288,7 @@ class DatalabOcrClient(ModelClient):
 
                     # Log periodically during long polls
                     if elapsed - last_log_ts >= log_interval:
-                        logger.info("Datalab collecting: request_id=%s elapsed=%.1fs interval=%.0fs", job.request_id, elapsed, interval)
+                        logger.info("Datalab polling: request_id=%s elapsed=%.1fs interval=%.0fs", job.request_id, elapsed, interval)
                         last_log_ts = elapsed
 
                 except httpx.HTTPStatusError as e:
@@ -314,16 +309,12 @@ class DatalabOcrClient(ModelClient):
                 resp = await client.get(job.check_url, headers=headers)
                 resp.raise_for_status()
                 body = resp.json()
-                logger.info("Datalab response keys: %s", list(body.keys()))
-                for k in ["markdown", "chunks", "segmentation_results", "json", "images", "metadata", "html"]:
-                    v = body.get(k)
-                    if v is not None:
-                        snippet = str(v)[:400].replace("\n", "\\n")
-                        logger.info("Datalab %s type=%s len=%d snippet=%s", k, type(v).__name__, len(v) if isinstance(v, (str, list, dict)) else -1, snippet)
-                    else:
-                        logger.info("Datalab %s is None", k)
                 status = body.get("status", "processing")
                 if status == "complete" and body.get("success"):
+                    fields_json = body.get("extraction_schema_json", {})
+                    field_count = len(fields_json) if isinstance(fields_json, dict) else 0
+                    score = body.get("extraction_score_average", "N/A")
+                    logger.info("Datalab webhook result OK: request_id=%s fields=%d score=%s", job.request_id, field_count, score)
                     return body
                 if status == "failed":
                     raise RuntimeError(f"Datalab processing failed: {body.get('error', 'unknown')}")

@@ -79,80 +79,212 @@ TABLE_PARENT_COLUMNS: dict[str, str] = {
     "4.6.1": "loan_details",
 }
 
-_ROW_RE = re.compile(r"^(.*?)\s*—\s*Row\s+\d+\s*—\s*(.*)$")
+# Columns whose value is a single choice rendered as a group of option checkboxes
+# (e.g. "3.5 Bathroom - Separate" / "- Common for Apartment"). The stored value is
+# the option label(s) whose checkbox is ticked.
+SINGLE_SELECT_COLUMNS: set[str] = {
+    "house_ownership",
+    "type_of_bedroom",
+    "kitchen_type",
+    "bathroom",
+}
+
+# Columns rendered as a Yes/No checkbox pair (e.g. "4.3 Do you own...? — Yes"/"— No").
+# The stored value is the ticked option ("Yes"/"No").
+YESNO_PAIR_COLUMNS: set[str] = {
+    "owns_other_assets",
+}
+
+# Table parent columns keyed by section number — handles both the datalab
+# "parent — Row {n} — column" format and the LLM flat "{parent} - {column}" format.
+_TABLE_BY_NUMBER: dict[str, str] = {
+    "2.5": "family_members",
+    "4.3.1": "other_assets_details",
+    "4.4.1": "other_income_sources",
+    "4.6.1": "loan_details",
+}
+
+_LEADING_NUM_RE = re.compile(r"^\s*\d+(?:\.\d+)*\.?\s+")
+_NUM_PREFIX_RE = re.compile(r"^\s*(\d+(?:\.\d+)*)")
+_NOISE_PAREN_RE = re.compile(r"\s*\(tick all that apply\)", re.IGNORECASE)
+_SEG_SEP_RE = re.compile(r"\s*—\s*|\s*–\s*|\s*--\s*|\s+-\s+")
+_ROW_RE = re.compile(r"^(.*?)\s*(?:—|–|--|-)\s*Row\s+(\d+)\s*(?:—|–|--|-)\s*(.*)$", re.IGNORECASE)
+_STRIKE_CHARS_RE = re.compile(r"[─━═]")
+_STRIKE_LINE_RE = re.compile(r"^[\s─━═\-_~xX]{4,}$")
+
+_NEG_VALUES = {
+    "", "no", "false", "0", "n", "\u2717", "\u2014", "\u2013", "-", "n/a", "nil", "none",
+}
+_CHECKED_VALUES = {"\u2713", "1", "yes", "true", "y", "/"}
+
+
+def _norm(text: str) -> str:
+    """Normalize a label: drop leading section number, unify dashes, lowercase."""
+    s = text or ""
+    s = _LEADING_NUM_RE.sub("", s)
+    s = _NOISE_PAREN_RE.sub("", s)
+    s = s.replace("\u2014", " - ").replace("\u2013", " - ").replace("--", " - ")
+    s = re.sub(r"\s+-\s+", " - ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s.rstrip(":").strip().lower()
+
+
+def _num_prefix(text: str) -> str:
+    m = _NUM_PREFIX_RE.match(text or "")
+    return m.group(1) if m else ""
+
+
+# Normalized parent-label indexes, built once from FIELD_TO_COLUMN.
+_NORM_SCALAR: dict[str, str] = {}
+_NORM_ARRAY_PARENT: dict[str, str] = {}
+_NORM_SINGLE_PARENT: dict[str, str] = {}
+_NORM_YESNO_PARENT: dict[str, str] = {}
+for _lab, _col in FIELD_TO_COLUMN.items():
+    _n = _norm(_lab)
+    if _col in JSONB_ARRAY_COLUMNS:
+        _NORM_ARRAY_PARENT[_n] = _col
+    elif _col in SINGLE_SELECT_COLUMNS:
+        _NORM_SINGLE_PARENT[_n] = _col
+    elif _col in YESNO_PAIR_COLUMNS:
+        _NORM_YESNO_PARENT[_n] = _col
+    elif _col in TABLE_PARENT_COLUMNS.values():
+        continue
+    else:
+        _NORM_SCALAR[_n] = _col
+
+
+def _is_checked(value: str | None) -> bool:
+    return isinstance(value, str) and value.strip().lower() in _CHECKED_VALUES
+
+
+def _is_strikethrough(value: Any) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    cleaned = value.strip()
+    if _STRIKE_CHARS_RE.search(cleaned):
+        return True
+    if _STRIKE_LINE_RE.match(cleaned):
+        return True
+    return False
 
 
 def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
-    """Map the fields array from result_json into structured DB columns."""
+    """Map the fields array from result_json into structured DB columns.
+
+    Tolerant of both the datalab label format (em-dash separators, "— Row {n} —"
+    tables, scalar group values) and the LLM label format (hyphen separators,
+    "(tick all that apply)" noise, flat single-row tables, Yes/No checkbox pairs).
+    """
     out: dict[str, Any] = {}
-    label_map: dict[str, str] = {}
+    array_checked: dict[str, list[str]] = {c: [] for c in JSONB_ARRAY_COLUMNS}
+    array_specify_texts: dict[str, str] = {}
+    single_checked: dict[str, list[str]] = {}
+    yesno_val: dict[str, str] = {}
     table_rows: dict[str, dict[int, dict[str, str]]] = {}
 
-    def _is_checked(value: str | None) -> bool:
-        if not isinstance(value, str):
-            return False
-        return value.strip().lower() in ("\u2713", "1", "yes", "true", "y")
+    def _add_cell(col: str, row: int, colname: str, value: Any) -> None:
+        colname = (colname or "").strip()
+        if colname:
+            if _is_strikethrough(value):
+                value = ""
+            table_rows.setdefault(col, {}).setdefault(row, {})[colname] = value
+
+    def _set_scalar(col: str, value: Any) -> None:
+        if col not in out or (
+            isinstance(value, str) and value.strip() and not str(out.get(col) or "").strip()
+        ):
+            out[col] = value
+
+    def _append_array(col: str, option: str, value: Any) -> None:
+        if _is_checked(value):
+            array_checked[col].append(option)
+        elif isinstance(value, str) and value.strip().lower() not in _NEG_VALUES:
+            array_checked[col].append(value.strip())
 
     for f in fields:
-        label = f.get("label", "")
+        label = (f.get("label") or "").strip()
         value = f.get("value", "")
-        label_map[label] = value
-
-        row_match = _ROW_RE.match(label)
-        if row_match:
-            parent_label = row_match.group(1).strip()
-            column_name = row_match.group(2).strip()
-            if parent_label in TABLE_PARENT_COLUMNS:
-                table_col = TABLE_PARENT_COLUMNS[parent_label]
-                table_rows.setdefault(table_col, {})
-                row_num_match = re.search(r"Row\s+(\d+)", label)
-                if row_num_match:
-                    row_num = int(row_num_match.group(1))
-                    table_rows[table_col].setdefault(row_num, {})
-                    table_rows[table_col][row_num][column_name] = value
-
-    for label, col in FIELD_TO_COLUMN.items():
-        val = label_map.get(label)
-
-        if col in JSONB_ARRAY_COLUMNS:
-            prefix = label + " \u2014 "
-            checked = []
-            for flabel, fval in label_map.items():
-                if flabel.startswith(prefix):
-                    option = flabel[len(prefix):]
-                    if option and fval.strip():
-                        lower_val = fval.strip().lower()
-                        if lower_val in ("\u2713", "1", "yes", "true", "y"):
-                            checked.append(option)
-                        elif lower_val not in (
-                            "\u2717", "no", "false", "0", "", "n/a", "\u2014", "-", "nil", "none",
-                        ):
-                            checked.append(fval.strip())
-            if checked:
-                out[col] = json.dumps(sorted(checked))
-            elif val is not None:
-                items = [x.strip() for x in val.split(",") if x.strip()]
-                out[col] = json.dumps(items)
-            else:
-                out[col] = json.dumps([])
+        if not label:
             continue
 
-        if val is None:
+        # 1) Table row: "parent — Row {n} — column"
+        rm = _ROW_RE.match(label)
+        if rm:
+            tcol = _TABLE_BY_NUMBER.get(_num_prefix(rm.group(1))) or \
+                TABLE_PARENT_COLUMNS.get(rm.group(1).strip())
+            if tcol:
+                _add_cell(tcol, int(rm.group(2)), rm.group(3), value)
             continue
-        if col in BOOLEAN_COLUMNS:
-            norm = val.strip().lower()
-            if not norm:
+
+        segs = [s for s in _SEG_SEP_RE.split(label) if s.strip()]
+
+        if len(segs) >= 2:
+            parent, leaf = segs[0], segs[-1].strip()
+
+            # 2) Flat single-row table: "4.6.1 ... - column"
+            num = _num_prefix(label)
+            if num in _TABLE_BY_NUMBER:
+                _add_cell(_TABLE_BY_NUMBER[num], 1, leaf, value)
                 continue
-            out[col] = norm in ("yes", "true", "1", "y")
-        elif col not in TABLE_PARENT_COLUMNS.values():
-            out[col] = val
 
+            nparent = _norm(parent)
+            acol = _NORM_ARRAY_PARENT.get(nparent)
+            if acol is not None:
+                if leaf.lower().endswith("(specify)"):
+                    if isinstance(value, str) and value.strip():
+                        array_specify_texts[acol] = value.strip()
+                    continue
+                _append_array(acol, leaf, value)
+                continue
+            scol = _NORM_SINGLE_PARENT.get(nparent)
+            if scol is not None:
+                if _is_checked(value):
+                    single_checked.setdefault(scol, []).append(leaf)
+                continue
+            ycol = _NORM_YESNO_PARENT.get(nparent)
+            if ycol is not None:
+                if _is_checked(value):
+                    yesno_val[ycol] = leaf
+                continue
+
+        # 3) Direct value for a column (scalar, or datalab-style group value)
+        nlabel = _norm(label)
+        col = (
+            _NORM_SCALAR.get(nlabel)
+            or _NORM_SINGLE_PARENT.get(nlabel)
+            or _NORM_YESNO_PARENT.get(nlabel)
+        )
+        if col is not None:
+            if value is not None:
+                _set_scalar(col, value)
+            continue
+        acol = _NORM_ARRAY_PARENT.get(nlabel)
+        if acol is not None and isinstance(value, str):
+            for item in re.split(r"[,\n]", value):
+                item = item.strip()
+                if item and item.lower() not in _NEG_VALUES:
+                    array_checked[acol].append(item)
+
+    for col, text in array_specify_texts.items():
+        if text:
+            checked = array_checked.get(col, [])
+            if "Other" in checked:
+                checked.remove("Other")
+            array_checked[col].append(f"Other: {text}")
+
+    for col in JSONB_ARRAY_COLUMNS:
+        out[col] = json.dumps(sorted(set(array_checked.get(col, []))))
+    for col, opts in single_checked.items():
+        out[col] = ", ".join(dict.fromkeys(opts))
+    for col, v in yesno_val.items():
+        out[col] = v
     for col, rows in table_rows.items():
         sorted_rows = [
             {k: rows[row_num].get(k, "") for k in sorted(rows[row_num].keys())}
             for row_num in sorted(rows.keys())
         ]
-        out[col] = json.dumps(sorted_rows)
+        sorted_rows = [r for r in sorted_rows if any(v.strip() for v in r.values())]
+        out[col] = json.dumps(sorted_rows) if sorted_rows else "[]"
 
     return out
 
@@ -253,6 +385,9 @@ async def upsert_ocr_document(
         rj = dict(result_json)
         rj["job_id"] = job_id
         data["result_json"] = json.dumps(rj)
+
+        # ambiguous_fields is embedded in result_json._ambiguous_fields
+        # and does not need a separate migration-dependent column
 
         raw_fields = rj.get("fields", [])
         if raw_fields:
@@ -381,7 +516,7 @@ async def create_job(
     pool = get_pool()
     try:
         async with pool.acquire() as conn:
-            await conn.execute(
+            result = await conn.execute(
                 """
                 INSERT INTO ocr_jobs (job_id, file_name, status, file_hash, file_path)
                 VALUES ($1, $2, 'submitted', $3, $4)
@@ -389,6 +524,8 @@ async def create_job(
                 """,
                 job_id, file_name, file_hash, file_path,
             )
+            if result == "DELETE 0":
+                logger.warning("Job %s already exists — skipping", job_id)
         return True
     except Exception as e:
         logger.error("create_job: FAILED for job=%s — %s", job_id, e, exc_info=True)

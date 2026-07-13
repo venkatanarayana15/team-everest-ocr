@@ -3,10 +3,12 @@ import base64
 import json
 import logging
 import os
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
 import time
 import random
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+import httpx
 
 
 if TYPE_CHECKING:
@@ -143,7 +145,9 @@ def _load_dotenv(path: str = None) -> None:
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 k, _, v = line.partition("=")
-                os.environ[k.strip()] = v.strip()
+                k = k.strip()
+                if k not in os.environ:
+                    os.environ[k] = v.strip()
 
 
 def _strip_json_fence(text: str) -> str:
@@ -152,7 +156,7 @@ def _strip_json_fence(text: str) -> str:
     return text
 
 
-def _encode_image(path: str, max_dim: int = 1024) -> str:
+def _encode_image(path: str, max_dim: int = 2048) -> str:
     import cv2
     img = cv2.imread(path)
     if img is not None:
@@ -214,6 +218,8 @@ class OpenAICompatibleClient(ModelClient):
     def _use_response_format(self) -> bool:
         if self.provider == "deepseek":
             return self.model_name == "deepseek-chat"
+        if "qwen" in self.model_name.lower() and "vl" in self.model_name.lower():
+            return False
         return True
 
     def _extra_headers(self) -> dict | None:
@@ -224,18 +230,34 @@ class OpenAICompatibleClient(ModelClient):
             }
         return None
 
-    def _build_content(self, prompt: str, page_images: dict[int, str]) -> list[dict] | str:
-        vision_keywords = ("vision", "neva", "vlm", "llava", "paligemma", "molmo", "vl", "gpt-4o", "gpt-4-turbo", "claude-3")
+    def _is_ollama(self) -> bool:
+        try:
+            url = str(self._client.base_url).lower()
+        except Exception:
+            return False
+        return "11434" in url or "ollama" in url
+
+    def _build_content(self, prompt: str, page_images: dict[int, str], max_dim: int | None = None) -> list[dict] | str:
+        vision_keywords = ("vision", "neva", "vlm", "paligemma", "molmo", "vl", "gpt-4o", "gpt-4-turbo", "claude-3")
         is_vision = self.provider in ("openai", "gemini") or any(x in self.model_name.lower() for x in vision_keywords)
         if not is_vision:
             return prompt
+        detail = os.environ.get("OPENAI_IMAGE_DETAIL", "high").strip().lower()
+        if detail not in ("low", "high", "auto"):
+            detail = "high"
+        if max_dim is None:
+            env_max = os.environ.get("OPENAI_IMAGE_MAX_DIM")
+            if env_max:
+                max_dim = int(env_max)
+            else:
+                max_dim = 768 if detail == "low" else 2048
         content: list[dict] = [{"type": "text", "text": prompt}]
         for page_num in sorted(page_images):
-            b64 = _encode_image(page_images[page_num])
+            b64 = _encode_image(page_images[page_num], max_dim=max_dim)
             content.append({"type": "text", "text": f"\n[Page {page_num}:]"})
             content.append({
                 "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "low"},
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": detail},
             })
         return content
 
@@ -313,9 +335,63 @@ class OpenAICompatibleClient(ModelClient):
             logger.info("Extracted %d fields (tokens: %s)", len(data.get("fields", [])), usage)
             return data, usage
         except json.JSONDecodeError as e:
-            logger.error("Failed to parse response: %s", e)
+            logger.warning("Failed to parse response, retrying once: %s", e)
             logger.debug("Raw: %s", text[:500])
-            return None, usage
+            retry_kwargs = {
+                "model": self.model_name,
+                "messages": [
+                    {"role": "user", "content": content},
+                    {"role": "assistant", "content": text},
+                    {"role": "user", "content": "The JSON above is invalid. Fix it — output ONLY valid JSON with no extra text."},
+                ],
+            }
+            if self._use_response_format():
+                retry_kwargs["response_format"] = {"type": "json_object"}
+            headers = self._extra_headers()
+            if headers:
+                retry_kwargs["extra_headers"] = headers
+            retry_text = ""
+            try:
+                retry_response = await call_with_retry_async(
+                    lambda: self._client.chat.completions.create(**retry_kwargs),
+                    rl=self._rl,
+                )
+                retry_text = _strip_json_fence(retry_response.choices[0].message.content or "")
+                data = json.loads(retry_text)
+                usage2 = _extract_usage(retry_response)
+                merged_usage = {
+                    "prompt_tokens": (usage or {}).get("prompt_tokens", 0) + (usage2 or {}).get("prompt_tokens", 0),
+                    "completion_tokens": (usage or {}).get("completion_tokens", 0) + (usage2 or {}).get("completion_tokens", 0),
+                    "total_tokens": (usage or {}).get("total_tokens", 0) + (usage2 or {}).get("total_tokens", 0),
+                    "calls": max((usage or {}).get("calls", 1), 1) + 1,
+                }
+                logger.info("Retry OK — extracted %d fields", len(data.get("fields", [])))
+                return data, merged_usage
+            except json.JSONDecodeError as e2:
+                logger.error("Retry also failed to parse response: %s", e2)
+                logger.debug("Raw retry: %s", retry_text[:500])
+                return None, usage
+
+    async def extract_raw_text(self, pdf_path: str, page_images: dict[int, str], prompt: str) -> str:
+        max_dim = int(os.environ.get("OCR_IMAGE_MAX_DIM", "1400"))
+        content = self._build_content(prompt, page_images, max_dim=max_dim)
+        kwargs = {
+            "model": self.model_name,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": float(os.environ.get("OCR_TEMPERATURE", "0")),
+            "max_tokens": int(os.environ.get("OCR_MAX_TOKENS", "2048")),
+        }
+        if self._is_ollama():
+            kwargs["extra_body"] = {"keep_alive": os.environ.get("OLLAMA_KEEP_ALIVE", "15m")}
+        headers = self._extra_headers()
+        if headers:
+            kwargs["extra_headers"] = headers
+
+        response = await call_with_retry_async(
+            lambda: self._client.chat.completions.create(**kwargs),
+            rl=self._rl,
+        )
+        return response.choices[0].message.content or ""
 
 
 # ── Gemini (google.genai) ──────────────────────────────────────────
@@ -420,7 +496,8 @@ def get_model_client(role: str = "primary") -> ModelClient:
     base_url_key = f"{prefix}_BASE_URL"
 
     provider = os.environ.get(provider_key, "gemini").lower().strip()
-    model = os.environ.get(model_key, "gemini-2.5-flash" if provider == "gemini" else "gpt-4o-mini")
+    _default_models = {"gemini": "gemini-2.5-flash"}
+    model = os.environ.get(model_key, _default_models.get(provider, "gpt-4o-mini"))
     api_key = os.environ.get(api_key_key)
 
     if not api_key:
@@ -432,10 +509,6 @@ def get_model_client(role: str = "primary") -> ModelClient:
             )
 
     base_url = os.environ.get(base_url_key) or _BASE_URLS.get(provider)
-
-    if provider == "chandra-2":
-        from src.chandra_client import ChandraOcrClient
-        return ChandraOcrClient(api_key=api_key, base_url=base_url)
 
     if provider == "datalab":
         from src.datalab_client import DatalabOcrClient

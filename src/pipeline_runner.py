@@ -23,6 +23,13 @@ from src.tesseract import _save_tesseract_data, run_tesseract_async
 
 logger = logging.getLogger(__name__)
 
+# Global semaphore limiting concurrent PDF page rendering (CPU-bound, prevents thrash)
+_RENDER_SEMAPHORE = asyncio.Semaphore(
+    int(os.environ.get("RENDER_MAX_CONCURRENCY", "6"))
+)
+
+_COMBINE_PAGES = os.environ.get("COMBINE_PAGES", "false").lower() in ("1", "true", "yes")
+
 
 def _validate_pdf(path: str) -> tuple[bool, str]:
     p = Path(path)
@@ -222,7 +229,10 @@ async def _run_core_extraction(
                 run_tesseract_async(loop, pipeline, processed_images, job_dir, use_cache)
             )
 
-        llm_task = asyncio.create_task(pipeline.run_primary_extraction(pdf_path, processed_images))
+        if _COMBINE_PAGES:
+            llm_task = asyncio.create_task(pipeline.run_combined_extraction(pdf_path, processed_images))
+        else:
+            llm_task = asyncio.create_task(pipeline.run_primary_extraction(pdf_path, processed_images))
 
         if tesseract_enabled:
             word_boxes = await tesseract_task
@@ -232,6 +242,12 @@ async def _run_core_extraction(
             word_boxes = []
 
         model_data, primary_token_usage = await llm_task
+
+        # Fallback: if combined extraction returned empty, retry per-page
+        if _COMBINE_PAGES and (not model_data or not model_data.get("fields")):
+            logger.warning("Combined extraction returned no data — falling back to per-page extraction")
+            llm_task = asyncio.create_task(pipeline.run_primary_extraction(pdf_path, processed_images))
+            model_data, primary_token_usage = await llm_task
 
         if tesseract_enabled:
             _save_tesseract_data(job_dir, word_boxes)
@@ -282,7 +298,22 @@ async def _run_core_extraction(
     }
 
     await status_func("template_fill", "Filling missing template fields...")
-    fields = ExtractionPipeline.fill_missing_template_fields(fields)
+    fields = ExtractionPipeline.fill_missing_template_fields(fields, pdf_path=pdf_path)
+
+    all_no_groups = ExtractionPipeline._find_all_no_groups(fields)
+    if all_no_groups and pipeline and pipeline.primary_client and pipeline.primary_client.needs_images:
+        await status_func("recheck_checkboxes", f"Re-checking {len(all_no_groups)} all-No checkbox groups...")
+        fields = await ExtractionPipeline._recheck_checkbox_groups(
+            fields, pdf_path, processed_images, pipeline.primary_client
+        )
+
+    text_refinable = [f for f in fields if ExtractionPipeline._needs_refinement(f) and ExtractionPipeline._is_text_field_candidate(f)]
+    if text_refinable and pipeline and pipeline.primary_client and pipeline.primary_client.needs_images:
+        await status_func("text_refinement", f"Re-reading {len(text_refinable)} text fields with focused prompts...")
+        fields = await ExtractionPipeline._refine_text_fields(
+            fields, pdf_path, processed_images, pipeline.primary_client
+        )
+
     sections_data = _derive_sections(fields, raw_text or "")
 
     num_pages = len(processed_images)
@@ -389,10 +420,10 @@ async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
                 await _set_status(job_dir, "preprocessing", f"Preprocessing PDF ({pdf_name})...")
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, pipeline.preprocess, pdf_path, str(job_dir))
-                await _set_status(job_dir, "preprocessing", "Preprocessing done.", pages=len(processed_images))
                 processed_images = _ensure_page_images(job_dir / "pages")
+                await _set_status(job_dir, "preprocessing", "Preprocessing done.", pages=len(processed_images))
             else:
-                await _set_status(job_dir, "preprocessing", "Skipping page rendering (Chandra OCR).")
+                await _set_status(job_dir, "preprocessing", "Skipping page rendering (provider handles PDF directly).")
                 processed_images = {}
         else:
             processed_images = _ensure_page_images(job_dir / "pages")
@@ -494,7 +525,8 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                         await _set_batch_pdf_status(job_dir, pdf_name, "preprocessing", 20, f"Images ready ({idx+1}/{len(pdfs_info)})")
                         processed_images = {p_num: str(pages_dir / f"page_{p_num}.png") for p_num in image_paths}
                         # Need to run preprocess_images for deskew/denoise
-                        processed = pipeline.preprocess_images(image_paths, str(pdf_job_dir))
+                        async with _RENDER_SEMAPHORE:
+                            processed = await asyncio.to_thread(pipeline.preprocess_images, image_paths, str(pdf_job_dir))
                         processed_images = _ensure_page_images(pdf_job_dir / "pages")
                         pdf_path_for_extraction = ""
                     else:
@@ -506,7 +538,8 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                             continue
 
                         if pipeline.primary_client.needs_images:
-                            await asyncio.to_thread(pipeline.preprocess, pdf_info["path"], str(pdf_job_dir))
+                            async with _RENDER_SEMAPHORE:
+                                await asyncio.to_thread(pipeline.preprocess, pdf_info["path"], str(pdf_job_dir))
                             await _set_batch_pdf_status(job_dir, pdf_name, "preprocessing", 20, f"Preprocessed ({idx+1}/{len(pdfs_info)})")
                             processed_images = _ensure_page_images(pdf_job_dir / "pages")
                         else:
@@ -551,7 +584,7 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 queue.task_done()
 
         # Run up to N PDFs concurrently (configurable, default 5)
-        max_batch_conc = int(os.environ.get("BATCH_MAX_CONCURRENCY", "5"))
+        max_batch_conc = int(os.environ.get("BATCH_MAX_CONCURRENCY", "50"))
         num_workers = min(max_batch_conc, len(pdfs_info))
         workers = [asyncio.create_task(batch_worker()) for _ in range(num_workers)]
         await asyncio.gather(*workers)
@@ -628,7 +661,8 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
         config = Config()
         primary = get_model_client("primary")
 
-        if not hasattr(primary, 'submit') or not hasattr(primary, 'collect'):
+        from src.model_client import ModelClient
+        if primary.__class__.submit is ModelClient.submit or primary.__class__.collect is ModelClient.collect:
             logger.warning("Primary client does not support async submit/collect — falling back to sync batch")
             await run_batch_pdfs_pipeline(job_dir, pdfs_info)
             return
@@ -705,10 +739,35 @@ async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) ->
                 if not result:
                     return {"name": pdf_name, "error": "Empty result from Datalab"}
 
+                # ── CV verification on RAW extraction data (before convert_extract_response) ──
+                # Must run here because verify_marks needs mark-description keys like gender_male_mark,
+                # and verify_asset_list needs assets_at_home_list — both are consumed by convert_extract_response.
+                from src.checkbox_vision import verify_all, load_page_images
+                try:
+                    cv_pdf_path = pdf_path
+                    if not cv_pdf_path or not Path(cv_pdf_path).exists():
+                        cv_pdf_path = str(original_pdf_path)
+                    if cv_pdf_path and Path(cv_pdf_path).exists():
+                        logger.info("CV verify: loading pages from %s for %s", cv_pdf_path, pdf_name)
+                        page_images = load_page_images(cv_pdf_path)
+                        raw_data = result.get("extraction_schema_json", result)
+                        if isinstance(raw_data, str):
+                            raw_data = json.loads(raw_data)
+                        if isinstance(raw_data, dict):
+                            raw_data = verify_all(page_images, raw_data)
+                            result["extraction_schema_json"] = raw_data
+                    else:
+                        logger.warning("CV verify: no PDF available for %s (tried path=%r original=%r) — skipping CV", pdf_name, pdf_path, str(original_pdf_path))
+                except Exception as e:
+                    logger.warning("CV checkbox verification failed for %s: %s — continuing without CV", pdf_name, e)
+
                 from src.datalab_schema import convert_extract_response
                 data = convert_extract_response(result)
+
                 data["pdf_name"] = pdf_name
                 data["input_type"] = "batch_pdf"
+
+                _print_field_report(pdf_job_dir, data, pdf_name)
 
                 processing_time = round(time.time() - t_file, 2)
                 confidence_score = data.get("overall_confidence")
@@ -905,7 +964,15 @@ def _derive_sections(fields: list[StructuredField], raw_text: str) -> list[dict]
     for f in fields:
         if f.section_number is not None and f.section_number not in page_map:
             page_map[f.section_number] = f.page
-    all_nums = sorted(set(name_map.keys()) | set(page_map.keys()))
+    all_keys = set()
+    for k in (set(name_map.keys()) | set(page_map.keys())):
+        if k is None:
+            continue
+        try:
+            all_keys.add(int(k))
+        except (ValueError, TypeError):
+            logger.warning("Skipping non-integer section key: %r", k)
+    all_nums = sorted(all_keys)
     return [
         {"number": num, "name": name_map.get(num, f"Section {num}"), "page": page_map.get(num, 1)}
         for num in all_nums
@@ -1014,7 +1081,7 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
 
     def get_check(label: str) -> str:
         val = _lookup(label)
-        if "✓" in val or val.lower() in ("yes", "true", "x"):
+        if val.lower() in ("yes", "true", "✓", "x"):
             return "☑"
         return "☐"
 
@@ -1106,7 +1173,7 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     p2.append("─" * C_WIDTH)
     p2.append("Section 3 — Housing Condition")
     p2.append("")
-    p2.append(f"3.1. House Ownership:   {get_radio('3.1 House Ownership', 'Own')} Own     {get_radio('3.1 House Ownership', 'Rented')} Rented")
+    p2.append(f"3.1. House Ownership:   {get_check('3.1 House Ownership — Own')} Own     {get_check('3.1 House Ownership — Rented')} Rented")
     p2.append(f"3.1.1 If rented, what is the rent amount?  {get_val('3.1.1 If rented, what is the rent amount?')}")
     p2.append("")
     p2.append(f"3.2. Type of Home:   {get_check('3.2 Type of Home — Individual')} Individual   {get_check('3.2 Type of Home — Private Apartment')} Private Apartment   {get_check('3.2 Type of Home — Housing Board')} Housing Board   {get_check('3.2 Type of Home — Line House')} Line House   {get_check('3.2 Type of Home — Others')} Others")
@@ -1117,22 +1184,24 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     p3.append(f"  {get_check('3.3 Type of Ceiling — Roof (Kurai)')} Roof (Kurai)    {get_check('3.3 Type of Ceiling — Tiled')} Tiled    {get_check('3.3 Type of Ceiling — Asbestos / Sheet')} Asbestos / Sheet    {get_check('3.3 Type of Ceiling — Concrete')} Concrete")
     p3.append("")
     p3.append(f"3.4. Number of Bedrooms:  {get_val('3.4 Number of Bedrooms')}")
-    p3.append(f"3.4.1 Type of Bedroom:   {get_radio('3.4.1 Type of Bedroom', 'Separate Bedroom')} Separate Bedroom     {get_radio('3.4.1 Type of Bedroom', 'No Separate Bedroom')} No Separate Bedroom")
+    p3.append(f"3.4.1 Type of Bedroom:   {get_check('3.4.1 Type of Bedroom — Separate Bedroom')} Separate Bedroom     {get_check('3.4.1 Type of Bedroom — No Separate Bedroom')} No Separate Bedroom")
     p3.append("")
-    p3.append(f"3.5. Bathroom:   {get_radio('3.5 Bathroom', 'Separate')} Separate     {get_radio('3.5 Bathroom', 'Common for Apartment')} Common for Apartment")
+    p3.append(f"3.5. Bathroom:   {get_check('3.5 Bathroom - Separate')} Separate     {get_check('3.5 Bathroom - Common for Apartment')} Common for Apartment")
     p3.append("")
-    p3.append(f"3.6. Kitchen Type:   {get_radio('3.6 Kitchen Type', 'Separate Kitchen')} Separate Kitchen     {get_radio('3.6 Kitchen Type', 'Hall with Kitchen')} Hall with Kitchen")
+    p3.append(f"3.6. Kitchen Type:   {get_check('3.6 Kitchen Type — Separate Kitchen')} Separate Kitchen     {get_check('3.6 Kitchen Type — Hall with Kitchen')} Hall with Kitchen")
     p3.append("─" * C_WIDTH)
     p3.append("Section 4 — Financial Background")
     p3.append("")
     p3.append("4.1. Assets at Home (tick all that apply)")
-    p3.append(f"  {get_check('4.1 Assets at Home — Washing Machine')} Washing Machine   {get_check('4.1 Assets at Home — Fridge')} Fridge   {get_check('4.1 Assets at Home — AC')} AC   {get_check('4.1 Assets at Home — LED TV')} LED TV   {get_check('4.1 Assets at Home — Two-Wheeler')} Two-Wheeler   {get_check('4.1 Assets at Home — Car')} Car")
-    p3.append(f"  {get_check('4.1 Assets at Home — Smartphone')} Smartphone   {get_check('4.1 Assets at Home — Separate Wi-Fi')} Separate Wi-Fi   {get_check('4.1 Assets at Home — Others')} Others")
+    PREFIX = '4.1 Assets at Home(tick all that apply) - '
+    p3.append(f"  {get_check(PREFIX + 'Washing Machine')} Washing Machine   {get_check(PREFIX + 'Fridge')} Fridge   {get_check(PREFIX + 'AC')} AC   {get_check(PREFIX + 'LED TV')} LED TV   {get_check(PREFIX + 'Two-Wheeler')} Two-Wheeler   {get_check(PREFIX + 'Car')} Car")
+    p3.append(f"  {get_check(PREFIX + 'Smartphone')} Smartphone   {get_check(PREFIX + 'Separate Wi-Fi')} Separate Wi-Fi   {get_check(PREFIX + 'Others:')} Others")
     p3.append("")
     p3.append(f"4.2. Amount of Last Electricity Bill:  {get_val('4.2 Amount of Last Electricity Bill')}")
     p3.append("")
-    p3.append("4.3. Do you own any other assets/properties in the name of grandparents, parents, or student?")
-    p3.append(f"  {get_radio('4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?', 'Yes')} Yes     {get_radio('4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?', 'No')} No")
+    _4_3 = '4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?'
+    p3.append(_4_3[4:])
+    p3.append(f"  {get_check(_4_3 + ' — Yes')} Yes     {get_check(_4_3 + ' — No')} No")
 
     # Page 4
     p4 = pages[4]

@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from rapidfuzz import fuzz
 from src.server import detect_input_type, detect_item_type, is_image, is_pdf, is_zip, extract_zip, scan_folder, IMAGE_EXTENSIONS
 from src.page_classifier import PageClassifier, PageClassification
+from src.datalab_schema import resolve_checkbox_marks, _validate_field_patterns, _resolve_single_checkbox_marks
+from src.database import _extract_structured_fields
 
 
 @dataclass
@@ -306,6 +308,135 @@ def test_structured_field_json_roundtrip():
     print("PASS: test_structured_field_json_roundtrip")
 
 
+def test_extract_structured_fields_llm_format():
+    """Regression: LLM label format (hyphen separators, '(tick all that apply)',
+    flat single-row tables, Yes/No checkbox pairs, single-select groups) must
+    persist to DB columns instead of being silently dropped."""
+    fields = [
+        {"label": "Volunteer Name", "value": "M. Riaz"},
+        {"label": "1.3 Gender", "value": "Male"},
+        {"label": "3.1 House Ownership — Own", "value": "Yes"},
+        {"label": "3.1 House Ownership — Rented", "value": "No"},
+        {"label": "3.4.1 Type of Bedroom — Separate Bedroom", "value": "No"},
+        {"label": "3.4.1 Type of Bedroom — No Separate Bedroom", "value": "Yes"},
+        {"label": "3.5 Bathroom - Separate", "value": "Yes"},
+        {"label": "3.5 Bathroom - Common for Apartment", "value": "No"},
+        {"label": "3.6 Kitchen Type — Separate Kitchen", "value": "No"},
+        {"label": "3.6 Kitchen Type — Hall with Kitchen", "value": "Yes"},
+        {"label": "4.1 Assets at Home(tick all that apply) - Fridge", "value": "Yes"},
+        {"label": "4.1 Assets at Home(tick all that apply) - Car", "value": "No"},
+        {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes", "value": "No"},
+        {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No", "value": "Yes"},
+        {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Loan Purpose", "value": "Gold loan"},
+        {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Loan Amount Taken", "value": "10 Lakh"},
+    ]
+    out = _extract_structured_fields(fields)
+    assert out["volunteer_name"] == "M. Riaz"
+    assert out["gender"] == "Male"
+    assert out["house_ownership"] == "Own"
+    assert out["type_of_bedroom"] == "No Separate Bedroom"
+    assert out["bathroom"] == "Separate"
+    assert out["kitchen_type"] == "Hall with Kitchen"
+    assert json.loads(out["assets_at_home"]) == ["Fridge"]
+    assert out["owns_other_assets"] == "No"
+    loans = json.loads(out["loan_details"])
+    assert loans[0]["Loan Purpose"] == "Gold loan"
+    assert loans[0]["Loan Amount Taken"] == "10 Lakh"
+    print("PASS: test_extract_structured_fields_llm_format")
+
+
+def test_extract_structured_fields_datalab_format():
+    """Datalab label format (em-dash separators, '— Row {n} —' tables, scalar
+    group values) must continue to map correctly."""
+    fields = [
+        {"label": "3.5 Bathroom", "value": "Common for Apartment"},
+        {"label": "3.1 House Ownership", "value": "Rented"},
+        {"label": "4.1 Assets at Home", "value": "Fridge, LED TV"},
+        {"label": "2.5 Family Members — Row 1 — Name", "value": "Ravi"},
+        {"label": "2.5 Family Members — Row 1 — Age", "value": "45"},
+        {"label": "4.3.1 — Row 1 — Property Description", "value": "Land"},
+        {"label": "2.4 Government ID Verified — Aadhaar Card", "value": "Yes"},
+    ]
+    out = _extract_structured_fields(fields)
+    assert out["bathroom"] == "Common for Apartment"
+    assert out["house_ownership"] == "Rented"
+    assert json.loads(out["assets_at_home"]) == ["Fridge", "LED TV"]
+    assert json.loads(out["family_members"])[0] == {"Age": "45", "Name": "Ravi"}
+    assert json.loads(out["other_assets_details"])[0]["Property Description"] == "Land"
+    assert json.loads(out["government_id_verified"]) == ["Aadhaar Card"]
+    print("PASS: test_extract_structured_fields_datalab_format")
+
+
+def test_extract_structured_fields_dash_separators():
+    """Label format (double-hyphen -- separators) and
+    'Other (specify)' text field must both work correctly."""
+    fields = [
+        {"label": "2.4 Government ID Verified -- Aadhaar Card", "value": "Yes"},
+        {"label": "2.4 Government ID Verified -- Ration Card", "value": "No"},
+        {"label": "2.4 Government ID Verified -- Driving Licence", "value": "Yes"},
+        {"label": "2.4 Government ID Verified -- Other", "value": ""},
+        {"label": "2.4 Government ID Verified -- Other (specify)", "value": "Pan Card"},
+        {"label": "3.2 Type of Home -- Individual", "value": "Yes"},
+        {"label": "3.2 Type of Home -- Private Apartment", "value": "No"},
+        {"label": "3.2 Type of Home -- Line House", "value": "Yes"},
+        {"label": "3.3 Type of Ceiling -- Roof (Kurai)", "value": "No"},
+        {"label": "3.3 Type of Ceiling -- Concrete", "value": "Yes"},
+        {"label": "3.1 House Ownership -- Own", "value": "No"},
+        {"label": "3.1 House Ownership -- Rented", "value": "Yes"},
+        {"label": "4.1 Assets at Home(tick all that apply) - Washing Machine", "value": "Yes"},
+        {"label": "4.1 Assets at Home(tick all that apply) - Car", "value": "No"},
+    ]
+    out = _extract_structured_fields(fields)
+    # 2.4: Aadhaar+Driving checked, Other with text → "Other" included
+    govt = json.loads(out["government_id_verified"])
+    assert "Aadhaar Card" in govt
+    assert "Driving Licence" in govt
+    assert "Other: Pan Card" in govt
+    assert "Other" not in govt
+    assert "Ration Card" not in govt
+    # 3.2: Individual + Line House checked
+    home = json.loads(out["type_of_home"])
+    assert "Individual" in home
+    assert "Line House" in home
+    assert "Private Apartment" not in home
+    # 3.3: Concrete checked
+    ceil = json.loads(out["type_of_ceiling"])
+    assert "Concrete" in ceil
+    assert "Roof (Kurai)" not in ceil
+    # 3.1: Rented checked
+    assert out["house_ownership"] == "Rented"
+    # 4.1: Washing Machine checked
+    assets = json.loads(out["assets_at_home"])
+    assert "Washing Machine" in assets
+    assert "Car" not in assets
+    print("PASS: test_extract_structured_fields_dash_separators")
+
+
+def test_extract_structured_fields_other_specify_no_text():
+    """When 'Other (specify)' is empty, 'Other' must NOT be in the checked array."""
+    fields = [
+        {"label": "2.4 Government ID Verified -- Aadhaar Card", "value": "Yes"},
+        {"label": "2.4 Government ID Verified -- Other", "value": ""},
+        {"label": "2.4 Government ID Verified -- Other (specify)", "value": ""},
+    ]
+    out = _extract_structured_fields(fields)
+    govt = json.loads(out["government_id_verified"])
+    assert govt == ["Aadhaar Card"]
+    print("PASS: test_extract_structured_fields_other_specify_no_text")
+
+
+def test_extract_structured_fields_other_checked_no_text():
+    """When 'Other' checkbox is ticked, it must be in array regardless of specify text."""
+    fields = [
+        {"label": "2.4 Government ID Verified -- Other", "value": "Yes"},
+        {"label": "2.4 Government ID Verified -- Other (specify)", "value": ""},
+    ]
+    out = _extract_structured_fields(fields)
+    govt = json.loads(out["government_id_verified"])
+    assert govt == ["Other"]
+    print("PASS: test_extract_structured_fields_other_checked_no_text")
+
+
 # ═══════════════════ Input Handler Tests ═══════════════════
 
 def test_is_image():
@@ -556,7 +687,83 @@ def test_docstring_inference():
     print("PASS: test_docstring_inference")
 
 
+def test_resolve_checkbox_marks():
+    extracted = {
+        "kitchen_type_separate_mark": "✗",
+        "kitchen_type_hall_mark": "✓",
+        "house_ownership_rented_mark": "/",
+        "house_ownership_own_mark": "✗",
+    }
+    resolved, ambiguous = resolve_checkbox_marks(extracted)
+    assert resolved.get("kitchen_type") == "Hall with Kitchen"
+    assert resolved.get("house_ownership") == "Rented"
+    assert len(ambiguous) == 0
+
+    # Ambiguous test
+    ambiguous_extracted = {
+        "kitchen_type_separate_mark": "✓",
+        "kitchen_type_hall_mark": "/",
+    }
+    resolved_ambig, ambiguous_fields = resolve_checkbox_marks(ambiguous_extracted)
+    assert "kitchen_type" in ambiguous_fields
+    print("PASS: test_resolve_checkbox_marks")
+
+def test_validate_field_patterns():
+    extracted = {
+        "volunteer_name": "APP-2024-1234",
+        "application_id": "John Doe",
+    }
+    validated = _validate_field_patterns(extracted)
+    assert validated.get("volunteer_name") == "John Doe"
+    assert validated.get("application_id") == "APP-2024-1234"
+    print("PASS: test_validate_field_patterns")
+
+
+def test_resolve_single_checkbox_marks():
+    # Tick → "✓"
+    tick_input = {"asset_washing_machine": "tick"}
+    _resolve_single_checkbox_marks(tick_input)
+    assert tick_input["asset_washing_machine"] == "✓"
+
+    # Slash → "✓"
+    slash_input = {"govt_id_aadhaar": "slash"}
+    _resolve_single_checkbox_marks(slash_input)
+    assert slash_input["govt_id_aadhaar"] == "✓"
+
+    # Cross → None
+    cross_input = {"ceiling_roof": "cross"}
+    _resolve_single_checkbox_marks(cross_input)
+    assert cross_input["ceiling_roof"] is None
+
+    # Empty → None
+    empty_input = {"home_type_individual": "empty"}
+    _resolve_single_checkbox_marks(empty_input)
+    assert empty_input["home_type_individual"] is None
+
+    # None → unchanged (not in extracted dict)
+    none_input = {}
+    _resolve_single_checkbox_marks(none_input)
+    assert len(none_input) == 0
+
+    # Unknown → unchanged
+    unknown_input = {"asset_fridge": "unclear_mark"}
+    _resolve_single_checkbox_marks(unknown_input)
+    assert unknown_input["asset_fridge"] == "unclear_mark"
+
+    # Not in _SINGLE_CHECKBOX_KEYS → unchanged
+    other_input = {"volunteer_name": "tick"}
+    _resolve_single_checkbox_marks(other_input)
+    assert other_input["volunteer_name"] == "tick"
+
+    print("PASS: test_resolve_single_checkbox_marks")
+
+
 if __name__ == "__main__":
+    # Schema tests
+    test_resolve_checkbox_marks()
+    test_validate_field_patterns()
+    test_resolve_single_checkbox_marks()
+    
     # Existing bbox tests
     test_group_words_into_lines()
     test_find_field_bboxes_label_match()
@@ -566,6 +773,8 @@ if __name__ == "__main__":
     test_find_value_bbox_below_label()
     test_find_value_bbox_fallback_to_label()
     test_structured_field_json_roundtrip()
+    test_extract_structured_fields_llm_format()
+    test_extract_structured_fields_datalab_format()
     # New input handler tests
     test_is_image()
     test_is_pdf()
@@ -578,6 +787,10 @@ if __name__ == "__main__":
     test_detect_item_type_pdf()
     test_extract_zip()
     test_scan_folder()
+    # Label format regression tests (dash/em-dash separators)
+    test_extract_structured_fields_dash_separators()
+    test_extract_structured_fields_other_specify_no_text()
+    test_extract_structured_fields_other_checked_no_text()
     # New page classifier tests
     test_classify_from_text_page1()
     test_classify_from_text_page2()
