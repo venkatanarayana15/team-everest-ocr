@@ -262,17 +262,31 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
         if acol is not None and isinstance(value, str):
             for item in re.split(r"[,\n]", value):
                 item = item.strip()
-                if item and item.lower() not in _NEG_VALUES:
-                    array_checked[acol].append(item)
+                if not item or item.lower() in _NEG_VALUES | _CHECKED_VALUES:
+                    continue
+                array_checked[acol].append(item)
 
     for col, text in array_specify_texts.items():
-        # Ignore specify text if it's a negation (e.g. "No") — that means the
-        # "Other" option was not actually chosen, so don't store "Other: No".
         if text and text.strip().lower() not in _NEG_VALUES:
             checked = array_checked.get(col, [])
-            if "Other" in checked:
-                checked.remove("Other")
+            for bare in ("Other", "Others", "Others:"):
+                if bare in checked:
+                    checked.remove(bare)
             array_checked[col].append(f"Other: {text}")
+
+    # Dedup: if both bare "Others"/"Others:" and a qualified "Others: ..."
+    # (e.g. "Others: old TV") exist for the same column, keep only the latter.
+    for col in JSONB_ARRAY_COLUMNS:
+        items = array_checked.get(col, [])
+        has_qualified = any(
+            item.strip().lower().startswith("others:")
+            for item in items
+        )
+        if has_qualified:
+            array_checked[col] = [
+                item for item in items
+                if item.strip().lower() not in ("others", "others:")
+            ]
 
     for col in JSONB_ARRAY_COLUMNS:
         out[col] = json.dumps(sorted(set(array_checked.get(col, []))))

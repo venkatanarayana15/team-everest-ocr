@@ -688,34 +688,46 @@ def test_docstring_inference():
     print("PASS: test_docstring_inference")
 
 
-def test_gemini_post_process_4_3_blank_merge():
-    """Free-text below 4.3 (Zone A) and below the 4.3.1 table (Zone B) must be
-    appended as extra 4.3.1 Property Description rows, and the helpers cleared."""
+def test_fill_missing_template_fields_row3_row4():
+    """fill_missing_template_fields must add Row 3 / Row 4 from KNOWN_TEMPLATE_FIELDS
+    with correct page numbers when LLM did not output them."""
     fields = [
         StructuredField(label="4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes", value="Yes", page=3, section_number=4),
         StructuredField(label="4.3.1 If Yes, list their properties: — Row 1 — Property Description", value="Land", page=4, section_number=4),
         StructuredField(label="4.3.1 If Yes, list their properties: — Row 1 — Owner Name", value="Father", page=4, section_number=4),
         StructuredField(label="4.3.1 If Yes, list their properties: — Row 2 — Property Description", value="House", page=4, section_number=4),
-        StructuredField(label="blank_text_below_4_3", value="grandparents asset", page=3, section_number=4),
-        StructuredField(label="blank_text_below_4_3_1_table", value="no chance of getting share from brother", page=4, section_number=4),
     ]
-    out = ExtractionPipeline._gemini_post_process(fields)
+    out = ExtractionPipeline.fill_missing_template_fields(fields, pdf_path=None, provider="")
 
-    prop_rows = [f for f in out if f.label.endswith("— Property Description")]
-    # 2 printed + 2 free-text zones = 4 rows
-    assert len(prop_rows) == 4, [f.label for f in prop_rows]
-    texts = [f.value for f in prop_rows]
-    assert "grandparents asset" in texts
-    assert "no chance of getting share from brother" in texts
+    # Row 3 fields should be added (page 3)
+    row3_prop = [f for f in out if f.label == "4.3.1 If Yes, list their properties: — Row 3 — Property Description"]
+    assert len(row3_prop) == 1, [f.label for f in out if "Row 3" in f.label]
+    assert row3_prop[0].page == 3
+    assert row3_prop[0].value == ""
 
-    # Helpers cleared
-    helpers = [f for f in out if f.label in ("blank_text_below_4_3", "blank_text_below_4_3_1_table")]
-    assert all(f.value == "" for f in helpers), [f.value for f in helpers]
+    row3_owner = [f for f in out if f.label == "4.3.1 If Yes, list their properties: — Row 3 — Owner Name"]
+    assert len(row3_owner) == 1
+    assert row3_owner[0].page == 3
 
-    # New rows tagged page 4, section 4
-    new_rows = [f for f in out if "Row 3" in f.label or "Row 4" in f.label]
-    assert all(f.page == 4 and f.section_number == 4 for f in new_rows)
-    print("PASS: test_gemini_post_process_4_3_blank_merge")
+    row3_val = [f for f in out if f.label == "4.3.1 If Yes, list their properties: — Row 3 — Approximate Value"]
+    assert len(row3_val) == 1
+    assert row3_val[0].page == 3
+
+    # Row 4 fields should be added (page 4)
+    row4_prop = [f for f in out if f.label == "4.3.1 If Yes, list their properties: — Row 4 — Property Description"]
+    assert len(row4_prop) == 1
+    assert row4_prop[0].page == 4
+    assert row4_prop[0].value == ""
+
+    # Row 1 and Row 2 preserved
+    assert any(f.label.endswith("— Row 1 — Property Description") for f in out)
+    assert any(f.label.endswith("— Row 2 — Property Description") for f in out)
+
+    # No 4.3 blank_text helpers remain (blank_text_below_2_1 still valid on page 1)
+    no_blank_43 = all("blank_text_below_4" not in (f.label or "") for f in out)
+    assert no_blank_43, [f.label for f in out if "blank_text_below_4" in (f.label or "")]
+
+    print("PASS: test_fill_missing_template_fields_row3_row4")
 
 
 def test_resolve_checkbox_marks():
@@ -835,5 +847,5 @@ if __name__ == "__main__":
     test_resolve_order_shuffled()
     test_resolve_order_missing_page()
     test_docstring_inference()
-    test_gemini_post_process_4_3_blank_merge()
+    test_fill_missing_template_fields_row3_row4()
     print("\n=== All tests passed! ===")

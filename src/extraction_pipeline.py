@@ -21,7 +21,7 @@ def _load_page_images_cv(pdf_path: str) -> dict[int, np.ndarray]:
 
 @dataclass
 class Config:
-    render_dpi: int = 150
+    render_dpi: int = 200
     deskew_max_angle: int = 5
     denoise_strength: int = 10
     binarization_block_size: int = 15
@@ -115,6 +115,8 @@ TEXT_FIELD_TIPS: dict[str, str] = {
     "7.1 Has the student received or applied for any other scholarships for their UG degree?": "Free-text. Strip prefixes like 'Applied:', 'Answer:'. Output content only.",
     "8.1 What is your opinion about the student, their family members, and their living condition?": "Long free-text. Preserve complete answer with newlines.",
     "8.3 Any other comments you want to share?": "Free-text comments. Capture verbatim.",
+    "4.3.1 If Yes, list their properties: — Row 3 — Property Description": "CRITICAL — PAGE 3 BLANK AREA: Look at the EMPTY SPACE below the '4.3' checkbox section at the BOTTOM of page 3. Handwriting here looks like e.g. 'brothers land', 'no share in the property', 'brothers property'. Transcribe EXACTLY as written. If truly blank, output empty string.",
+    "4.3.1 If Yes, list their properties: — Row 4 — Property Description": "CRITICAL — PAGE 4 BLANK AREA: Look at the EMPTY GAP between the last 4.3.1 table row and the '4.4 Apart from your job' question on page 4. Handwriting here looks like e.g. 'no chance of getting share', 'brothers land'. Transcribe EXACTLY as written. If truly blank, output empty string.",
 }
 
 HANDWRITTEN_TEXT_LABELS: set[str] = set(TEXT_FIELD_TIPS.keys())
@@ -184,13 +186,20 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "4.2 Amount of Last Electricity Bill", "section_number": 4, "page": 3},
     {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes", "section_number": 4, "page": 3},
     {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No", "section_number": 4, "page": 3},
-    {"label": "blank_text_below_4_3", "section_number": 4, "page": 3},
+    {"label": "4.3.1 If Yes, list their properties: — Row 3 — Property Description", "section_number": 4, "page": 3},
+    {"label": "4.3.1 If Yes, list their properties: — Row 3 — Owner Name", "section_number": 4, "page": 3},
+    {"label": "4.3.1 If Yes, list their properties: — Row 3 — Approximate Value", "section_number": 4, "page": 3},
     # ── Page 4 ──
     # Section 4 — Financial Background (Page 4: 4.4-4.7)
-    {"label": "4.3.1 If Yes, list their properties: - Property Description", "section_number": 4, "page": 4},
-     {"label": "4.3.1 If Yes, list their properties: - Owner Name", "section_number": 4, "page": 4},
-      {"label": "4.3.1 If Yes, list their properties: - Approximate Value", "section_number": 4, "page": 4},
-    {"label": "blank_text_below_4_3_1_table", "section_number": 4, "page": 4},
+    {"label": "4.3.1 If Yes, list their properties: — Row 1 — Property Description", "section_number": 4, "page": 4},
+    {"label": "4.3.1 If Yes, list their properties: — Row 1 — Owner Name", "section_number": 4, "page": 4},
+    {"label": "4.3.1 If Yes, list their properties: — Row 1 — Approximate Value", "section_number": 4, "page": 4},
+    {"label": "4.3.1 If Yes, list their properties: — Row 2 — Property Description", "section_number": 4, "page": 4},
+    {"label": "4.3.1 If Yes, list their properties: — Row 2 — Owner Name", "section_number": 4, "page": 4},
+    {"label": "4.3.1 If Yes, list their properties: — Row 2 — Approximate Value", "section_number": 4, "page": 4},
+    {"label": "4.3.1 If Yes, list their properties: — Row 4 — Property Description", "section_number": 4, "page": 4},
+    {"label": "4.3.1 If Yes, list their properties: — Row 4 — Owner Name", "section_number": 4, "page": 4},
+    {"label": "4.3.1 If Yes, list their properties: — Row 4 — Approximate Value", "section_number": 4, "page": 4},
     {"label": "4.4 Apart from your job, is there any other source of income?", "section_number": 4, "page": 4},
      {"label": "4.4.1 If Yes, list other sources of income: - Source of Income", "section_number": 4, "page": 4},
           {"label": "4.4.1 If Yes, list other sources of income: - Amount", "section_number": 4, "page": 4},
@@ -513,7 +522,7 @@ REASONING INSTRUCTIONS — Apply these steps for each field
   STEP 5: For Yes/No radios (4.4, 4.6, 5.1, 2.3, 6.3): if both appear empty, default "No". NEVER output "Yes" for an empty circle.
 
 ### Numeric fields:
-  For 4.4.1 Amount, 4.6.1 Loan Amount Taken/Pending:
+  For 4.6.1 Loan Amount Taken/Pending:
   STEP 1: Extract only digits and decimal point. Strip ₹, commas, Rs, words.
   STEP 2: Handwriting digit disambiguation — 'l' or 'I' is usually '1'; 'O' or 'o' is usually '0'; 'S' or 's' is usually '5'; 'Z' or 'z' is usually '2'.
   STEP 3: If value is wholly non-numeric, output "" (empty) — don't guess.
@@ -526,19 +535,18 @@ REASONING INSTRUCTIONS — Apply these steps for each field
   STEP 4: If the blank is empty, output "" — do not repeat nearby text.
 
 ### Table fields (count pre-printed rows, fill every cell):
-  For 2.5 (Family Members), 4.3.1 (Properties), 4.4.1 (Other Income), 4.6.1 (Loans):
+  For 2.5 (Family Members), 4.3.1 (Properties), 4.6.1 (Loans):
   STEP 1: Count ALL pre-printed rows. 2.5 usually has 5 rows.
   STEP 2: Label = "{{Table label}} — Row {{n}} — {{Column}}".
   STEP 3: Parent "No" → ALL cells = "N/A". Parent "Yes" or unclear → extract.
-  STEP 4: For 4.3.1, 4.4.1, 4.6.1 — use the EXACT labels from PAGE FIELD LIST below.
+  STEP 4: For 4.3.1, 4.6.1 — use the EXACT labels from PAGE FIELD LIST below.
 
 ### Conditional dependencies — hard rule:
   Parent field = "No" or "✗" → ALL child fields = "N/A", UNLESS child field has visible handwritten text.
   Key dependencies:
     3.1.1 rent amount → ALWAYS look for handwritten text FIRST. If text exists, extract it regardless of 3.1 selection. Only output "N/A" if the 3.1.1 blank is COMPLETELY empty AND 3.1 Own is checked.
     4.3.1 properties → depends on 4.3 Yes = ✓
-    4.4.1 income → depends on 4.4 = Yes
-    4.6.1 loans → depends on 4.6 = Yes
+     4.6.1 loans → depends on 4.6 = Yes
     5.2 health issues → depends on 5.1 = Yes
 
 -------------------------------------------------------------------------------
@@ -763,7 +771,7 @@ FIELD LIST FOR PAGE {page}:
         if num_pages > 1:
             prompt = (
                 f"You are examining all {num_pages} pages of the Home Visit Questionnaire. "
-                f"Each image below is labeled with its page number.\n\n"
+                f"The images are sent in order (page 1 through page 6). Use the printed page number at the bottom of each page.\n\n"
                 f"RULES:\n"
                 f"1. Extract ALL fields visible across ALL pages.\n"
                 f"2. Set the 'page' field to the page number where each field physically appears.\n"
@@ -833,16 +841,16 @@ GROUND RULES:
 1. Extract EVERY field listed in FIELD LIST BY PAGE below. Every label must appear in output, even if empty.
 2. Labels MUST EXACTLY match the field list including numbers (e.g. "1.2 Student Full Name"). Do NOT alter.
 3. value="" for unreadable/missing. value="N/A" when parent="No". Never "null".
- 4. Checkbox → "Yes" if a tick (✓) or slash (/) is INSIDE/BESIDE the box; "No" if empty/cross/scribble/dot. If a box has BOTH tick and cross, the tick wins → "Yes". A tick/slash drawn ON TOP OF the option text is a stray annotation — ignore it (empty box = unselected); a cross under/beside the box = deselected.
+ 4. Checkbox → "Yes" if a tick (✓) or slash (/) appears in the box OR on the option text. "No" if cross/scribble/empty. Mark inside box is authoritative. Box tick + text cross = "Yes". Box cross + text tick = "No". If BOTH tick and cross in one box, tick wins → "Yes".
 5. Radio → exact option text (e.g. "Male", "Having both parents"). Never "✓" or "✗".
 6. Table → "{{Table}} — Row {{n}} — {{Column}}" (e.g. "2.5 Family Members — Row 1 — Name").
-7. Conditionals: parent="No" → child="N/A". Dependencies: rent→3.1, 4.3/4.4/4.6→4.3.1/4.4.1/4.6.1, health→5.1.
+7. Conditionals: parent="No" → child="N/A". Dependencies: rent→3.1, 4.3/4.6→4.3.1/4.6.1, health→5.1.
 8. Never invent values. Only text visible on the images.
 
 REASONING — Apply per field type:
 - Mutually-exclusive pairs (Own/Rented, Separate/No Separate Bedroom, Yes/No for 4.3, Separate/Common for Bathroom): exactly ONE marked. Use context clues (filled rent→Rented=Yes, bedrooms>0→Separate=Yes).
 - Multi-select (2.4 Govt ID, 3.2 Home Type, 3.3 Ceiling, 3.6 Kitchen, 4.1 Assets): each checkbox independent. Default ambiguous="No".
-- Numerics (4.4.1 Amount, 4.6.1 Loan): digits+decimal only. Strip ₹, commas, Rs.
+- Numerics (4.6.1 Loan): digits+decimal only. Strip ₹, commas, Rs.
 - 4.7: capture COMPLETE handwritten college name + fee amount together. Do NOT drop the text.
 - Table rows: count ALL pre-printed rows (2.5 usually 5). Every cell filled.
 - Other(s) fields: also capture handwritten text.
@@ -1255,7 +1263,7 @@ FIELD LIST BY PAGE:
             ("3.5 Bathroom - Separate", "3.5 Bathroom - Common for Apartment", None),
             ("4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes",
              "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No",
-             "4.3.1 If Yes, list their properties: - Property Description"),
+             "4.3.1 If Yes, list their properties: — Row 1 — Property Description"),
         ]
         fmap = {f.label: f for f in fields}
         for opt_a, opt_b, clue_label in mutual_pairs:
@@ -1367,6 +1375,7 @@ FIELD LIST BY PAGE:
                 reason="Not extracted by LLM",
                 extracted_by="template_fill",
             ))
+
         return fields
 
     @staticmethod
@@ -1405,47 +1414,20 @@ FIELD LIST BY PAGE:
                 f.confidence = 100
                 f.needs_clarification = False
 
-            # Merge blank_text_below_4_3 / blank_text_below_4_3_1_table into
-            # 4.3.1 Property Description as extra table rows.
-            if label in ("blank_text_below_4_3", "blank_text_below_4_3_1_table") and val:
-                ExtractionPipeline._merge_blank_into_4_3_1(fields, val)
-                f.value = ""
-                f.confidence = 100
-                f.needs_clarification = False
-
         return fields
-
-    @staticmethod
-    def _merge_blank_into_4_3_1(fields: list[StructuredField], text: str) -> None:
-        """Append handwritten free-text (from below 4.3 / below 4.3.1 table)
-        as a new 4.3.1 table row with the text in Property Description."""
-        base = "4.3.1 If Yes, list their properties:"
-        max_row = 0
-        has_flat = False
-        for f in fields:
-            if f.label.startswith("4.3.1"):
-                m = re.search(r"Row\s+(\d+)", f.label)
-                if m:
-                    max_row = max(max_row, int(m.group(1)))
-                else:
-                    has_flat = True
-        if has_flat:
-            max_row = max(max_row, 1)
-        new_row = max_row + 1
-        logger.info("Gemini 4.3.1 merge: blank area → Row %d Property Description", new_row)
-        for col in ("Property Description", "Owner Name", "Approximate Value"):
-            fields.append(StructuredField(
-                label=f"{base} — Row {new_row} — {col}",
-                value=text if col == "Property Description" else "",
-                confidence=80,
-                page=4,
-                section_number=4,
-                extracted_by="gemini_post_process",
-            ))
 
     @staticmethod
     def _cv_checkbox_verify(fields: list[StructuredField], pdf_path: str) -> list[StructuredField]:
         from src.checkbox_vision import CHECKBOX_COORDS, _crop_checkbox, _classify_checkbox_mark
+
+        def _norm(label: str) -> str:
+            s = label or ""
+            s = re.sub(r'^\s*\d+(?:\.\d+)*\.?\s+', '', s)
+            s = re.sub(r'\s*\(tick all that apply\)', '', s, flags=re.IGNORECASE)
+            s = s.replace('\u2014', ' - ').replace('\u2013', ' - ').replace('--', ' - ')
+            s = re.sub(r'\s+-\s+', ' - ', s)
+            s = re.sub(r'\s+', ' ', s).strip()
+            return s.rstrip(':').strip().lower()
 
         label_to_coords_key: dict[str, str] = {
             "2.4 Government ID Verified — Aadhaar Card": "govt_id_aadhaar",
@@ -1475,7 +1457,11 @@ FIELD LIST BY PAGE:
             "4.1 Assets at Home(tick all that apply) - Car": "asset_car_checkbox",
             "4.1 Assets at Home(tick all that apply) - Smartphone": "asset_smartphone_checkbox",
             "4.1 Assets at Home(tick all that apply) - Separate Wi-Fi": "asset_separate_wifi_checkbox",
+
+            "3.6 Kitchen Type — Separate Kitchen": "kitchen_type_separate",
+            "3.6 Kitchen Type — Hall with Kitchen": "kitchen_type_hall",
         }
+        norm_map: dict[str, str] = {_norm(k): v for k, v in label_to_coords_key.items()}
 
         extra_coords: dict[str, tuple[int, float, float, float, float]] = {
             "house_ownership_own": (2, 172.0, 375.0, 10.0, 13.0),
@@ -1491,6 +1477,10 @@ FIELD LIST BY PAGE:
 
         for f in fields:
             coords_key = label_to_coords_key.get(f.label)
+            if coords_key is None:
+                coords_key = norm_map.get(_norm(f.label))
+                if coords_key is not None:
+                    logger.debug("CV normalized label %r → %r", f.label, coords_key)
             if coords_key is None:
                 continue
             coords = CHECKBOX_COORDS.get(coords_key) or extra_coords.get(coords_key)
@@ -1723,6 +1713,67 @@ FIELD LIST BY PAGE:
         return False
 
     @staticmethod
+    async def _refine_one_page(
+        client,
+        page: int,
+        page_fields: list,
+        field_map: dict[str, "StructuredField"],
+        processed_images: dict[int, str],
+        pdf_path: str,
+    ) -> int:
+        page_images = {page: processed_images.get(page)}
+        if not page_images.get(page):
+            return 0
+
+        field_list = "\n".join(
+            f"  - {f.label}: {TEXT_FIELD_TIPS.get(f.label, 'Extract the handwritten text value accurately')}"
+            for f in page_fields
+        )
+        current_values = "\n".join(
+            f"  - {f.label}: current_value={f.value!r}"
+            for f in page_fields
+        )
+        prompt = (
+            f"Re-examine Page {page} of the Home Visit Questionnaire.\n\n"
+            f"I need you to re-read ONLY the following handwritten text fields on this page. "
+            f"These fields currently have missing or low-confidence values.\n\n"
+            f"Fields to re-read:\n{field_list}\n\n"
+            f"Current (possibly incomplete) values:\n{current_values}\n\n"
+            f"HANDWRITING RULES:\n"
+            f"- Read each character individually\n"
+            f"- 'l'/'I'→'1', 'O'/'o'→'0', 'S'→'5', 'Z'→'2'\n"
+            f"- 'n'↔'u', 'a'↔'o', 'l'↔'t', 'r'↔'v'\n"
+            f"- Printed question text = LABEL, NOT the value\n"
+            f"- Look at the blank AFTER the label — that is the handwritten answer\n"
+            f"- For 4.7 (college fee): capture the COMPLETE handwritten answer including college name AND fee amount together (e.g. \"guru nanak college rs 30000/-per year\"). Do NOT drop any part.\n"
+            f"- If truly empty → value=\"\"\n\n"
+            f"Output ONLY valid JSON:\n"
+            f"{{\"fields\": [{{\"label\": \"exact label from above\", \"value\": \"extracted text\"}}, ...]}}"
+        )
+
+        refined = 0
+        try:
+            data, _ = await client.extract_structured(pdf_path, page_images, prompt)
+            if data and "fields" in data:
+                for entry in data["fields"]:
+                    label = entry.get("label", "")
+                    value = entry.get("value", "")
+                    if label in field_map and value:
+                        f = field_map[label]
+                        old_val = f.value
+                        if value != old_val:
+                            logger.info("Text refinement %r: %r → %r", label, old_val, value)
+                            f.original_value = old_val
+                            f.value = value
+                            f.confidence = max(f.confidence, 80)
+                            f.needs_clarification = False
+                            f.reason = "Refined by focused re-read"
+                            refined += 1
+        except Exception as e:
+            logger.warning("Text field refinement failed for page %d: %s", page, e)
+        return refined
+
+    @staticmethod
     async def _refine_text_fields(
         fields: list[StructuredField],
         pdf_path: str,
@@ -1742,57 +1793,12 @@ FIELD LIST BY PAGE:
             p = f.page or 1
             fields_by_page.setdefault(p, []).append(f)
 
-        for page, page_fields in fields_by_page.items():
-            page_images = {page: processed_images.get(page)}
-            if not page_images[page]:
-                continue
+        tasks = [
+            ExtractionPipeline._refine_one_page(client, page, page_fields, field_map, processed_images, pdf_path)
+            for page, page_fields in fields_by_page.items()
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        total_refined = sum(r for r in results if isinstance(r, int))
 
-            field_list = "\n".join(
-                f"  - {f.label}: {TEXT_FIELD_TIPS.get(f.label, 'Extract the handwritten text value accurately')}"
-                for f in page_fields
-            )
-            current_values = "\n".join(
-                f"  - {f.label}: current_value={f.value!r}"
-                for f in page_fields
-            )
-            prompt = (
-                f"Re-examine Page {page} of the Home Visit Questionnaire.\n\n"
-                f"I need you to re-read ONLY the following handwritten text fields on this page. "
-                f"These fields currently have missing or low-confidence values.\n\n"
-                f"Fields to re-read:\n{field_list}\n\n"
-                f"Current (possibly incomplete) values:\n{current_values}\n\n"
-                f"HANDWRITING RULES:\n"
-                f"- Read each character individually\n"
-                f"- 'l'/'I'→'1', 'O'/'o'→'0', 'S'→'5', 'Z'→'2'\n"
-                f"- 'n'↔'u', 'a'↔'o', 'l'↔'t', 'r'↔'v'\n"
-                f"- Printed question text = LABEL, NOT the value\n"
-                f"- Look at the blank AFTER the label — that is the handwritten answer\n"
-                f"- For 4.7 (college fee): capture the COMPLETE handwritten answer including college name AND fee amount together (e.g. \"guru nanak college rs 30000/-per year\"). Do NOT drop any part.\n"
-                f"- If truly empty → value=\"\"\n\n"
-                f"Output ONLY valid JSON:\n"
-                f"{{\"fields\": [{{\"label\": \"exact label from above\", \"value\": \"extracted text\"}}, ...]}}"
-            )
-
-            try:
-                data, _ = await client.extract_structured(pdf_path, page_images, prompt)
-                if data and "fields" in data:
-                    for entry in data["fields"]:
-                        label = entry.get("label", "")
-                        value = entry.get("value", "")
-                        if label in field_map and value:
-                            f = field_map[label]
-                            old_val = f.value
-                            if value != old_val:
-                                was_blank = not old_val or old_val in ("N/A", "")
-                                logger.info("Text refinement %r: %r → %r", label, old_val, value)
-                                f.original_value = old_val
-                                f.value = value
-                                f.confidence = max(f.confidence, 80)
-                                f.needs_clarification = False
-                                f.reason = "Refined by focused re-read"
-            except Exception as e:
-                logger.warning("Text field refinement failed for page %d: %s", page, e)
-
-        refined_count = sum(1 for f in refinable if f.reason == "Refined by focused re-read")
-        logger.info("Text field refinement: %d/%d fields updated", refined_count, len(refinable))
+        logger.info("Text field refinement: %d/%d fields updated", total_refined, len(refinable))
         return fields

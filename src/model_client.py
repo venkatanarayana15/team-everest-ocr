@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Global semaphore that caps total concurrent LLM calls across ALL pipelines.
 # This prevents LLM API overload regardless of how many pipelines are active.
 _global_llm_semaphore = asyncio.Semaphore(
-    int(os.environ.get("GLOBAL_LLM_MAX_CONCURRENCY", "6"))
+    int(os.environ.get("GLOBAL_LLM_MAX_CONCURRENCY", "24"))
 )
 
 
@@ -30,7 +30,7 @@ class RateLimiter:
 
     def __init__(self, rpm: int | None = None, max_concurrency: int | None = None):
         self.rpm = rpm or int(os.environ.get("LLM_RATE_LIMIT_RPM", "30"))
-        self.max_concurrency = max_concurrency or int(os.environ.get("LLM_MAX_CONCURRENCY", "2"))
+        self.max_concurrency = max_concurrency or int(os.environ.get("LLM_MAX_CONCURRENCY", "6"))
         self._timestamps: list[float] = []
         self._semaphore = asyncio.Semaphore(self.max_concurrency)
 
@@ -399,14 +399,14 @@ class OpenAICompatibleClient(ModelClient):
 class GeminiClient(ModelClient):
     def __init__(self, api_key: str, model: str = "gemini-2.5-flash", base_url: str | None = None):
         from google import genai as _genai
-        http_options = {}
+        http_options = {"timeout": 120000}
         if base_url:
             http_options["base_url"] = base_url
-        self._client = _genai.Client(api_key=api_key, http_options=http_options or None)
+        self._client = _genai.Client(api_key=api_key, http_options=http_options)
         self._genai = _genai
         self.model_name = model
         self.provider = "gemini"
-        _gemini_conc = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "6"))
+        _gemini_conc = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "12"))
         _gemini_rpm = int(os.environ.get("GEMINI_RATE_LIMIT_RPM", "14"))
         self._rl = RateLimiter(rpm=_gemini_rpm, max_concurrency=_gemini_conc)
 
@@ -437,6 +437,7 @@ class GeminiClient(ModelClient):
                     contents=contents,
                     config=self._genai.types.GenerateContentConfig(
                         response_mime_type="application/json",
+                        max_output_tokens=16384,
                     ),
                 ),
                 rl=self._rl,
@@ -458,6 +459,7 @@ class GeminiClient(ModelClient):
                         contents=[sample_file, prompt],
                         config=self._genai.types.GenerateContentConfig(
                             response_mime_type="application/json",
+                            max_output_tokens=16384,
                         ),
                     ),
                     rl=self._rl,

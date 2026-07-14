@@ -214,6 +214,7 @@ async def _run_core_extraction(
 ) -> dict:
     coverage = None
     confidence = None
+    primary_extraction_failed = False
 
     if checkpoint:
         step, fields, overall_confidence, raw_text, sections_data = checkpoint
@@ -265,6 +266,7 @@ async def _run_core_extraction(
             fields = pipeline.merge_fields(model_data, word_boxes, prefix=primary_name)
             await status_func("field_mapping", f"Merged {len(fields)} fields.")
         else:
+            primary_extraction_failed = True
             if word_boxes:
                 await status_func("field_mapping", "Primary extraction failed — using Tesseract words.")
                 fields = [
@@ -302,18 +304,28 @@ async def _run_core_extraction(
     fields = ExtractionPipeline.fill_missing_template_fields(fields, pdf_path=pdf_path, provider=_provider)
 
     all_no_groups = ExtractionPipeline._find_all_no_groups(fields)
-    if all_no_groups and pipeline and pipeline.primary_client and pipeline.primary_client.needs_images:
-        await status_func("recheck_checkboxes", f"Re-checking {len(all_no_groups)} all-No checkbox groups...")
-        fields = await ExtractionPipeline._recheck_checkbox_groups(
-            fields, pdf_path, processed_images, pipeline.primary_client
-        )
-
     text_refinable = [f for f in fields if ExtractionPipeline._needs_refinement(f) and ExtractionPipeline._is_text_field_candidate(f)]
-    if text_refinable and pipeline and pipeline.primary_client and pipeline.primary_client.needs_images:
-        await status_func("text_refinement", f"Re-reading {len(text_refinable)} text fields with focused prompts...")
-        fields = await ExtractionPipeline._refine_text_fields(
-            fields, pdf_path, processed_images, pipeline.primary_client
-        )
+    do_recheck = all_no_groups and pipeline and pipeline.primary_client and pipeline.primary_client.needs_images
+    do_refine = text_refinable and pipeline and pipeline.primary_client and pipeline.primary_client.needs_images
+
+    if do_recheck or do_refine:
+        tasks = []
+        if do_recheck:
+            await status_func("recheck_checkboxes", f"Re-checking {len(all_no_groups)} all-No checkbox groups...")
+            tasks.append(ExtractionPipeline._recheck_checkbox_groups(
+                fields, pdf_path, processed_images, pipeline.primary_client
+            ))
+        if do_refine:
+            await status_func("text_refinement", f"Re-reading {len(text_refinable)} text fields with focused prompts...")
+            tasks.append(ExtractionPipeline._refine_text_fields(
+                fields, pdf_path, processed_images, pipeline.primary_client
+            ))
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                logger.warning("Post-primary task failed: %s", r)
+            elif r is not None:
+                fields = r
 
     if _provider == "gemini":
         await status_func("gemini_post_process", "Applying Gemini-specific post-processing...")
@@ -342,6 +354,7 @@ async def _run_core_extraction(
         "llm_calls": primary_token_usage.get("calls", 0),
         "sections": sections_data or [],
         "fields": _fields_to_dict(fields),
+        "primary_extraction_failed": primary_extraction_failed,
     }
 
 
@@ -426,6 +439,8 @@ async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, pipeline.preprocess, pdf_path, str(job_dir))
                 processed_images = _ensure_page_images(job_dir / "pages")
+                if not processed_images:
+                    logger.warning("Preprocessing produced 0 page images — Gemini will receive the raw PDF")
                 await _set_status(job_dir, "preprocessing", "Preprocessing done.", pages=len(processed_images))
             else:
                 await _set_status(job_dir, "preprocessing", "Skipping page rendering (provider handles PDF directly).")

@@ -79,6 +79,12 @@ CHECKBOX_COORDS: dict[str, tuple[int, float, float, float, float]] = {
     "asset_car_checkbox": (3, 530.3, 447.5, 4.7, 6.5),
     "asset_smartphone_checkbox": (3, 60.0, 486.0, 7.0, 7.0),
     "asset_separate_wifi_checkbox": (3, 168.0, 486.0, 7.0, 7.0),
+
+    # ── Page 3 — 3.6 Kitchen Type ──────────────────────────────────────
+    # Two options on same row: Separate Kitchen (left), Hall with Kitchen (right)
+    # Estimated from reference scan — auto-calibrated by _search_checkbox_window
+    "kitchen_type_separate": (3, 59.0, 315.0, 8.0, 8.0),
+    "kitchen_type_hall":     (3, 199.4, 315.0, 8.0, 8.0),
 }
 
 # ── Asset name → checkbox coordinate key mapping ─────────────────────────
@@ -648,10 +654,14 @@ def _crop_region(
 
 
 def _has_strikethrough_line(roi: np.ndarray) -> bool:
-    """Check if an image region contains horizontal line(s) spanning it.
+    """Check if an image region contains a strike-through line.
 
-    Uses probabilistic Hough Line Transform.  A strike-through is a thin
-    near-horizontal line crossing most of the region width.
+    Detects:
+      - Horizontal line (strikethrough) — angle ≤ 20°, length ≥ half width.
+      - Diagonal line (\\ or / cancellation mark) — angle 30-60° or 120-150°,
+        length ≥ 40% of the region diagonal.
+
+    Uses probabilistic Hough Line Transform.
     """
     if roi is None or roi.size < 64:
         return False
@@ -668,18 +678,22 @@ def _has_strikethrough_line(roi: np.ndarray) -> bool:
         rho=1,
         theta=np.pi / 180,
         threshold=max(20, h // 10),
-        minLineLength=w // 2,
-        maxLineGap=5,
+        minLineLength=max(w, h) // 3,
+        maxLineGap=8,
     )
     if lines is None:
         return False
 
+    diag = np.hypot(w, h)
     for line in lines:
         x1, y1, x2, y2 = line[0]
         length = np.hypot(x2 - x1, y2 - y1)
         angle = abs(np.rad2deg(np.arctan2(y2 - y1, x2 - x1)))
-        # Horizontal line spanning ≥ half the region width, angle ≤ 20°
+        # Horizontal strikethrough: spans ≥ half width, angle ≤ 20°
         if length >= w * 0.5 and angle <= 20.0:
+            return True
+        # Diagonal cancellation (\\ or /): angle 30-60° or 120-150°, ≥ 40% of region diagonal
+        if length >= diag * 0.4 and (30 <= angle <= 60 or 120 <= angle <= 150):
             return True
 
     return False

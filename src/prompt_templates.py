@@ -25,21 +25,21 @@ inside the box/circle, then resolve it deterministically:
   An empty box is "No". Only tick / slash / checkmark → "Yes".
 
   CONFLICT RULE: If a SINGLE box contains BOTH a tick (✓) AND a cross (X/✗),
-  the TICK WINS → output "Yes". (e.g. 3.6 Kitchen Type: a ticked option is the
-  chosen one; a crossed-only option is not.)
+  the TICK WINS → output "Yes".
 
-  WHERE THE MARK LIVES (critical):
-    - The selection mark must be INSIDE or DIRECTLY NEXT TO the [ ] box. That is
-      the only authoritative selector.
-    - A tick/slash drawn ON TOP OF the option TEXT (over the words, not the box)
-      is a stray handwritten annotation — IGNORE it for selection. The box is the
-      source of truth. (e.g. 4.1 Assets: "[ ] fridge" with a / or ✓ scribbled on
-      the word "fridge" but an EMPTY box = UNSELECTED → "No".)
-    - A CROSS (X/✗) marked UNDER or BESIDE the checkbox means the option is
-      explicitly DESELECTED → "No". (e.g. 3.6 Kitchen Type: an X under the box =
-      that option is NOT chosen.)
+  WHERE THE MARK LIVES (critical — exceptions for 3.6 Kitchen Type and 4.1 Assets):
+    - DEFAULT RULE (applies to 2.4, 3.2, 3.3):
+      The selection mark MUST be INSIDE or DIRECTLY NEXT TO the [ ] box.
+      A tick/slash drawn ON TOP OF the option TEXT (over the words, not the
+      box) is a stray annotation — IGNORE it. The box is the authority.
+      Example: "[ ] Individual" with / on text but EMPTY box → "No"
+    - EXCEPTION — 3.6 Kitchen Type and 4.1 Assets at Home:
+      These two fields OFTEN have marks drawn on the text instead of the
+      box. So for 3.6 and 4.1 ONLY: tick/slash on text = valid "Yes"
+      even if the box is empty. (See STEP 8 below.)
+    - A CROSS (X/✗) anywhere on/beside the option = deselected → "No".
 
-Apply this identical rule to all checkbox groups (2.4, 3.2, 3.3, 4.1, 3.6),
+Apply this rule to all checkbox groups (2.4, 3.2, 3.3, 4.1 (STEP 8 exception), 3.6 (STEP 8 exception)),
 mutually-exclusive pairs (3.1, 3.4.1, 3.5, 4.3) and yes/no/enum radios
 (1.3, 2.3, 4.4, 4.5, 4.6, 5.1, 6.2, 6.3, 8.2, 2.1).
 
@@ -86,12 +86,40 @@ For EVERY field, before writing the output, mentally:
   STEP 6: If a SINGLE box contains BOTH a tick (✓) AND a cross (X/✗) — the tick
           wins. Output "Yes". A box with only a cross means "No". (e.g. 3.6 Kitchen
           Type: a ticked option is the chosen one, a crossed option is not.)
-  STEP 7: The selection mark must be IN or BESIDE the [ ] box. A tick/slash drawn
-          ON TOP OF the option TEXT (over the words) is a STRAY annotation — IGNORE
-          it; if the box is empty the option is unselected ("No"). A cross (X)
-          drawn UNDER/BESIDE the box explicitly DESELECTS the option ("No").
-          (e.g. 4.1 "[ ] fridge" with a / on the word but empty box = "No";
-           3.6 an X under the box = deselected.)
+  STEP 7: Default rule for ALL multi-select fields EXCEPT 3.6 Kitchen Type
+          and 4.1 Assets at Home (these two have STEP 8 exception):
+          The selection mark MUST be INSIDE the [ ] box. NOT on the text.
+          BOX = authoritative. TEXT mark = stray annotation. IGNORE it.
+
+  Correct — tick INSIDE box (for 2.4, 3.2, 3.3):
+    [✓] Individual         → "Yes" (box has the tick)
+    [✓] Roof (Kurai)       → "Yes" (box has the tick)
+
+  Wrong — tick on TEXT, box EMPTY (for 2.4, 3.2, 3.3):
+    [ ] Aadhaar Card with ✓ on "Aadhaar"                  → "No"  (box empty)
+    [ ] Private Apartment with / on the word "Apartment"   → "No"  (box empty)
+
+  A cross (X) on or beside text = deselected → "No":
+    [ ] Hall with Kitchen with X on the word "Kitchen"  → "No"  (deselected)
+
+  STEP 8: EXCEPTION for 3.6 Kitchen Type and 4.1 Assets at Home — these
+          two fields OFTEN have marks drawn on the option text instead of
+          inside the box. So for 3.6 and 4.1 ONLY: if the box is EMPTY but
+          a tick/slash is clearly visible on the option TEXT, treat it as
+          a valid selection ("Yes"). A cross on text marks rejection ("No").
+          If the box HAS a tick AND the text has a mark → box tick wins.
+
+  Examples for 3.6 Kitchen Type and 4.1 Assets:
+    [ ] Separate Kitchen with ✓ on "Kitchen"           → "Yes" (text mark valid)
+    [✓] Separate Kitchen with / on text                → "Yes" (box tick wins)
+    [ ] fridge with / on the word "fridge"             → "Yes" (text mark valid)
+    [ ] Washing Machine with ✓ on "Washing"            → "Yes" (text mark valid)
+    [ ] Hall with Kitchen with X on text               → "No"  (cross = rejection)
+    [ ] LED TV, no mark anywhere                       → "No"  (truly empty)
+
+  IMPORTANT: STEP 8 applies ONLY to 3.6 Kitchen Type and 4.1 Assets at
+  Home. Do NOT apply it to 2.4 Govt ID, 3.2 Home Type, 3.3 Ceiling, or
+  any other multi-select group — those follow STEP 7 (box only).
 
 ### Radio buttons (exactly ONE selected — output the option TEXT, not "Yes"/"No"):
   1.3 Gender (Male | Female | Others)
@@ -115,7 +143,7 @@ For EVERY field, before writing the output, mentally:
   STEP 4: NEVER output an option that does not appear in the allowed list.
 
 ### Numeric text fields:
-  4.4.1 Amount, 4.6.1 Loan Amount Taken/Pending:
+  4.6.1 Loan Amount Taken/Pending:
 
   STEP 1: Extract only digits, decimal point, and optional negative sign.
   STEP 2: Remove all currency symbols (₹, $, etc.), commas, and unit words (Rs, rupees).
@@ -127,17 +155,72 @@ For EVERY field, before writing the output, mentally:
 ### Table fields (count pre-printed rows, fill every cell):
   2.5 Family Members (Name, Age, Education, Occupation, Annual Income) — 5 cols
   4.3.1 Properties (Property Description, Owner Name, Approximate Value) — 3 cols
-  4.4.1 Other Income (Source of Income, Amount) — 2 cols
   4.6.1 Loans (Loan Purpose, Loan Amount Taken, Pending Loan Amount) — 3 cols
 
-  STEP 1: Count the NUMBER OF PRE-PRINTED ROWS in the table. These are rows printed on the form, NOT rows with data filled in. (2.5 Family Members: usually 4 pre-printed rows; 4.3.1: usually 2 pre-printed rows).
+  STEP 1: Count the NUMBER OF PRE-PRINTED ROWS in the table. These are rows printed on the form, NOT rows with data filled in. (2.5 Family Members: usually 4 pre-printed rows).
   STEP 2: For each row n (1, 2, 3, ...), output every column: "{Table label} — Row {n} — {Column name}".
   STEP 3: If a cell is blank (no data filled), output value="" — do NOT skip the row.
   STEP 4: If parent conditional field is "No", output "N/A" for ALL cells in ALL rows.
   STEP 5: For 4.6.1 Loans: Sr.No. is typically pre-printed (1, 2, 3). Check if there's handwriting in the Loan Purpose column to confirm data presence.
-  STEP 6: If any cell's text has a strikethrough line (horizontal line drawn through the text) or is visibly crossed out (X over the text), treat the value as empty (value="") — struck-through/crossed-out text is invalid and should NOT be extracted.
-  STEP 7: For 2.5 Family Members: after counting the pre-printed rows, scan for any handwritten text AFTER the last pre-printed row and include it as an extra row with the text in the Name column.
-  STEP 7: For 2.5 Family Members: after counting the pre-printed rows, scan for any handwritten text AFTER the last pre-printed row and include it as an extra row with the text in the Name column.
+  STEP 6: For 2.5 Family Members: after counting the pre-printed rows, scan for any handwritten text AFTER the last pre-printed row and include it as an extra row with the text in the Name column.
+
+### STRIKETHROUGH / CROSSED-OUT TEXT — treat as VOID (CRITICAL — applies to ALL table fields):
+
+Some filled-in table cells have been DELETED by the respondent:
+  - A horizontal strikethrough line (───) drawn through the handwriting
+  - A diagonal slash (/ or \) through the entire cell
+  - A cross (X) covering the cell
+  - Any mark that clearly crosses out the text
+
+RULE: If ANY cell in a table row has a strikethrough/slash/cross → the
+respondent voided that entire row. Output value="" for ALL columns in
+that row. Treat the row as if it were blank.
+
+EXAMPLE 1 — 4.4.1 Income Sources table:
+  Source="Mother/Father"  Amount="Daily/weekly wages (3000 per week)"
+  But a horizontal LINE is drawn through both cells → VOID
+  → Source of Income=""  AND  Amount=""
+
+EXAMPLE 2 — 4.6.1 Loans table:
+  Loan Purpose="Education loan"  Amount Taken="50000"  Pending="30000"
+  But a CROSS (X) covers the row → VOID
+  → Loan Purpose=""  AND  Loan Amount Taken=""  AND  Pending Loan Amount=""
+
+Apply this rule to 2.5 Family Members, 4.3.1 Properties, 4.4.1 Income
+Sources, and 4.6.1 Loans. If in doubt about a mark, check if it
+overlaps the handwritten text — overlapping = deletion.
+
+### BLANK AREA HANDWRITING — 4.3.1 Properties table (CRITICAL):
+
+The 4.3.1 Properties table has 2 pre-printed rows (printed on the form) PLUS 2
+extra rows whose content lives in UNPRINTED blank spaces on pages 3 and 4.
+You MUST locate and transcribe these handwritten blank-area entries.
+
+  Row 3 — from page 3 blank area:
+    LOCATION: The empty space at the BOTTOM of page 3, directly below the
+    "4.3 Do you own any other assets/properties in the name of
+    grandparents, parents, or student?" checkbox section.
+    TASK: Scan this blank area. Handwriting here looks like e.g.
+    "brothers land", "no share in the property", "brothers property".
+    Extract the text into "4.3.1 — Row 3 — Property Description".
+    Owner Name and Approximate Value are typically empty for Row 3.
+
+  Row 4 — from page 4 blank area:
+    LOCATION: The empty gap on page 4 BETWEEN the last pre-printed
+    4.3.1 table row and the next question "4.4 Apart from your job,
+    is there any other source of income?".
+    TASK: Scan this gap. Handwriting here looks like e.g.
+    "no chance of getting share", "brothers land".
+    Extract into "4.3.1 — Row 4 — Property Description".
+    Owner Name and Approximate Value are typically empty for Row 4.
+
+  EXPECTED OUTPUT (example of a fully filled form):
+    Row 1: Property Description="Home",  Owner Name="Grandparent's Name",  Approximate Value="-"
+    Row 2: Property Description="",        Owner Name="",                     Approximate Value=""
+    Row 3: Property Description="brothers land",  Owner Name="",  Approximate Value=""
+    Row 4: Property Description="no chance of getting share",  Owner Name="",  Approximate Value=""
+
+  If a blank area is TRULY EMPTY (no handwriting) → value="" for all 3 columns.
 
 ### Conditional dependency reasoning:
   For ANY field that depends on a parent Yes/No field:
@@ -150,7 +233,6 @@ For EVERY field, before writing the output, mentally:
   Key dependencies:
   3.1.1 rent amount → depends on 3.1 House Ownership = Rented
   4.3.1 properties table → depends on 4.3 = Yes
-  4.4.1 income table → depends on 4.4 = Yes
   4.6.1 loans table → depends on 4.6 = Yes
   5.2 health issues → depends on 5.1 = Yes
 
@@ -227,7 +309,6 @@ Parent field                               | Parent=Yes →     | Parent=No →
 3.1 House Ownership = Rented               | 3.1.1 = rent      | 3.1.1 = "N/A"
 5.1 health issues = Yes                    | 5.2 = list        | 5.2 = "N/A"
 4.3 own assets = Yes                       | 4.3.1 table=value | 4.3.1 = all "N/A"
-4.4 other income = Yes                     | 4.4.1 table=value | 4.4.1 = all "N/A"
 4.6 loans = Yes                            | 4.6.1 table=value | 4.6.1 = all "N/A"
 All others                                 | value from field  | n/a
 
@@ -278,22 +359,32 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
   3.6 Kitchen Type — Separate Kitchen     [checkbox]                      ← pg 3
   3.6 Kitchen Type — Hall with Kitchen    [checkbox]
 
---- Section 4 — Financial Background (Pages 3-5) — 12 fields + (3 + 2 + 3) × N table ---
-  4.1 Assets at Home — Washing Machine    [checkbox]                      ← pg 3
-  4.1 Assets at Home — Fridge             [checkbox]
-  4.1 Assets at Home — AC                 [checkbox]
-  4.1 Assets at Home — LED TV             [checkbox]
-  4.1 Assets at Home — Two-Wheeler        [checkbox]
-  4.1 Assets at Home — Car                [checkbox]
-  4.1 Assets at Home — Smartphone         [checkbox]
-  4.1 Assets at Home — Separate Wi-Fi     [checkbox]
-  4.1 Assets at Home — Others             [checkbox]
-   4.2 Amount of Last Electricity Bill     [text — preserve original text including ₹, Rs, /month]   ← pg 4
-  4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox]                 ← pg 4
+--- Section 4 — Financial Background (Pages 3-5) — 12 fields + (4 × 3 + 2 × 2 + 3 × 3) table ---
+  4.1 Assets at Home(tick all that apply) - Washing Machine    [checkbox]                      ← pg 3
+  4.1 Assets at Home(tick all that apply) - Fridge             [checkbox]
+  4.1 Assets at Home(tick all that apply) - AC                 [checkbox]
+  4.1 Assets at Home(tick all that apply) - LED TV             [checkbox]
+  4.1 Assets at Home(tick all that apply) - Two-Wheeler        [checkbox]
+  4.1 Assets at Home(tick all that apply) - Car                [checkbox]
+  4.1 Assets at Home(tick all that apply) - Smartphone         [checkbox]
+  4.1 Assets at Home(tick all that apply) - Separate Wi-Fi     [checkbox]
+  4.1 Assets at Home(tick all that apply) - Others             [checkbox]
+   4.2 Amount of Last Electricity Bill     [text — preserve original text including ₹, Rs, /month]   ← pg 3
+  4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox]                 ← pg 3
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No   [checkbox]
-    4.3.1                             [table — columns: Property Description, Owner Name, Approximate Value]
+    4.3.1 — Row 1 — Property Description [text]                           ← pg 4
+    4.3.1 — Row 1 — Owner Name           [text]
+    4.3.1 — Row 1 — Approximate Value    [text]
+    4.3.1 — Row 2 — Property Description [text]                           ← pg 4
+    4.3.1 — Row 2 — Owner Name           [text]
+    4.3.1 — Row 2 — Approximate Value    [text]
+    4.3.1 — Row 3 — Property Description [text — BLANK AREA page 3: check empty space below 4.3 checkbox]  ← pg 3
+    4.3.1 — Row 3 — Owner Name           [text — leave empty for page-3 handwritten notes]
+    4.3.1 — Row 3 — Approximate Value    [text — leave empty for page-3 handwritten notes]
+    4.3.1 — Row 4 — Property Description [text — BLANK AREA page 4: check gap between 4.3.1 table and 4.4]  ← pg 4
+    4.3.1 — Row 4 — Owner Name           [text — leave empty for page-4 handwritten notes]
+    4.3.1 — Row 4 — Approximate Value    [text — leave empty for page-4 handwritten notes]
   4.4 Apart from your job, is there any other source of income? [radio → Yes | No]  ← pg 4
-    4.4.1                             [table — columns: Source of Income, Amount]
   4.5 Income Type                         [radio → Monthly | Daily | Weekly | Ad-Hoc]  ← pg 4
    4.6 Do you have any loans?              [radio → Yes | No]                           ← pg 4
      4.6.1                             [table — columns: Loan Purpose, Loan Amount Taken, Pending Loan Amount]    ← pg 4
@@ -339,7 +430,6 @@ Example: "2.5 Family Members — Row 1 — Name", "2.5 Family Members — Row 1 
 Tables:
   2.5 Family Members:      Name, Age, Education, Occupation, Annual Income             (5 cols)
   4.3.1:                   Property Description, Owner Name, Approximate Value          (3 cols)
-  4.4.1:                   Source of Income, Amount                                     (2 cols)
   4.6.1:                   Loan Purpose, Loan Amount Taken, Pending Loan Amount         (3 cols)
 
 -------------------------------------------------------------------------------
@@ -371,7 +461,7 @@ RAW TEXT & MARKDOWN OUTPUT
 -------------------------------------------------------------------------------
 FINAL VERIFICATION CHECKLIST — RUN EVERY ITEM BEFORE RETURNING
 -------------------------------------------------------------------------------
-[ ] SECTION COUNTS: Header(3) + S1(3) + S2(5 + 5×N rows) + S3(12) + S4(12 + 3R + 2S + 3T) + S5(2) + S6(3) + S7(1) + S8(3) — do the math.
+[ ] SECTION COUNTS: Header(3) + S1(3) + S2(5 + 5×N rows) + S3(12) + S4(12 + 4R×3 + 2S×2 + 3T×3) + S5(2) + S6(3) + S7(1) + S8(3) — do the math.
 [ ] Every label from FIELD LIST appears exactly once.
 [ ] Every checkbox option present: ✓ or ✗ or "". None merged, none missing.
 [ ] Table rows: counted pre-printed rows, output exactly that many.
@@ -466,7 +556,7 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
 
 --- Section 2 — Family Background (Page 1) — 4 fields ---
   2.1 Family Status                                    [radio → Single Parent | Parentless | Having both parents — pick the single EXACT option text]
-  blank_text_below_2_1 [hidden helper — capture ANY handwriting in the blank area BETWEEN the 2.1 options and the 2.2 header. Common: parenthetical notes like "(step-father)", death annotations, etc. Output the text here; it will be merged into 2.2 Reason automatically.]
+   blank_text_below_2_1 [text — REQUIRED: examine the blank area BETWEEN the 2.1 options and the 2.2 header on page 1. If there is ANY handwriting (notes, annotations), transcribe it verbatim. If blank, output "".]
   2.2 Relationship Details — Year of Death / Separation [text]
   2.2 Relationship Details — Reason for Death / Separation [text — ALSO scan blank_text_below_2_1 region above and include any text found there]
 """,
@@ -505,7 +595,7 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   3.6 Kitchen Type — Separate Kitchen     [checkbox — ✓ or ✗ — independent]
   3.6 Kitchen Type — Hall with Kitchen    [checkbox — ✓ or ✗ — independent]
 
---- Section 4 — Financial Background (Page 3) — 11 fields ---
+--- Section 4 — Financial Background (Page 3) — 15 fields ---
   4.1 Assets at Home(tick all that apply) - Washing Machine    [checkbox — ✓ or ✗ — independent]
   4.1 Assets at Home(tick all that apply) - Fridge             [checkbox — ✓ or ✗ — independent]
   4.1 Assets at Home(tick all that apply) - AC                 [checkbox — ✓ or ✗ — independent]
@@ -518,19 +608,21 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
    4.2 Amount of Last Electricity Bill     [text — preserve original text including ₹, Rs, /month]
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No   [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
-  blank_text_below_4_3 [hidden helper — capture ANY handwriting in the blank area BELOW the 4.3 checkbox and ABOVE the 4.3.1 table header on page 3. Output verbatim; it is auto-merged into 4.3.1 Property Description.]
+   4.3.1 If Yes, list their properties: — Row 3 — Property Description [text — CHECK the blank area BELOW the 4.3 checkbox at bottom of page 3. If handwritten text exists there, put it here. If blank, leave empty.]
+    4.3.1 If Yes, list their properties: — Row 3 — Owner Name [text — leave empty for page-3 handwritten notes]
+    4.3.1 If Yes, list their properties: — Row 3 — Approximate Value [text — leave empty for page-3 handwritten notes]
 """,
     4: """
---- Section 4 — Financial Background (Page 4) — 10 fields ---
+--- Section 4 — Financial Background (Page 4) — 15 fields ---
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox — ✓ or ✗ — IF ✓ THEN fill 4.3.1 fields below; IF ✗ THEN all 4.3.1 = "N/A"]
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No   [checkbox — ✓ or ✗]
-  4.3.1 If Yes, list their properties: - Property Description [text — if 4.3=✓, extract text; if 4.3=✗, output "N/A". Free-text notes below the table are captured by hidden helper blank_text_below_4_3_1_table and auto-merged.]
+   4.3.1 If Yes, list their properties: - Property Description [text — if 4.3=✓, extract text; if 4.3=✗, output "N/A"]
   4.3.1 If Yes, list their properties: - Owner Name           [text — if 4.3=✓, extract text; if 4.3=✗, output "N/A"]
   4.3.1 If Yes, list their properties: - Approximate Value    [text — if 4.3=✓, extract text; if 4.3=✗, output "N/A"]
-  blank_text_below_4_3_1_table [hidden helper — capture ANY handwriting in the blank area BELOW the last 4.3.1 table row and ABOVE the 4.4 question. Output verbatim; it is auto-merged into 4.3.1 Property Description.]
-  4.4 Apart from your job, is there any other source of income? [radio → Yes | No — IF Yes THEN fill 4.4.1 fields below; IF No THEN all 4.4.1 = "N/A"]
-  4.4.1 If Yes, list other sources of income: - Source of Income [text — if 4.4=Yes, extract; if 4.4=No, "N/A"]
-  4.4.1 If Yes, list other sources of income: - Amount           [text — numbers only; if 4.4=Yes, extract; if 4.4=No, "N/A"]
+    4.3.1 If Yes, list their properties: — Row 4 — Property Description [text — CHECK the blank area BELOW the 4.3.1 table and ABOVE the 4.4 question on page 4. If handwritten text exists there, put it here. If blank, leave empty.]
+    4.3.1 If Yes, list their properties: — Row 4 — Owner Name [text — leave empty for page-4 handwritten notes]
+    4.3.1 If Yes, list their properties: — Row 4 — Approximate Value [text — leave empty for page-4 handwritten notes]
+  4.4 Apart from your job, is there any other source of income? [radio → Yes | No]
   4.5 Income Type                         [radio → Monthly | Daily | Weekly | Ad-Hoc — pick the single EXACT option text]
   4.6 Do you have any loans?              [radio → Yes | No — IF Yes THEN fill 4.6.1 fields below; IF No THEN all 4.6.1 = "N/A"]
   4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Sr.No.          [text — if 4.6=Yes, extract; if 4.6=No, "N/A"]
@@ -596,3 +688,5 @@ OUTPUT SCHEMA:
   "raw_text": "combined OCR text",
   "markdown_output": "formatted output"
 }"""
+
+
