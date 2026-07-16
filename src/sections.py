@@ -1,7 +1,6 @@
 """Shared section definitions derived from KNOWN_TEMPLATE_FIELDS.
 
 Avoids hardcoding section-to-page mappings in multiple files.
-Uses lazy import to avoid circular dependency with extraction_pipeline/datalab_schema.
 """
 
 SECTION_NAMES = {

@@ -84,15 +84,7 @@ class PageClassifier:
     """Classifies page images into page numbers 1-6 based on OCR content."""
 
     def __init__(self):
-        self._tesseract_available = False
-        self._check_tesseract()
-
-    def _check_tesseract(self):
-        try:
-            import pytesseract
-            self._tesseract_available = True
-        except ImportError:
-            logger.warning("pytesseract not available for page classification")
+        pass
 
     def classify_from_text(self, text: str) -> PageClassification:
         """Classify a single page from its OCR text content."""
@@ -161,17 +153,9 @@ class PageClassifier:
         )
 
     def classify_image(self, image_path: str, ocr_text: str | None = None) -> PageClassification:
-        """Classify a page from an image file."""
-        if ocr_text is None:
-            try:
-                import pytesseract
-                from PIL import Image
-                img = Image.open(image_path)
-                ocr_text = pytesseract.image_to_string(img)
-            except Exception as e:
-                logger.warning("Tesseract OCR failed for %s: %s", image_path, e)
-                return PageClassification(0, 0.0, [], [], unreadable=True)
-
+        """Classify a page from an image file. Requires ocr_text to be provided."""
+        if not ocr_text:
+            return PageClassification(0, 0.0, [], [], unreadable=True)
         return self.classify_from_text(ocr_text)
 
     def classify_all(

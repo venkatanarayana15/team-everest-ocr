@@ -38,6 +38,7 @@ STAGE_PROGRESS: dict[str, int] = {
 }
 
 _progress_store: dict[str, dict] = {}
+_progress_lock = asyncio.Lock()
 _status_queues: dict[str, asyncio.Queue] = {}
 _new_job_queues: list[asyncio.Queue] = []
 _last_good_status: dict[str, dict] = {}
@@ -116,31 +117,32 @@ async def _set_status(job_dir: Path, status: str, message: str = "", pages: int 
     name_path = job_dir / "original_name.txt"
     pdf_name = name_path.read_text().strip() if name_path.exists() else job_dir.name
 
-    existing_progress = _progress_store.get(job_dir.name, {})
-    start_time = existing_progress.get("start_time")
-    if not start_time:
-        start_time = time.time()
-    now = time.time()
+    async with _progress_lock:
+        existing_progress = _progress_store.get(job_dir.name, {})
+        start_time = existing_progress.get("start_time")
+        if not start_time:
+            start_time = time.time()
+        now = time.time()
 
-    pdfs_map = existing_progress.get("pdfs", {})
-    pdf_file_start = existing_progress.get("pdf_file_start", {})
-    if pdf_name not in pdf_file_start:
-        pdf_file_start[pdf_name] = now
-    file_elapsed = round(now - pdf_file_start[pdf_name], 1)
+        pdfs_map = dict(existing_progress.get("pdfs", {}))
+        pdf_file_start = dict(existing_progress.get("pdf_file_start", {}))
+        if pdf_name not in pdf_file_start:
+            pdf_file_start[pdf_name] = now
+        file_elapsed = round(now - pdf_file_start[pdf_name], 1)
 
-    pdfs_map[pdf_name] = {
-        "progress": pct,
-        "stage": status,
-        "elapsed": file_elapsed,
-    }
+        pdfs_map[pdf_name] = {
+            "progress": pct,
+            "stage": status,
+            "elapsed": file_elapsed,
+        }
 
-    _progress_store[job_dir.name] = {
-        "overall": pct,
-        "pdfs": pdfs_map,
-        "start_time": start_time,
-        "pdf_file_start": pdf_file_start,
-        "elapsed": round(now - start_time, 1),
-    }
+        _progress_store[job_dir.name] = {
+            "overall": pct,
+            "pdfs": pdfs_map,
+            "start_time": start_time,
+            "pdf_file_start": pdf_file_start,
+            "elapsed": round(now - start_time, 1),
+        }
 
     sse_payload = {
         "status": status,
@@ -221,12 +223,6 @@ def _load_checkpoint(job_dir: Path) -> tuple[str, list[StructuredField], float, 
 
 
 def _cleanup_intermediate(job_dir: Path) -> None:
-    cp = job_dir / "checkpoint.json"
-    if cp.exists():
-        cp.unlink(missing_ok=True)
-    ts = job_dir / "tesseract_data.json"
-    if ts.exists():
-        ts.unlink(missing_ok=True)
     tmp = job_dir / ".status.json.tmp"
     if tmp.exists():
         tmp.unlink(missing_ok=True)

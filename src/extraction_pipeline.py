@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
@@ -10,14 +10,7 @@ import numpy as np
 from rapidfuzz import fuzz
 
 import os
-from src.datalab_schema import EXPECTED_FIELD_LABELS
-from src.tesseract import WordBox, get_backend
 from src.model_client import ModelClient, get_model_client
-
-# Lazy import for checkbox_vision to avoid circular import at module level
-def _load_page_images_cv(pdf_path: str) -> dict[int, np.ndarray]:
-    from src.checkbox_vision import load_page_images
-    return load_page_images(pdf_path, dpi=200)
 
 @dataclass
 class Config:
@@ -26,17 +19,9 @@ class Config:
     denoise_strength: int = 10
     binarization_block_size: int = 15
     binarization_c: int = 2
-    ocr_backend: str = "tesseract"
     max_image_width: int = 1600
-    bbox_render_dpi: int = 150
-    tesseract_workers: int = 4
-    tesseract_timeout: int = 120
-    tesseract_enabled: bool = True
 
     def __post_init__(self):
-        env_val = os.environ.get("TESSERACT_ENABLED")
-        if env_val is not None:
-            self.tesseract_enabled = env_val.lower() in ("1", "true", "yes")
         self.render_dpi = int(os.environ.get("RENDER_DPI", self.render_dpi))
         self.max_image_width = int(os.environ.get("MAX_IMAGE_WIDTH", self.max_image_width))
 
@@ -97,14 +82,15 @@ TEXT_FIELD_TIPS: dict[str, str] = {
     "Volunteer Name": "A person's name. Common misreads: 'n'↔'u', 'a'↔'o', 'l'↔'t', 'r'↔'v'. Read each character individually.",
     "Co-Volunteer Name": "A person's name. Common misreads: 'n'↔'u', 'a'↔'o', 'l'↔'t', 'r'↔'v'.",
     "Date of Visit": "A date like DD/MM/YYYY or written as text.",
-    "1.1 Application ID": "An alphanumeric CODE like 'TE2024001', NOT a name. Digits that look like letters: '0'↔'O', '1'↔'l', '5'↔'S'.",
+    "1.1 Application ID": "An alphanumeric CODE like 'TE2024001' or 'temp-2026-9934', NOT a name. The last 4 characters in the suffix are NUMERICAL digits only (not letters). Critical confusions: '8'↔'B' (e.g. B974 should be 8974), '0'↔'O', '1'↔'l', '5'↔'S'. Reason letter vs digit by position.",
     "1.2 Student Full Name": "The student's full name. Common misreads: 'n'↔'u', 'a'↔'o'. Read each character.",
     "2.2 Relationship Details — Year of Death / Separation": "A year (e.g. '2020'). ONLY the year digits.",
     "2.2 Relationship Details — Reason for Death / Separation": "Free-text description. Capture ALL text verbatim.",
+    "2.3 Is Father/Mother photograph kept at home? — Notes": "Free text written after the 2.3 Yes/No checkbox, e.g. 'we shifted to new house 2 months back'. Capture verbatim, output empty string if nothing written.",
     "2.4 Government ID Verified — Other (specify)": "Short text written on the line next to 'Other', e.g. 'Pan Card'. If the 'Other' box is unchecked or nothing is written, output empty string.",
     "3.1.1 If rented, what is the rent amount?": "Rent amount. Preserve the original text as written including comma, ₹, Rs, /month. If you see '4,100', output '4,100' not '4100' or '41000'. If you see '4000/month', output '4000/month'. 'l'/'I'→'1', 'O'/'o'→'0', 'S'→'5', 'Z'→'2'.",
     "3.2 Type of Home — Others": "Free text written next to 'Others'. Capture verbatim.",
-    "3.4 Number of Bedrooms": "A small number (1-5). Strip words like 'bedroom'.",
+    "3.4 Number of Bedrooms": "Number OR text — whatever is written (e.g. '2', 'two', '2 rooms'). Capture verbatim, do NOT strip or convert.",
     "4.1 Assets at Home(tick all that apply) - Others:": "Free text after 'Others:'. Prefix with 'Others: ' if missing.",
     "4.2 Amount of Last Electricity Bill": "Electricity bill amount. Preserve the original text as written including units like ₹, Rs, /month. Do NOT strip non-digit characters.",
     "4.7 If you choose any college, how much is the college fee?": "College name AND fee together (e.g. 'RITE Institute - 50000'). Keep both parts.",
@@ -139,6 +125,7 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     # ── Page 2 ──
     # Section 2 — Family Background (Page 2: 2.3-2.5)
     {"label": "2.3 Is Father/Mother photograph kept at home?", "section_number": 2, "page": 2},
+    {"label": "2.3 Is Father/Mother photograph kept at home? — Notes", "section_number": 2, "page": 2},
     {"label": "2.4 Government ID Verified", "section_number": 2, "page": 2},
     {"label": "2.4 Government ID Verified — Aadhaar Card", "section_number": 2, "page": 2},
     {"label": "2.4 Government ID Verified — Ration Card", "section_number": 2, "page": 2},
@@ -203,7 +190,14 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "4.4 Apart from your job, is there any other source of income?", "section_number": 4, "page": 4},
      {"label": "4.4.1 If Yes, list other sources of income: - Source of Income", "section_number": 4, "page": 4},
           {"label": "4.4.1 If Yes, list other sources of income: - Amount", "section_number": 4, "page": 4},
-    {"label": "4.5 Income Type", "section_number": 4, "page": 4},
+    {"label": "4.5 Income Type — Monthly", "section_number": 4, "page": 4},
+    {"label": "4.5 Income Type — Monthly (specify)", "section_number": 4, "page": 4},
+    {"label": "4.5 Income Type — Daily", "section_number": 4, "page": 4},
+    {"label": "4.5 Income Type — Daily (specify)", "section_number": 4, "page": 4},
+    {"label": "4.5 Income Type — Weekly", "section_number": 4, "page": 4},
+    {"label": "4.5 Income Type — Weekly (specify)", "section_number": 4, "page": 4},
+    {"label": "4.5 Income Type — Ad-Hoc", "section_number": 4, "page": 4},
+    {"label": "4.5 Income Type — Ad-Hoc (specify)", "section_number": 4, "page": 4},
     {"label": "4.6 Do you have any loans?", "section_number": 4, "page": 4},
          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Sr.No.", "section_number": 4, "page": 4},
          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Loan Purpose", "section_number": 4, "page": 4},
@@ -232,6 +226,8 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "8.3 Any other comments you want to share?", "section_number": 8, "page": 6},
 ]
 
+EXPECTED_FIELD_LABELS: set[str] = {f["label"] for f in KNOWN_TEMPLATE_FIELDS}
+
 
 @dataclass
 class StructuredField:
@@ -257,7 +253,7 @@ class TextLine:
     text: str
     bbox: tuple[int, int, int, int]
     page: int
-    words: list[WordBox]
+    words: list = field(default_factory=list)
 
 
 class ExtractionPipeline:
@@ -431,19 +427,6 @@ class ExtractionPipeline:
         logger.info("Preprocessed %d image pages → %s", len(pages), pages_dir)
         return pages
 
-    # ── Stage 2: Bounding box detection (Tesseract, CPU) ─────────
-
-    def run_bbox(self, pdf_path: str) -> list[WordBox]:
-        backend = get_backend(self.config.ocr_backend)
-        result = backend.process(pdf_path, self.config)
-        return result.word_boxes
-
-    def run_bbox_images(self, page_images: dict[int, str]) -> list[WordBox]:
-        """Run Tesseract bbox on pre-rendered images instead of PDF."""
-        backend = get_backend(self.config.ocr_backend)
-        result = backend.process_images(page_images, self.config)
-        return result.word_boxes
-
     # ── Stage 3a: Primary model extraction ───────────────────────
 
     async def run_primary_extraction(self, pdf_path: str, page_images: dict[int, str]) -> tuple[dict | None, dict]:
@@ -485,7 +468,7 @@ GROUND RULES:
 1. Extract ONLY the fields that physically appear on Page {page}. Do NOT output fields that belong to other pages.
 2. The labels in the output JSON MUST EXACTLY match the labels listed in the FIELD LIST below (including their numbers, e.g. "2.3 Is Father/Mother photograph kept at home?", "3.1 House Ownership", "2.5 Family Members — Row 1 — Name"). Do NOT strip the numbers or alter the labels under any circumstances!
 3. value="" for unreadable/blanks. value="N/A" for conditionals when parent="No". Never "null".
-4. Radio → exact allowed option (e.g. "Male", "Yes", "Separate"). Checkbox → "Yes" if marked, "No" if empty. NEVER use "✓" or "✗".
+  4. Radio → exact allowed option (e.g. "Male", "Yes", "Separate"). Checkbox → "Yes" if a tick/slash is ANYWHERE in the combined option region (box + label text as one unit), "No" if the region has a cross or no mark. NEVER use "✓" or "✗".
 5. Table → count pre-printed rows first. Every cell: "{{Table}} — Row {{n}} — {{Column}}".
 6. Never invent values.
 
@@ -496,8 +479,9 @@ REASONING INSTRUCTIONS — Apply these steps for each field
 ### Mutually exclusive checkbox pairs (exactly ONE must be "Yes"):
   For 3.1 (Own/Rented), 3.4.1 (Separate/No Separate),
   4.3 (Yes/No), 3.5 (Separate/Common):
-  STEP 1: Look at BOTH checkboxes. ONE should be marked.
-  STEP 2: Output "Yes" for the marked option, "No" for the unmarked one.
+  STEP 1: Look at BOTH option regions (box + label text as one unit).
+          ONE should have a tick/slash in its combined region.
+  STEP 2: Output "Yes" for the option with the tick/slash, "No" for the other.
   STEP 3: If BOTH appear marked → pick denser mark as "Yes".
   STEP 4: If NEITHER is clearly marked → use context clues:
     - 3.1: if rent amount is filled → Rented="Yes", Own="No"
@@ -507,24 +491,27 @@ REASONING INSTRUCTIONS — Apply these steps for each field
 
 ### Multi-select checkboxes (any subset can be "Yes", others "No"):
   For 2.4 (Govt ID), 3.2 (Home Type), 3.3 (Ceiling), 3.6 (Kitchen), 4.1 (Assets):
-  STEP 1: Examine EACH checkbox independently.
-  STEP 2: "Yes" = dark filled mark inside box. "No" = empty/clean box.
+  STEP 1: Examine EACH option in its combined region (box + label text as one).
+  STEP 2: "Yes" = tick (✓) or slash (/) ANYWHERE in the combined region.
+          "No" = cross (X) in the region, or no mark at all.
   STEP 3: Multiple "Yes" allowed.
   STEP 4: IF ALL OPTIONS ARE "No" — RE-EXAMINE. The form is usually partially filled. Look again for any tick or slash.
   STEP 5: For "Other(s)" fields, also capture handwritten text.
 
 ### Radio buttons (exactly ONE selected — output the option TEXT):
-  For 1.3, 2.1, 2.3, 4.4, 4.5, 4.6, 5.1, 6.2, 6.3, 8.2:
+  For 1.3, 2.1, 2.3, 4.4, 4.6, 5.1, 6.2, 6.3, 8.2:
   STEP 1: Find the filled radio circle (●) vs empty circles (○).
   STEP 2: Output the EXACT option text (e.g. "Male", "Having both parents", "Yes").
   STEP 3: NEVER output "✓" or "✗" for radio. Output the option text itself.
   STEP 4: A circle is ONLY "Yes" if it has a clear dot (●) or tick inside. An empty circle → the OTHER option is selected.
-  STEP 5: For Yes/No radios (4.4, 4.6, 5.1, 2.3, 6.3): if both appear empty, default "No". NEVER output "Yes" for an empty circle.
+  STEP 5: For Yes/No radios (4.4, 4.6, 5.1, 6.3): if both appear empty, default "No". NEVER output "Yes" for an empty circle.
+  For 2.3 specifically: if both radios appear empty, output "" (empty string). NEVER default to "No".
+  STEP 6: For 2.3 specifically, also scan the area BEYOND the No checkbox for free text notes (e.g. "we shifted to new house 2 months back"). Output as "2.3 Is Father/Mother photograph kept at home? — Notes".
 
 ### Numeric fields:
   For 4.6.1 Loan Amount Taken/Pending:
   STEP 1: Extract only digits and decimal point. Strip ₹, commas, Rs, words.
-  STEP 2: Handwriting digit disambiguation — 'l' or 'I' is usually '1'; 'O' or 'o' is usually '0'; 'S' or 's' is usually '5'; 'Z' or 'z' is usually '2'.
+  STEP 2: Handwriting digit disambiguation — 'l' or 'I' is usually '1'; 'O' or 'o' is usually '0'; 'S' or 's' is usually '5'; 'Z' or 'z' is usually '2'; 'B' or 'b' is usually '8'.
   STEP 3: If value is wholly non-numeric, output "" (empty) — don't guess.
 
 ### Text fields that commonly capture wrong text:
@@ -535,7 +522,7 @@ REASONING INSTRUCTIONS — Apply these steps for each field
   STEP 4: If the blank is empty, output "" — do not repeat nearby text.
 
 ### Table fields (count pre-printed rows, fill every cell):
-  For 2.5 (Family Members), 4.3.1 (Properties), 4.6.1 (Loans):
+  For 2.5 (Family Members), 4.3.1 (Properties), 4.4.1 (Income Sources), 4.6.1 (Loans):
   STEP 1: Count ALL pre-printed rows. 2.5 usually has 5 rows.
   STEP 2: Label = "{{Table label}} — Row {{n}} — {{Column}}".
   STEP 3: Parent "No" → ALL cells = "N/A". Parent "Yes" or unclear → extract.
@@ -544,8 +531,9 @@ REASONING INSTRUCTIONS — Apply these steps for each field
 ### Conditional dependencies — hard rule:
   Parent field = "No" or "✗" → ALL child fields = "N/A", UNLESS child field has visible handwritten text.
   Key dependencies:
-    3.1.1 rent amount → ALWAYS look for handwritten text FIRST. If text exists, extract it regardless of 3.1 selection. Only output "N/A" if the 3.1.1 blank is COMPLETELY empty AND 3.1 Own is checked.
+     3.1.1 rent amount → ALWAYS look for handwritten text FIRST. If text exists, extract it regardless of 3.1 selection. Only output "N/A" if the 3.1.1 blank is COMPLETELY empty AND 3.1 Own is checked.
     4.3.1 properties → depends on 4.3 Yes = ✓
+    4.4.1 income sources table → depends on 4.4 = Yes, BUT extract handwritten text even if 4.4 = No
      4.6.1 loans → depends on 4.6 = Yes
     5.2 health issues → depends on 5.1 = Yes
 
@@ -575,78 +563,7 @@ FIELD LIST FOR PAGE {page}:
 {_page_handwriting_tips(page)}
 '''
 
-        # Two-stage extraction: vision model does OCR text, text model does structured JSON.
-        # Only needed for local VL models that can't reliably emit JSON directly.
-        # Capable vision models (e.g. gpt-4o-mini) use the faster single-stage path below.
-        two_stage_mode = os.environ.get("TWO_STAGE_EXTRACTION", "auto").lower()
-        primary_is_local_vl = "vl" in getattr(self.primary_client, "model_name", "").lower()
-        use_two_stage = two_stage_mode == "on" or (two_stage_mode == "auto" and primary_is_local_vl)
-        if num_pages == 6 and self.primary_client.needs_images and self.secondary_client is not None and use_two_stage:
-            from src.prompt_templates import PRIMARY_OCR_PROMPT, TEXT_EXTRACTION_PROMPT, PAGE_FIELD_MAPPINGS
 
-            logger.info("Stage 1 — extracting OCR text from %d pages via vision model...", num_pages)
-            pages = sorted(page_images.keys())
-            ocr_concurrency = max(1, int(os.environ.get("OCR_PAGE_CONCURRENCY", "1")))
-            ocr_sem = asyncio.Semaphore(ocr_concurrency)
-
-            async def _ocr_page(p: int) -> str:
-                async with ocr_sem:
-                    prompt = f"--- Page {p} ---\n\n{PRIMARY_OCR_PROMPT}"
-                    return await self.primary_client.extract_raw_text(None, {p: page_images[p]}, prompt)
-
-            ocr_results = await asyncio.gather(*(_ocr_page(p) for p in pages), return_exceptions=True)
-
-            page_texts: dict[int, str] = {}
-            for idx, res in enumerate(ocr_results):
-                page = pages[idx]
-                if isinstance(res, Exception):
-                    logger.error("OCR failed for page %d: %s", page, res)
-                    page_texts[page] = ""
-                    continue
-                page_texts[page] = str(res or "")
-
-            combined_text = "\n\n".join(f"--- Page {p} ---\n{page_texts.get(p, '')}" for p in pages)
-            logger.info("Combined OCR text: %d chars across %d pages", len(combined_text), len(page_texts))
-
-            logger.info("Stage 2 — extracting structured fields from combined OCR text via text model...")
-            section_names = {
-                1: "Student Profile", 2: "Family Background", 3: "Housing Condition",
-                4: "Financial Background", 5: "Health Information", 6: "Student Commitment",
-                7: "Scholarship Information", 8: "Volunteer Observation",
-            }
-            section_pages: dict[int, set[int]] = {}
-            for tpl in KNOWN_TEMPLATE_FIELDS:
-                sn = tpl.get("section_number")
-                if sn is None:
-                    continue
-                section_pages.setdefault(sn, set()).add(tpl["page"])
-
-            extraction_prompt = (
-                f"{TEXT_EXTRACTION_PROMPT}\n\n"
-                f"OCR TEXT (all 6 pages):\n{combined_text}\n\n"
-                f"FIELD LIST FOR PAGE 1:\n{PAGE_FIELD_MAPPINGS.get(1, '')}\n"
-                f"FIELD LIST FOR PAGE 2:\n{PAGE_FIELD_MAPPINGS.get(2, '')}\n"
-                f"FIELD LIST FOR PAGE 3:\n{PAGE_FIELD_MAPPINGS.get(3, '')}\n"
-                f"FIELD LIST FOR PAGE 4:\n{PAGE_FIELD_MAPPINGS.get(4, '')}\n"
-                f"FIELD LIST FOR PAGE 5:\n{PAGE_FIELD_MAPPINGS.get(5, '')}\n"
-                f"FIELD LIST FOR PAGE 6:\n{PAGE_FIELD_MAPPINGS.get(6, '')}\n"
-            )
-            text_data, text_usage = await self.secondary_client.extract_structured("", {}, extraction_prompt)
-
-            if text_data and text_data.get("fields"):
-                coverage, confidence = self._compute_coverage_confidence(text_data["fields"])
-                logger.info("Stage 2 OK — text model extracted %d fields (coverage=%d%%, confidence=%d%%)",
-                            len(text_data["fields"]), coverage, confidence)
-                text_data["sections"] = [
-                    {"number": sn, "name": section_names.get(sn, f"Section {sn}"), "page": min(sp)}
-                    for sn, sp in sorted(section_pages.items())
-                ]
-                text_data["coverage"] = coverage
-                text_data["confidence"] = confidence
-                text_data["overall_confidence"] = round(coverage * confidence / 100) if coverage and confidence else 0
-                return text_data, text_usage
-
-            logger.warning("Two-stage extraction produced no fields — falling through to direct extraction")
 
         def clean_labels(fields: list[dict]) -> list[dict]:
             cleaned = []
@@ -664,15 +581,17 @@ FIELD LIST FOR PAGE {page}:
         #   6 pages + vision provider → parallel per-page extraction (fast, accurate)
         #   non-6 pages              → sequential all-pages prompt (handles any page count/order)
         #   1 page or text-only      → single prompt
-        if num_pages == 6 and self.primary_client.needs_images and getattr(self.primary_client, 'provider', '') != "gemini":
+        if num_pages == 6 and self.primary_client.needs_images:
             logger.info("Starting page-by-page parallel LLM extraction for %d pages...", num_pages)
-            tasks = []
             pages = sorted(page_images.keys())
-            for p in pages:
-                single_page_images = {p: page_images[p]}
-                prompt = build_page_prompt(p)
-                tasks.append(self.primary_client.extract_structured(None, single_page_images, prompt))
+            _page_sem = asyncio.Semaphore(1)
+            async def _extract_page(p: int):
+                async with _page_sem:
+                    single_page_images = {p: page_images[p]}
+                    prompt = build_page_prompt(p)
+                    return await self.primary_client.extract_structured(None, single_page_images, prompt)
 
+            tasks = [_extract_page(p) for p in pages]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             section_names = {
@@ -841,7 +760,7 @@ GROUND RULES:
 1. Extract EVERY field listed in FIELD LIST BY PAGE below. Every label must appear in output, even if empty.
 2. Labels MUST EXACTLY match the field list including numbers (e.g. "1.2 Student Full Name"). Do NOT alter.
 3. value="" for unreadable/missing. value="N/A" when parent="No". Never "null".
- 4. Checkbox → "Yes" if a tick (✓) or slash (/) appears in the box OR on the option text. "No" if cross/scribble/empty. Mark inside box is authoritative. Box tick + text cross = "Yes". Box cross + text tick = "No". If BOTH tick and cross in one box, tick wins → "Yes".
+  4. Checkbox → "Yes" if a tick (✓) or slash (/) appears ANYWHERE in the combined option region (box + label text as one unit). "No" if cross/scribble/empty. A mark on the text counts the same as a mark in the box. If BOTH tick and cross in one region, tick wins → "Yes".
 5. Radio → exact option text (e.g. "Male", "Having both parents"). Never "✓" or "✗".
 6. Table → "{{Table}} — Row {{n}} — {{Column}}" (e.g. "2.5 Family Members — Row 1 — Name").
 7. Conditionals: parent="No" → child="N/A". Dependencies: rent→3.1, 4.3/4.6→4.3.1/4.6.1, health→5.1.
@@ -849,9 +768,11 @@ GROUND RULES:
 
 REASONING — Apply per field type:
 - Mutually-exclusive pairs (Own/Rented, Separate/No Separate Bedroom, Yes/No for 4.3, Separate/Common for Bathroom): exactly ONE marked. Use context clues (filled rent→Rented=Yes, bedrooms>0→Separate=Yes).
-- Multi-select (2.4 Govt ID, 3.2 Home Type, 3.3 Ceiling, 3.6 Kitchen, 4.1 Assets): each checkbox independent. Default ambiguous="No".
+- Multi-select (2.4 Govt ID, 3.2 Home Type, 3.3 Ceiling, 3.6 Kitchen): each checkbox independent. Default ambiguous="No".
+- 4.1 Assets at Home: relaxed mark detection — any mark (dot, line, scribble) near box or text = checked; only X = unchecked.
 - Numerics (4.6.1 Loan): digits+decimal only. Strip ₹, commas, Rs.
-- 4.7: capture COMPLETE handwritten college name + fee amount together. Do NOT drop the text.
+- 4.7: scan ENTIRE blank space below the label (multiple lines ok). Handwriting may continue on a lower line — combine continuation lines with ", " into one value.
+- 2.3: also capture any free text written after the checkbox as "2.3 Is Father/Mother photograph kept at home? — Notes".
 - Table rows: count ALL pre-printed rows (2.5 usually 5). Every cell filled.
 - Other(s) fields: also capture handwritten text.
 
@@ -885,63 +806,23 @@ FIELD LIST BY PAGE:
 
     # ── Stage 3b: Merge (enhanced with position_hint + confidence weighting) ──
 
-    def _group_words_into_lines(self, word_boxes: list[WordBox], page: int, y_tolerance: int = 20) -> list[TextLine]:
-        page_words = sorted(
-            [wb for wb in word_boxes if wb.page_num == page],
-            key=lambda w: (w.bbox[1], w.bbox[0]),
-        )
-        if not page_words:
-            return []
-
-        lines: list[list[WordBox]] = [[page_words[0]]]
-        for wb in page_words[1:]:
-            prev_top = lines[-1][-1].bbox[1]
-            if abs(wb.bbox[1] - prev_top) < y_tolerance:
-                lines[-1].append(wb)
-            else:
-                lines.append([wb])
-
-        result: list[TextLine] = []
-        for group in lines:
-            result.append(TextLine(
-                text=" ".join(w.text for w in group),
-                bbox=self._words_bbox(group),
-                page=page,
-                words=group,
-            ))
-        return result
-
-    @staticmethod
-    def _words_bbox(words: list[WordBox]) -> tuple[int, int, int, int]:
-        xs = [w.bbox[0] for w in words]
-        ys = [w.bbox[1] for w in words]
-        xe = [w.bbox[2] for w in words]
-        ye = [w.bbox[3] for w in words]
-        return (min(xs), min(ys), max(xe), max(ye))
-
     def merge_fields(
         self,
         model_data: dict,
-        word_boxes: list[WordBox],
+        word_boxes: list | None = None,
         prefix: str = "",
     ) -> list[StructuredField]:
         fields: list[StructuredField] = []
         raw_fields = [f for f in model_data.get("fields", []) if isinstance(f, dict)]
 
-        pages_in_fields = sorted({gf.get("page", 1) for gf in raw_fields})
-        lines_by_page: dict[int, list[TextLine]] = {
-            p: self._group_words_into_lines(word_boxes, p) for p in pages_in_fields
-        }
-
         for gf in raw_fields:
-            fields.append(self._create_structured_field(gf, lines_by_page, prefix))
+            fields.append(self._create_structured_field(gf, prefix))
 
         return fields
 
     def _create_structured_field(
         self,
         gf: dict,
-        lines_by_page: dict[int, list[TextLine]],
         prefix: str = "",
     ) -> StructuredField:
         label = gf.get("label", "")
@@ -952,11 +833,6 @@ FIELD LIST BY PAGE:
         if section_number is None:
             section_number = self._infer_section_from_label(label)
         needs_clarification = gf.get("needs_clarification", False)
-        position_hint = gf.get("position_hint")
-        label_bbox, value_bbox = self._find_field_bboxes(
-            value, label, page, lines_by_page.get(page, []),
-            position_hint=position_hint,
-        )
 
         return StructuredField(
             label=label,
@@ -964,184 +840,20 @@ FIELD LIST BY PAGE:
             confidence=confidence,
             page=page,
             section_number=section_number,
-            bbox=label_bbox,
-            value_bbox=value_bbox,
+            bbox=None,
+            value_bbox=None,
             needs_clarification=needs_clarification,
             reason=gf.get("reason"),
             extracted_by=prefix or None,
         )
-
-    def _find_field_bboxes(
-        self, value: str, label: str, page: int, lines: list[TextLine],
-        position_hint: str | None = None,
-    ) -> tuple[tuple[int, int, int, int] | None, tuple[int, int, int, int] | None]:
-        """Returns (label_bbox, value_bbox)."""
-        if not lines:
-            return None, None
-
-        # For composite labels (checkbox options, table rows, sub-questions),
-        # match the main label part (before " — ") against Tesseract lines.
-        main_label = label.split(" — ")[0] if " — " in label else label
-        option_part = label[len(main_label) + 3:].strip() if " — " in label else ""
-
-        label_lower = label.lower().strip()
-        main_label_lower = main_label.lower().strip()
-
-        best: tuple[float, TextLine] | None = None
-        # Prefer matching the main label over the full composite label
-        for text, candidate in [(main_label_lower, main_label), (label_lower, label)]:
-            for line in lines:
-                ratio = fuzz.token_set_ratio(text, line.text.lower())
-                if ratio > 65 and (best is None or ratio > best[0]):
-                    best = (ratio, line)
-
-        if best is None:
-            # Fallback: match just the leading number (e.g. "4.1")
-            m = __import__('re').match(r"(\d+(?:\.\d+)*)", label)
-            if m:
-                num_prefix = m.group(1)
-                for line in lines:
-                    if num_prefix in line.text:
-                        if best is None or len(line.text) < len(best[1].text):
-                            best = (90.0, line)
-
-        if best is None:
-            return None, None
-
-        _, best_line = best
-        label_bbox = best_line.bbox
-        value_lower = value.lower().strip()
-
-        value_bbox = self._find_value_bbox(
-            value_lower, best_line, lines, position_hint,
-            option_text=option_part,
-        )
-
-        return label_bbox, value_bbox
-
-    def _find_value_bbox(
-        self, value_lower: str, best_line: TextLine, lines: list[TextLine],
-        position_hint: str | None = None,
-        option_text: str = "",
-    ) -> tuple[int, int, int, int] | None:
-        """Find the bounding box for the value text, given the label line."""
-
-        # ── Composite label (checkbox / table row): find the option text ──
-        if option_text:
-            best_idx = lines.index(best_line)
-            opt_lower = option_text.lower().strip()
-            search_region = lines[max(0, best_idx - 3):best_idx + 6]
-            best_opt: tuple[float, TextLine] | None = None
-            for candidate in search_region:
-                r = fuzz.token_set_ratio(opt_lower, candidate.text.lower())
-                if r > 65 and (best_opt is None or r > best_opt[0]):
-                    best_opt = (r, candidate)
-            if best_opt:
-                _, opt_line = best_opt
-                # Value is likely to the right of the option text (checkbox ✓/✗)
-                # or on the same line (table cell value after colon)
-                if value_lower:
-                    for wb in opt_line.words:
-                        wl = wb.text.lower()
-                        if fuzz.partial_ratio(value_lower, wl) > 75:
-                            return wb.bbox
-                # Return the option text bbox as the value location
-                return opt_line.bbox
-
-        # ── Position hint strategies ──────────────────────────────────
-        if position_hint == "above_label":
-            best_idx = lines.index(best_line)
-            for candidate in reversed(lines[:best_idx]):
-                if best_line.bbox[1] - candidate.bbox[3] > 40:
-                    break
-                if value_lower and fuzz.partial_ratio(value_lower, candidate.text.lower()) > 50:
-                    return candidate.bbox
-                return candidate.bbox
-            return best_line.bbox
-
-        if position_hint == "below_label":
-            best_idx = lines.index(best_line)
-            for candidate in lines[best_idx + 1:]:
-                if candidate.bbox[1] - best_line.bbox[3] > 40:
-                    break
-                if value_lower and fuzz.partial_ratio(value_lower, candidate.text.lower()) > 50:
-                    return candidate.bbox
-                return candidate.bbox
-            return best_line.bbox
-
-        if position_hint in ("same_line_colon", "right_of_label"):
-            colon_idx = best_line.text.find(":")
-            if colon_idx >= 0:
-                colon_word = None
-                char_count = 0
-                for wb in best_line.words:
-                    word_end = char_count + len(wb.text)
-                    if char_count <= colon_idx < word_end:
-                        colon_word = wb
-                        break
-                    char_count = word_end + 1
-                if colon_word and len(best_line.words) > 1:
-                    right_words = [wb for wb in best_line.words if wb.bbox[0] > colon_word.bbox[0]]
-                    if right_words:
-                        return self._words_bbox(right_words)
-
-            if value_lower:
-                mid_x = (best_line.bbox[0] + best_line.bbox[2]) / 2
-                right_words = [wb for wb in best_line.words if wb.bbox[0] > mid_x]
-                if right_words:
-                    return self._words_bbox(right_words)
-            return best_line.bbox
-
-        # ── No position_hint — try all strategies in order ────────────
-
-        # Strategy 1: Find value words within the same line
-        if value_lower:
-            value_words: list[tuple[float, WordBox]] = []
-            for wb in best_line.words:
-                wl = wb.text.lower()
-                if fuzz.partial_ratio(value_lower, wl) > 75 or fuzz.partial_ratio(wl, value_lower) > 75:
-                    weight = wb.confidence / 100.0 if wb.confidence > 60 else 0.5
-                    value_words.append((weight, wb))
-            if value_words:
-                value_words.sort(key=lambda x: x[0], reverse=True)
-                chosen = [vw[1] for vw in value_words[:3]]
-                return self._words_bbox(chosen)
-
-        # Strategy 2: Colon split — words to the right of colon
-        colon_idx = best_line.text.find(":")
-        if colon_idx >= 0:
-            colon_word = None
-            char_count = 0
-            for wb in best_line.words:
-                word_end = char_count + len(wb.text)
-                if char_count <= colon_idx < word_end:
-                    colon_word = wb
-                    break
-                char_count = word_end + 1
-            if colon_word and len(best_line.words) > 1:
-                right_words = [wb for wb in best_line.words if wb.bbox[0] > colon_word.bbox[0]]
-                if right_words:
-                    return self._words_bbox(right_words)
-
-        # Strategy 3: Next line below
-        best_idx = lines.index(best_line)
-        for candidate in lines[best_idx + 1:]:
-            if candidate.bbox[1] - best_line.bbox[3] > 40:
-                break
-            if value_lower and fuzz.partial_ratio(value_lower, candidate.text.lower()) > 50:
-                return candidate.bbox
-            return candidate.bbox
-
-        # Fallback: value is on the same line as the label
-        return best_line.bbox
 
     # ── Stage 4: Secondary model verification ───────────────────────
 
     async def verify_secondary(
         self,
         fields: list[StructuredField],
-        word_boxes: list[WordBox],
-        output_dir: str,
+        word_boxes: list | None = None,
+        output_dir: str = "",
         prefix: str = "",
     ) -> tuple[list[StructuredField], dict]:
         from src.prompt_templates import SECONDARY_VERIFICATION_PROMPT
@@ -1153,7 +865,6 @@ FIELD LIST BY PAGE:
                 f.verified_by = prefix or None
             return fields, {}
 
-        # Only send low-confidence fields to secondary — skip high-confidence ones
         low_conf = [f for f in fields if f.confidence < 90 or f.needs_clarification]
         high_conf = [f for f in fields if f.confidence >= 90 and not f.needs_clarification]
 
@@ -1198,9 +909,6 @@ FIELD LIST BY PAGE:
             "{fields_json}", json.dumps(fields_json, indent=2)
         )
 
-        # Secondary verification is text-only: it verifies field labels/values
-        # and finds gaps in the extraction. It does not need to re-read the
-        # document images (which would cost ~225k tokens and ~90s latency).
         raw_result, secondary_token_usage = await self.secondary_client.extract_structured("", {}, prompt)
 
         if raw_result is None:
@@ -1210,7 +918,6 @@ FIELD LIST BY PAGE:
                 f.verified_by = prefix or None
             return fields, secondary_token_usage
 
-        # Process verifications
         verif_map: dict[str, dict] = {}
         for v in raw_result.get("verifications", []):
             if isinstance(v, dict):
@@ -1232,24 +939,16 @@ FIELD LIST BY PAGE:
                 f.value = v["correct_value"]
                 f.confidence = min(f.confidence, v_conf or 50)
 
-        # Process new fields from secondary
         new_fields_data = raw_result.get("new_fields", [])
         if new_fields_data:
-            pages_in_new = sorted({nf.get("page", 1) for nf in new_fields_data})
-            lines_by_page: dict[int, list[TextLine]] = {}
-            for p in pages_in_new:
-                lines_by_page[p] = self._group_words_into_lines(word_boxes, p)
-
             for nf in new_fields_data:
-                field_obj = self._create_structured_field(nf, lines_by_page, prefix)
+                field_obj = self._create_structured_field(nf, prefix)
                 field_obj.is_verified = True
                 field_obj.verifier_confidence = field_obj.confidence
                 field_obj.verification_note = "Added by secondary model"
                 fields.append(field_obj)
 
             logger.info("Secondary model added %d new fields", len(new_fields_data))
-
-        return fields, secondary_token_usage
 
     @staticmethod
     def _checkbox_sub_option(label: str) -> bool:
@@ -1351,13 +1050,8 @@ FIELD LIST BY PAGE:
         fields = ExtractionPipeline._sanitize_checkbox_values(fields)
         fields = ExtractionPipeline._fix_concatenated_parents(fields)
         fields = ExtractionPipeline._detect_concatenated_parents(fields)
-        if pdf_path and provider != "gemini":
-            try:
-                fields = ExtractionPipeline._cv_checkbox_verify(fields, pdf_path)
-            except Exception as e:
-                logger.warning("CV checkbox verification failed (non-fatal): %s", e)
+        fields = ExtractionPipeline._split_table_rows(fields)
         fields = ExtractionPipeline._fix_mutual_exclusivity(fields)
-        fields = ExtractionPipeline._validate_checkbox_groups(fields)
         fields = ExtractionPipeline._clean_numeric_fields(fields)
         existing_labels = {f.label for f in fields}
         for tpl in KNOWN_TEMPLATE_FIELDS:
@@ -1380,35 +1074,33 @@ FIELD LIST BY PAGE:
 
     @staticmethod
     def _gemini_post_process(fields: list[StructuredField]) -> list[StructuredField]:
+        field_map = {f.label: f for f in fields}
+        reason_field = field_map.get("2.2 Relationship Details — Reason for Death / Separation")
+
         for f in fields:
             label = f.label or ""
             val = (f.value or "").strip()
 
-            # 3.1.1 rent amount: if LLM stripped currency, restore full format
+            # 3.1.1 rent amount: normalize to canonical "Rs X/-" format
             if "rent amount" in label.lower() and val and val not in ("N/A", ""):
-                has_currency = any(c in val for c in ("₹", "Rs", "rs", "/-", "$"))
-                if not has_currency and re.match(r'^[\d,.\s]+$', val):
-                    clean = val.strip().rstrip('/').strip()
-                    wrapped = f"Rs {clean}/-"
-                    if wrapped != val:
-                        logger.info("Gemini rent format: %r → %r", val, wrapped)
-                        f.original_value = val
-                        f.value = wrapped
+                already_canonical = bool(re.match(r'^Rs\s+[\d,./]+/-\s*$', val, re.IGNORECASE))
+                if not already_canonical:
+                    clean = re.sub(r'[^\d,./]', '', val).strip().rstrip('/').strip()
+                    if clean:
+                        wrapped = f"Rs {clean}/-"
+                        if wrapped != val:
+                            logger.info("Gemini rent format: %r → %r", val, wrapped)
+                            f.original_value = val
+                            f.value = wrapped
 
             # Merge blank_text_below_2_1 into 2.2 Reason for Death / Separation
-            if label == "blank_text_below_2_1" and val:
-                reason_field = next(
-                    (x for x in fields
-                     if x.label == "2.2 Relationship Details — Reason for Death / Separation"),
-                    None
-                )
-                if reason_field:
-                    current = (reason_field.value or "").strip()
-                    if val not in current:
-                        merged = f"{current} — {val}" if current else val
-                        logger.info("Gemini 2.2 merge: blank_text_below_2_1 → Reason for Death / Separation")
-                        reason_field.original_value = reason_field.value
-                        reason_field.value = merged
+            if label == "blank_text_below_2_1" and val and reason_field:
+                current = (reason_field.value or "").strip()
+                if val not in current:
+                    merged = f"{current} — {val}" if current else val
+                    logger.info("Gemini 2.2 merge: blank_text_below_2_1 → Reason for Death / Separation")
+                    reason_field.original_value = reason_field.value
+                    reason_field.value = merged
                 # Clear the blank_text field since it's merged
                 f.value = ""
                 f.confidence = 100
@@ -1416,148 +1108,7 @@ FIELD LIST BY PAGE:
 
         return fields
 
-    @staticmethod
-    def _cv_checkbox_verify(fields: list[StructuredField], pdf_path: str) -> list[StructuredField]:
-        from src.checkbox_vision import CHECKBOX_COORDS, _crop_checkbox, _classify_checkbox_mark
 
-        def _norm(label: str) -> str:
-            s = label or ""
-            s = re.sub(r'^\s*\d+(?:\.\d+)*\.?\s+', '', s)
-            s = re.sub(r'\s*\(tick all that apply\)', '', s, flags=re.IGNORECASE)
-            s = s.replace('\u2014', ' - ').replace('\u2013', ' - ').replace('--', ' - ')
-            s = re.sub(r'\s+-\s+', ' - ', s)
-            s = re.sub(r'\s+', ' ', s).strip()
-            return s.rstrip(':').strip().lower()
-
-        label_to_coords_key: dict[str, str] = {
-            "2.4 Government ID Verified — Aadhaar Card": "govt_id_aadhaar",
-            "2.4 Government ID Verified — Ration Card": "govt_id_ration",
-            "2.4 Government ID Verified — Driving Licence": "govt_id_driving_licence",
-            "2.4 Government ID Verified — Voter ID": "govt_id_voter",
-            "2.4 Government ID Verified — Other": "govt_id_other",
-
-            "3.1 House Ownership — Own": "house_ownership_own",
-            "3.1 House Ownership — Rented": "house_ownership_rented",
-
-            "3.2 Type of Home — Individual": "home_type_individual",
-            "3.2 Type of Home — Private Apartment": "home_type_private_apartment",
-            "3.2 Type of Home — Housing Board": "home_type_housing_board",
-            "3.2 Type of Home — Line House": "home_type_line_house",
-
-            "3.3 Type of Ceiling — Roof (Kurai)": "ceiling_roof",
-            "3.3 Type of Ceiling — Tiled": "ceiling_tiled",
-            "3.3 Type of Ceiling — Asbestos / Sheet": "ceiling_asbestos",
-            "3.3 Type of Ceiling — Concrete": "ceiling_concrete",
-
-            "4.1 Assets at Home(tick all that apply) - Washing Machine": "asset_washing_machine_checkbox",
-            "4.1 Assets at Home(tick all that apply) - Fridge": "asset_fridge_checkbox",
-            "4.1 Assets at Home(tick all that apply) - AC": "asset_ac_checkbox",
-            "4.1 Assets at Home(tick all that apply) - LED TV": "asset_led_tv_checkbox",
-            "4.1 Assets at Home(tick all that apply) - Two-Wheeler": "asset_two_wheeler_checkbox",
-            "4.1 Assets at Home(tick all that apply) - Car": "asset_car_checkbox",
-            "4.1 Assets at Home(tick all that apply) - Smartphone": "asset_smartphone_checkbox",
-            "4.1 Assets at Home(tick all that apply) - Separate Wi-Fi": "asset_separate_wifi_checkbox",
-
-            "3.6 Kitchen Type — Separate Kitchen": "kitchen_type_separate",
-            "3.6 Kitchen Type — Hall with Kitchen": "kitchen_type_hall",
-        }
-        norm_map: dict[str, str] = {_norm(k): v for k, v in label_to_coords_key.items()}
-
-        extra_coords: dict[str, tuple[int, float, float, float, float]] = {
-            "house_ownership_own": (2, 172.0, 375.0, 10.0, 13.0),
-            "house_ownership_rented": (2, 277.0, 370.0, 10.0, 10.0),
-        }
-
-        page_images = _load_page_images_cv(pdf_path)
-        dpi = 200
-        overrides = 0
-
-        import cv2 as _cv2
-        import numpy as _np
-
-        for f in fields:
-            coords_key = label_to_coords_key.get(f.label)
-            if coords_key is None:
-                coords_key = norm_map.get(_norm(f.label))
-                if coords_key is not None:
-                    logger.debug("CV normalized label %r → %r", f.label, coords_key)
-            if coords_key is None:
-                continue
-            coords = CHECKBOX_COORDS.get(coords_key) or extra_coords.get(coords_key)
-            if coords is None:
-                continue
-            roi = _crop_checkbox(page_images, *coords, dpi)
-            if roi is None:
-                continue
-            # Sanity check: crop should have checkbox-level density (4-35% dark)
-            # Higher density = text/form line; lower = blank/missed crop
-            _, _bin = _cv2.threshold(roi, 0, 255, _cv2.THRESH_BINARY_INV + _cv2.THRESH_OTSU)
-            _dark_ratio = float(_cv2.countNonZero(_bin)) / max(_bin.size, 1)
-            if _dark_ratio > 0.35:
-                logger.debug("CV skip %r: ROI too dense (%.2f) — likely not a checkbox", f.label, _dark_ratio)
-                continue
-            cv_class = _classify_checkbox_mark(roi)
-            llm_val = f.value.strip()
-
-            if cv_class == "tick" and llm_val not in ("Yes", "✓"):
-                logger.info("CV override %r: LLM=%r → Yes (CV=tick)", f.label, f.value)
-                f.original_value = f.value if f.value not in ("No", "N/A", "") else None
-                f.value = "Yes"
-                f.confidence = 85
-                f.reason = "Corrected: CV detected tick mark"
-                f.needs_clarification = False
-                overrides += 1
-            elif cv_class == "empty" and llm_val not in ("No", "N/A", ""):
-                logger.info("CV override %r: LLM=%r → No (CV=empty)", f.label, f.value)
-                f.original_value = f.value if f.value not in ("Yes", "✓") else None
-                f.value = "No"
-                f.confidence = 80
-                f.reason = "Corrected: CV detected empty checkbox"
-                f.needs_clarification = False
-                overrides += 1
-            elif cv_class in ("cross", "unknown") and llm_val not in ("No", "N/A", ""):
-                logger.warning("CV flagged %r: LLM=%r but CV=%s — marking for review", f.label, f.value, cv_class)
-                f.needs_clarification = True
-                f.reason = "CV disagrees with LLM: detected {}".format(cv_class)
-
-        if overrides:
-            logger.info("CV checkbox verification: %d field(s) overridden", overrides)
-        else:
-            logger.info("CV checkbox verification: no overrides needed")
-        return fields
-
-    @staticmethod
-    def _validate_checkbox_groups(fields: list[StructuredField]) -> list[StructuredField]:
-        """Detect all-No or suspicious single-No multi-select checkbox groups."""
-        GROUPS: list[tuple[str, str]] = [
-            ("2.4 Government ID Verified", "2.4"),
-            ("3.2 Type of Home", "3.2"),
-            ("3.3 Type of Ceiling", "3.3"),
-            ("3.6 Kitchen Type", "3.6"),
-            ("4.1 Assets at Home", "4.1"),
-        ]
-        for group_label, prefix in GROUPS:
-            group = [f for f in fields if f.label.startswith(prefix) and not f.label.startswith(prefix + ".1")]
-            if not group:
-                continue
-            yes_count = sum(1 for f in group if f.value in ("Yes", "✓"))
-            no_count = sum(1 for f in group if f.value in ("No", "", None))
-            if yes_count == 0 and no_count == len(group):
-                for f in group:
-                    if f.confidence is None or f.confidence > 50:
-                        f.confidence = max(f.confidence or 50, 50)
-                    f.needs_clarification = True
-                    f.reason = f"All {len(group)} checkboxes in {group_label} are No — possible missed mark"
-                logger.warning("All-No group detected: %s (%d checkboxes)", group_label, len(group))
-            elif yes_count >= len(group) - 2 and no_count >= 1 and len(group) >= 4:
-                no_fields = [f for f in group if f.value in ("No", "", None)]
-                if len(no_fields) == 1:
-                    no_fields[0].needs_clarification = True
-                    no_fields[0].reason = f"Suspicious No — {yes_count}/{len(group)} are Yes in {group_label}, this field likely has a missed mark"
-                    no_fields[0].confidence = min(no_fields[0].confidence, 50)
-                    logger.warning("Suspicious single-No in %s: %r (yes_count=%d/%d)",
-                                   group_label, no_fields[0].label, yes_count, len(group))
-        return fields
 
     @staticmethod
     def _clean_numeric_fields(fields: list[StructuredField]) -> list[StructuredField]:
@@ -1566,6 +1117,8 @@ FIELD LIST BY PAGE:
         for f in fields:
             val = f.value
             if not val or val in ("N/A", "", None):
+                continue
+            if "; " in val:
                 continue
             for prefix in NUMERIC_PREFIXES:
                 if f.label.startswith(prefix):
@@ -1587,17 +1140,51 @@ FIELD LIST BY PAGE:
         return fields
 
     @staticmethod
+    def _normalize_boolean_fields(fields: list[StructuredField]) -> list[StructuredField]:
+        """Normalize boolean values to canonical Yes/No."""
+        BOOL_PREFIXES = (
+            "3.1 House Ownership",
+            "3.4.1 Type of Bedroom",
+            "3.5 Bathroom",
+            "4.3 Do you own any other assets",
+            "4.4 Apart from your job",
+            "4.6 Do you have any loans",
+            "5.1 Does the student have any health issues",
+            "6.2 If we have a training program",
+            "6.3 Are you ready to send",
+            "8.2 Will you recommend",
+        )
+        YES_VALUES = {"yes", "y", "✓", "1", "true"}
+        NO_VALUES = {"no", "n", "✗", "0", "false"}
+        normalized = 0
+        for f in fields:
+            if not f.value or f.value in ("N/A", ""):
+                continue
+            if not any(f.label.startswith(p) for p in BOOL_PREFIXES):
+                continue
+            lower = f.value.strip().lower()
+            if lower in YES_VALUES:
+                f.value = "Yes"
+                normalized += 1
+            elif lower in NO_VALUES:
+                f.value = "No"
+                normalized += 1
+        if normalized:
+            logger.info("Normalized %d boolean field(s) to Yes/No", normalized)
+        return fields
+
+    @staticmethod
     def _detect_concatenated_parents(fields: list[StructuredField]) -> list[StructuredField]:
         """Detect fields where LLM merged parent+child into single label:value."""
-        PARENT_CHILD_MAP = {
-            "4.3": "4.3.1 If Yes, list their properties",
-            "4.4": "4.4.1 If Yes, list other sources of income",
-            "4.6": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount",
+        PARENT_MAP = {
+            "4.3 Do you own any other assets": "4.3.1 If Yes, list their properties",
+            "4.4 Apart from your job, is there any other source of income?": "4.4.1 If Yes, list other sources of income",
+            "4.6 Do you have any loans?": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount",
         }
         for f in fields:
             val = f.value or ""
-            for parent_prefix, child_prefix in PARENT_CHILD_MAP.items():
-                if not f.label.startswith(parent_prefix):
+            for parent_label, child_prefix in PARENT_MAP.items():
+                if f.label != parent_label:
                     continue
                 if val.lower() in ("yes", "no") or not val:
                     continue
@@ -1608,6 +1195,117 @@ FIELD LIST BY PAGE:
                     f.reason = "Derived from concatenated value"
                 break
         return fields
+
+    @staticmethod
+    def _split_table_rows(fields: list[StructuredField]) -> list[StructuredField]:
+        TABLE_PREFIXES = ["4.6.1"]
+        table_groups: dict[str, list[StructuredField]] = {}
+        for f in fields:
+            label = f.label or ""
+            for prefix in TABLE_PREFIXES:
+                if not label.startswith(prefix):
+                    continue
+                for sep in (" — ", " - ", " – "):
+                    if sep in label:
+                        parent_part = label.rsplit(sep, 1)[0].strip()
+                        table_groups.setdefault(parent_part, []).append(f)
+                        break
+                break
+
+        if not table_groups:
+            return fields
+
+        multi_groups: dict[str, list[StructuredField]] = {}
+        for parent_part, group_fields in table_groups.items():
+            if any(f.value and ("; " in f.value or ", " in f.value) for f in group_fields):
+                multi_groups[parent_part] = group_fields
+
+        if not multi_groups:
+            return fields
+
+        processed_ids: set[int] = set()
+        result: list[StructuredField] = []
+        split_produced: dict[str, set[int]] = {}
+
+        for parent_part, group_fields in multi_groups.items():
+            for f in group_fields:
+                processed_ids.add(id(f))
+
+            pfx_match = re.match(r"^(\d+(?:\.\d+)*)", parent_part)
+            pfx = pfx_match.group(1) if pfx_match else ""
+            row_match = re.match(r"^.*?\s*—\s*Row\s+(\d+)", parent_part, re.IGNORECASE)
+            start_row = int(row_match.group(1)) if row_match else 1
+
+            columns: list[str] = []
+            for f in group_fields:
+                label = f.label or ""
+                for sep in (" — ", " - ", " – "):
+                    if sep in label:
+                        columns.append(label.rsplit(sep, 1)[-1].strip())
+                        break
+
+            max_rows = 0
+            for f in group_fields:
+                val = f.value or ""
+                if "; " in val or ", " in val:
+                    n = len([p for p in (val.split("; ") if "; " in val else val.split(", ")) if p.strip()])
+                    max_rows = max(max_rows, n)
+
+            if max_rows <= 1:
+                result.extend(group_fields)
+                continue
+
+            for i in range(max_rows):
+                split_produced.setdefault(pfx, set()).add(start_row + i)
+
+            for f in group_fields:
+                label = f.label or ""
+                for sep in (" — ", " - ", " – "):
+                    if sep in label:
+                        column = label.rsplit(sep, 1)[-1].strip()
+                        break
+                else:
+                    result.append(f)
+                    continue
+
+                val = f.value or ""
+                parts = [p.strip() for p in (val.split("; ") if "; " in val else val.split(", "))] if ("; " in val or ", " in val) else [val]
+                parts = parts + [""] * (max_rows - len(parts))
+
+                for row_idx in range(max_rows):
+                    new_label = f"{parent_part} — Row {row_idx + 1} — {column}"
+                    row_val = parts[row_idx]
+                    if row_idx == 0:
+                        f.label = new_label
+                        f.value = row_val
+                        f.original_value = None
+                        result.append(f)
+                    else:
+                        result.append(StructuredField(
+                            label=new_label,
+                            value=row_val,
+                            confidence=f.confidence,
+                            page=f.page,
+                            section_number=f.section_number,
+                            needs_clarification=not bool(row_val),
+                            reason="Split from multi-row value",
+                            extracted_by="row_split",
+                        ))
+                logger.info("Split %s into %d row(s)", parent_part, max_rows)
+
+        for f in fields:
+            if id(f) not in processed_ids:
+                label = f.label or ""
+                rm = re.match(r"^(.*?)\s*—\s*Row\s+(\d+)\s*—", label, re.IGNORECASE)
+                if rm:
+                    pfx = re.match(r"^(\d+(?:\.\d+)*)", rm.group(1))
+                    if pfx:
+                        row = int(rm.group(2))
+                        if pfx.group(1) in split_produced and row in split_produced[pfx.group(1)]:
+                            continue
+                result.append(f)
+
+        return result
 
     @staticmethod
     def _find_all_no_groups(fields: list[StructuredField]) -> list[list[StructuredField]]:
@@ -1652,6 +1350,10 @@ FIELD LIST BY PAGE:
                 f"Re-examine the checkboxes on page(s) {list(group_pages.keys())} in the group '{group_prefix}'. "
                 f"The following fields were all marked as 'No' but this group should have at least one 'Yes':\n"
                 f"{field_list}\n\n"
+                f"COMBINED-OPTION MARK DETECTION: For each option, search its combined rectangle "
+                f"(checkbox square + label text as one unit — don't limit to the box alone). "
+                f"A tick (✓) or forward-slash (/) ANYWHERE in that combined region → 'Yes'. "
+                f"A cross (X/✗) ANYWHERE → 'No'. No mark → 'No'.\n\n"
                 f"Answer with ONLY valid JSON: {{\"fields\": [{{\"label\": \"...\", \"value\": \"Yes|No\"}}, ...]}}"
             )
             try:
@@ -1684,7 +1386,7 @@ FIELD LIST BY PAGE:
             "1.3 Gender", "2.1 Family Status", "2.3 Is Father/Mother photograph kept at home?",
             "3.5 Bathroom - Separate", "3.5 Bathroom - Common for Apartment",
             "4.4 Apart from your job, is there any other source of income?",
-            "4.5 Income Type", "4.6 Do you have any loans?",
+            "4.6 Do you have any loans?",
             "5.1 Does the student have any health issues?",
             "6.2 If we have a training program within 15 km from your home, can you come?",
             "6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?",
@@ -1704,11 +1406,9 @@ FIELD LIST BY PAGE:
 
     @staticmethod
     def _needs_refinement(field: StructuredField) -> bool:
-        if not field.value or field.value in ("N/A", ""):
-            return True
-        if field.confidence < 70:
-            return True
         if field.needs_clarification:
+            return True
+        if field.confidence < 50:
             return True
         return False
 
@@ -1741,11 +1441,12 @@ FIELD LIST BY PAGE:
             f"Current (possibly incomplete) values:\n{current_values}\n\n"
             f"HANDWRITING RULES:\n"
             f"- Read each character individually\n"
-            f"- 'l'/'I'→'1', 'O'/'o'→'0', 'S'→'5', 'Z'→'2'\n"
+            f"- 'l'/'I'→'1', 'O'/'o'→'0', 'S'→'5', 'Z'→'2', 'B'→'8'\n"
             f"- 'n'↔'u', 'a'↔'o', 'l'↔'t', 'r'↔'v'\n"
             f"- Printed question text = LABEL, NOT the value\n"
             f"- Look at the blank AFTER the label — that is the handwritten answer\n"
-            f"- For 4.7 (college fee): capture the COMPLETE handwritten answer including college name AND fee amount together (e.g. \"guru nanak college rs 30000/-per year\"). Do NOT drop any part.\n"
+            f"- For 4.7 (college fee): scan the ENTIRE blank space below the label for continuation lines (e.g. \"paid(49000)\" below \"1,00,000 per year college name\"). Combine continuation lines with \", \" into one complete value.\n"
+            f"- For 2.3 (photograph): also capture any free text written after the checkbox area as \"2.3 Is Father/Mother photograph kept at home? — Notes\".\n"
             f"- If truly empty → value=\"\"\n\n"
             f"Output ONLY valid JSON:\n"
             f"{{\"fields\": [{{\"label\": \"exact label from above\", \"value\": \"extracted text\"}}, ...]}}"

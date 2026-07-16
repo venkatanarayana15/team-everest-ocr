@@ -1,18 +1,12 @@
 import asyncio
 import base64
+import functools
 import json
 import logging
 import os
 import time
 import random
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
-
-import httpx
-
-
-if TYPE_CHECKING:
-    from src.datalab_schema import DatalabJob
 
 
 
@@ -29,8 +23,8 @@ class RateLimiter:
     """Sliding-window rate limiter with both sync and async wait."""
 
     def __init__(self, rpm: int | None = None, max_concurrency: int | None = None):
-        self.rpm = rpm or int(os.environ.get("LLM_RATE_LIMIT_RPM", "30"))
-        self.max_concurrency = max_concurrency or int(os.environ.get("LLM_MAX_CONCURRENCY", "6"))
+        self.rpm = rpm or int(os.environ.get("LLM_RATE_LIMIT_RPM", "15"))
+        self.max_concurrency = max_concurrency or int(os.environ.get("LLM_MAX_CONCURRENCY", "2"))
         self._timestamps: list[float] = []
         self._semaphore = asyncio.Semaphore(self.max_concurrency)
 
@@ -88,7 +82,7 @@ def call_with_retry(fn, max_retries: int | None = None, rl: RateLimiter | None =
                 raise
             if attempt == max_retries - 1:
                 raise
-            wait = (2**attempt) + random.uniform(0, 1)
+            wait = (2**attempt) + random.uniform(0, 5)
             logger.warning(
                 "Transient error (%s) attempt %d/%d. Waiting %.1fs...",
                 type(e).__name__,
@@ -101,26 +95,22 @@ def call_with_retry(fn, max_retries: int | None = None, rl: RateLimiter | None =
 
 
 async def call_with_retry_async(fn, max_retries: int | None = None, rl: RateLimiter | None = None):
-    async with _global_llm_semaphore:
-        if rl:
-            async with rl._semaphore:
-                await rl.wait_async()
-                return await _call_with_retry_async_inner(fn, max_retries)
-        else:
-            return await _call_with_retry_async_inner(fn, max_retries)
-
-
-async def _call_with_retry_async_inner(fn, max_retries: int | None = None):
     max_retries = max_retries if max_retries is not None else int(os.environ.get("LLM_MAX_RETRIES", "5"))
     for attempt in range(max_retries):
         try:
-            return await fn()
+            async with _global_llm_semaphore:
+                if rl:
+                    async with rl._semaphore:
+                        await rl.wait_async()
+                        return await fn()
+                else:
+                    return await fn()
         except Exception as e:
             if not _is_transient(e):
                 raise
             if attempt == max_retries - 1:
                 raise
-            wait = (2**attempt) + random.uniform(0, 1)
+            wait = (2**attempt) + random.uniform(0, 5)
             logger.warning(
                 "Transient error (%s) attempt %d/%d. Waiting %.1fs...",
                 type(e).__name__,
@@ -156,6 +146,7 @@ def _strip_json_fence(text: str) -> str:
     return text
 
 
+@functools.lru_cache(maxsize=32)
 def _encode_image(path: str, max_dim: int = 2048) -> str:
     import cv2
     img = cv2.imread(path)
@@ -172,17 +163,6 @@ def _encode_image(path: str, max_dim: int = 2048) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 
-def _extract_usage(response) -> TokenUsage:
-    usage = {}
-    if hasattr(response, 'usage') and response.usage:
-        usage = {
-            "prompt_tokens": getattr(response.usage, 'prompt_tokens', 0) or 0,
-            "completion_tokens": getattr(response.usage, 'completion_tokens', 0) or 0,
-            "total_tokens": getattr(response.usage, 'total_tokens', 0) or 0,
-        }
-    return usage
-
-
 class ModelClient(ABC):
     @property
     def needs_images(self) -> bool:
@@ -191,207 +171,6 @@ class ModelClient(ABC):
     @abstractmethod
     async def extract_structured(self, pdf_path: str, page_images: dict[int, str], prompt: str) -> tuple[dict | None, TokenUsage]:
         ...
-
-    async def submit(self, pdf_data: bytes) -> "DatalabJob | None":
-        """Optional: submit PDF async and return a job reference immediately.
-        Override in clients that support split submit/collect (e.g. DatalabOcrClient).
-        Returns None by default (synchronous fallback)."""
-        return None
-
-    async def collect(self, job: "DatalabJob") -> dict | None:
-        """Optional: poll a submitted job until complete.
-        Override in clients that support split submit/collect.
-        Returns None by default."""
-        return None
-
-
-# ── Unified OpenAI-Compatible Provider ──────────────────────────
-
-class OpenAICompatibleClient(ModelClient):
-    def __init__(self, api_key: str, model: str, base_url: str, provider: str = ""):
-        from openai import AsyncOpenAI
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        self.model_name = model
-        self.provider = provider.lower().strip()
-        self._rl = RateLimiter()
-
-    def _use_response_format(self) -> bool:
-        if self.provider == "deepseek":
-            return self.model_name == "deepseek-chat"
-        if "qwen" in self.model_name.lower() and "vl" in self.model_name.lower():
-            return False
-        return True
-
-    def _extra_headers(self) -> dict | None:
-        if self.provider == "openrouter":
-            return {
-                "HTTP-Referer": "https://github.com/anomalyco/opencode",
-                "X-Title": "OCR Extraction Pipeline",
-            }
-        return None
-
-    def _is_ollama(self) -> bool:
-        try:
-            url = str(self._client.base_url).lower()
-        except Exception:
-            return False
-        return "11434" in url or "ollama" in url
-
-    def _build_content(self, prompt: str, page_images: dict[int, str], max_dim: int | None = None) -> list[dict] | str:
-        vision_keywords = ("vision", "neva", "vlm", "paligemma", "molmo", "vl", "gpt-4o", "gpt-4-turbo", "claude-3")
-        is_vision = self.provider in ("openai", "gemini") or any(x in self.model_name.lower() for x in vision_keywords)
-        if not is_vision:
-            return prompt
-        detail = os.environ.get("OPENAI_IMAGE_DETAIL", "high").strip().lower()
-        if detail not in ("low", "high", "auto"):
-            detail = "high"
-        if max_dim is None:
-            env_max = os.environ.get("OPENAI_IMAGE_MAX_DIM")
-            if env_max:
-                max_dim = int(env_max)
-            else:
-                max_dim = 768 if detail == "low" else 2048
-        content: list[dict] = [{"type": "text", "text": prompt}]
-        for page_num in sorted(page_images):
-            b64 = _encode_image(page_images[page_num], max_dim=max_dim)
-            content.append({"type": "text", "text": f"\n[Page {page_num}:]"})
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": detail},
-            })
-        return content
-
-    async def _call_stream(self, content: list[dict] | str) -> str:
-        extra_body = {}
-        if self.provider == "nvidia" and "nemotron" in self.model_name.lower():
-            extra_body = {
-                "chat_template_kwargs": {"enable_thinking": True},
-                "reasoning_budget": 16384
-            }
-
-        response_stream = await self._client.chat.completions.create(
-            model=self.model_name,
-            messages=[{"role": "user", "content": content}],
-            temperature=1,
-            top_p=0.95,
-            max_tokens=16384,
-            extra_body=extra_body,
-            stream=True
-        )
-
-        full_content = []
-        async for chunk in response_stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            reasoning = getattr(delta, "reasoning_content", None)
-            if reasoning:
-                print(reasoning, end="", flush=True)
-            if getattr(delta, "content", None) is not None:
-                content_text = delta.content
-                print(content_text, end="", flush=True)
-                full_content.append(content_text)
-        print()
-        return "".join(full_content)
-
-    async def extract_structured(self, pdf_path: str, page_images: dict[int, str], prompt: str) -> tuple[dict | None, TokenUsage]:
-        content = self._build_content(prompt, page_images)
-
-        if self.provider == "nvidia" and "nemotron" in self.model_name.lower():
-            logger.info("Calling NVIDIA NIM API (%s) stream...", self.model_name)
-            loop = asyncio.get_running_loop()
-            text = await loop.run_in_executor(
-                None,
-                lambda: call_with_retry(lambda: asyncio.run(self._call_stream(content)), rl=self._rl),
-            )
-            text = _strip_json_fence(text)
-            try:
-                data = json.loads(text)
-                logger.info("Extracted %d fields", len(data.get("fields", [])))
-                return data, {}
-            except json.JSONDecodeError as e:
-                logger.error("Failed to parse NVIDIA response: %s", e)
-                logger.debug("Raw: %s", text[:500])
-                return None, {}
-
-        kwargs = {
-            "model": self.model_name,
-            "messages": [{"role": "user", "content": content}],
-        }
-        if self._use_response_format():
-            kwargs["response_format"] = {"type": "json_object"}
-        headers = self._extra_headers()
-        if headers:
-            kwargs["extra_headers"] = headers
-
-        response = await call_with_retry_async(
-            lambda: self._client.chat.completions.create(**kwargs),
-            rl=self._rl,
-        )
-        usage = _extract_usage(response)
-        text = _strip_json_fence(response.choices[0].message.content or "")
-        try:
-            data = json.loads(text)
-            logger.info("Extracted %d fields (tokens: %s)", len(data.get("fields", [])), usage)
-            return data, usage
-        except json.JSONDecodeError as e:
-            logger.warning("Failed to parse response, retrying once: %s", e)
-            logger.debug("Raw: %s", text[:500])
-            retry_kwargs = {
-                "model": self.model_name,
-                "messages": [
-                    {"role": "user", "content": content},
-                    {"role": "assistant", "content": text},
-                    {"role": "user", "content": "The JSON above is invalid. Fix it — output ONLY valid JSON with no extra text."},
-                ],
-            }
-            if self._use_response_format():
-                retry_kwargs["response_format"] = {"type": "json_object"}
-            headers = self._extra_headers()
-            if headers:
-                retry_kwargs["extra_headers"] = headers
-            retry_text = ""
-            try:
-                retry_response = await call_with_retry_async(
-                    lambda: self._client.chat.completions.create(**retry_kwargs),
-                    rl=self._rl,
-                )
-                retry_text = _strip_json_fence(retry_response.choices[0].message.content or "")
-                data = json.loads(retry_text)
-                usage2 = _extract_usage(retry_response)
-                merged_usage = {
-                    "prompt_tokens": (usage or {}).get("prompt_tokens", 0) + (usage2 or {}).get("prompt_tokens", 0),
-                    "completion_tokens": (usage or {}).get("completion_tokens", 0) + (usage2 or {}).get("completion_tokens", 0),
-                    "total_tokens": (usage or {}).get("total_tokens", 0) + (usage2 or {}).get("total_tokens", 0),
-                    "calls": max((usage or {}).get("calls", 1), 1) + 1,
-                }
-                logger.info("Retry OK — extracted %d fields", len(data.get("fields", [])))
-                return data, merged_usage
-            except json.JSONDecodeError as e2:
-                logger.error("Retry also failed to parse response: %s", e2)
-                logger.debug("Raw retry: %s", retry_text[:500])
-                return None, usage
-
-    async def extract_raw_text(self, pdf_path: str, page_images: dict[int, str], prompt: str) -> str:
-        max_dim = int(os.environ.get("OCR_IMAGE_MAX_DIM", "1400"))
-        content = self._build_content(prompt, page_images, max_dim=max_dim)
-        kwargs = {
-            "model": self.model_name,
-            "messages": [{"role": "user", "content": content}],
-            "temperature": float(os.environ.get("OCR_TEMPERATURE", "0")),
-            "max_tokens": int(os.environ.get("OCR_MAX_TOKENS", "2048")),
-        }
-        if self._is_ollama():
-            kwargs["extra_body"] = {"keep_alive": os.environ.get("OLLAMA_KEEP_ALIVE", "15m")}
-        headers = self._extra_headers()
-        if headers:
-            kwargs["extra_headers"] = headers
-
-        response = await call_with_retry_async(
-            lambda: self._client.chat.completions.create(**kwargs),
-            rl=self._rl,
-        )
-        return response.choices[0].message.content or ""
 
 
 # ── Gemini (google.genai) ──────────────────────────────────────────
@@ -415,10 +194,17 @@ class GeminiClient(ModelClient):
         usage = {}
         metadata = getattr(response, "usage_metadata", None)
         if metadata is not None:
+            prompt_tokens = getattr(metadata, "prompt_token_count", 0) or 0
+            completion_tokens = getattr(metadata, "response_token_count", 0) or 0
+            total_tokens = getattr(metadata, "total_token_count", 0) or 0
+            if completion_tokens == 0 and total_tokens == 0 and prompt_tokens > 0:
+                text = getattr(response, "text", "") or ""
+                completion_tokens = max(len(text.split()) * 4 // 3, 1)
+                total_tokens = prompt_tokens + completion_tokens
             usage = {
-                "prompt_tokens": getattr(metadata, "prompt_token_count", 0) or 0,
-                "completion_tokens": getattr(metadata, "response_token_count", 0) or 0,
-                "total_tokens": getattr(metadata, "total_token_count", 0) or 0,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
             }
         return usage
 
@@ -486,46 +272,20 @@ class GeminiClient(ModelClient):
 
 # ── Factory ───────────────────────────────────────────────────────
 
-_BASE_URLS: dict[str, str] = {
-    "openai": "https://api.openai.com/v1",
-    "deepseek": "https://api.deepseek.com/v1",
-    "openrouter": "https://openrouter.ai/api/v1",
-    "nvidia": "https://integrate.api.nvidia.com/v1",
-    "datalab": "https://www.datalab.to/api/v1",
-}
-
-
 def get_model_client(role: str = "primary") -> ModelClient:
     _load_dotenv()
 
     prefix = role.upper()
-    provider_key = f"{prefix}_PROVIDER"
     model_key = f"{prefix}_MODEL"
     api_key_key = f"{prefix}_API_KEY"
     base_url_key = f"{prefix}_BASE_URL"
 
-    provider = os.environ.get(provider_key, "gemini").lower().strip()
-    _default_models = {"gemini": "gemini-2.5-flash"}
-    model = os.environ.get(model_key, _default_models.get(provider, "gpt-4o-mini"))
-    api_key = os.environ.get(api_key_key)
+    model = os.environ.get(model_key, "gemini-2.5-flash")
+    api_key = os.environ.get(api_key_key) or os.environ.get("GEMINI_API_KEY")
+    base_url = os.environ.get(base_url_key)
 
     if not api_key:
-        legacy_key = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
-        api_key = os.environ.get(legacy_key)
-        if not api_key:
-            raise ValueError(
-                f"{api_key_key} (or {legacy_key}) not set in .env"
-            )
+        raise ValueError(f"{api_key_key} (or GEMINI_API_KEY) not set in .env")
 
-    base_url = os.environ.get(base_url_key) or _BASE_URLS.get(provider)
-
-    if provider == "datalab":
-        from src.datalab_client import DatalabOcrClient
-        return DatalabOcrClient(api_key=api_key, model=model, base_url=base_url)
-
-    if provider == "gemini":
-        logger.info("[%s] Using Gemini: %s  base_url=%s", role, model, base_url)
-        return GeminiClient(api_key=api_key, model=model, base_url=base_url)
-
-    logger.debug("[%s] Using OpenAI-Compatible Client (%s): %s", role, provider, model)
-    return OpenAICompatibleClient(api_key=api_key, model=model, base_url=base_url, provider=provider)
+    logger.info("[%s] Using Gemini: %s  base_url=%s", role, model, base_url)
+    return GeminiClient(api_key=api_key, model=model, base_url=base_url)

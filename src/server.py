@@ -15,7 +15,6 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-import httpx
 
 from src.extraction_pipeline import ExtractionPipeline, StructuredField, Config
 from src.page_classifier import PageClassifier
@@ -135,7 +134,7 @@ def scan_folder(folder_path: str | Path) -> list[dict]:
                 })
     return items
 from src.pipeline_runner import (
-    run_pipeline, run_batch_pdfs_pipeline, run_batch_pdfs_pipeline_async,
+    run_pipeline, run_batch_pdfs_pipeline,
     run_image_pipeline_from_zip,
     _validate_pdf, _validate_images,
 )
@@ -221,21 +220,8 @@ def _validate_env() -> None:
     """Validate critical environment variables at startup.
     Logs warnings for missing or misconfigured vars — does not crash.
     """
-    provider = os.environ.get("PRIMARY_PROVIDER", "").lower().strip()
-    api_key = os.environ.get("PRIMARY_API_KEY", "")
-
-    if not provider:
-        logger.warning("PRIMARY_PROVIDER not set — extraction will fail at runtime")
-    elif provider == "datalab" and not api_key:
-        logger.warning("PRIMARY_API_KEY not set — %s extraction will fail at runtime", provider)
-
-    if provider == "datalab":
-        base_url = os.environ.get("PRIMARY_BASE_URL", "")
-        if not base_url:
-            logger.warning("PRIMARY_BASE_URL not set — Datalab client will use default")
-        model = os.environ.get("PRIMARY_MODEL", "")
-        if not model:
-            logger.warning("PRIMARY_MODEL not set — Datalab client will use default")
+    if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("PRIMARY_API_KEY"):
+        logger.warning("GEMINI_API_KEY not set — extraction will fail at runtime")
 
     if not os.environ.get("DATABASE_URL"):
         logger.warning("DATABASE_URL not set — DB features (save-to-db, webhook) disabled")
@@ -284,93 +270,14 @@ async def _reconcile_stuck_jobs_on_startup() -> None:
         return
     try:
         stuck = await get_incomplete_jobs()
-        if not stuck:
-            logger.info("Startup reconciliation: no incomplete jobs found")
-            return
-
-        logger.info("Startup reconciliation: found %d incomplete jobs — attempting recovery", len(stuck))
-        from src.datalab_client import DatalabOcrClient
-
-        recovered = 0
-        failed = 0
-
-        for job in stuck:
-            job_id = job["job_id"]
-            check_url = job.get("datalab_check_url", "")
-            request_id = job.get("datalab_request_id", "")
-
-            if not check_url or not request_id:
-                # No Datalab tracking info — can't recover
+        if stuck:
+            logger.info("Startup reconciliation: found %d incomplete jobs — marking as failed", len(stuck))
+            for job in stuck:
                 await update_job_status(
-                    job_id=job_id,
+                    job_id=job["job_id"],
                     status="failed",
-                    error_detail="Server restarted while job was in progress (no Datalab tracking info)",
+                    error_detail="Server restarted while job was in progress",
                 )
-                failed += 1
-                continue
-
-            # Attempt to check Datalab status once
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    api_key = os.environ.get("PRIMARY_API_KEY", "")
-                    headers = {"X-API-Key": api_key}
-                    resp = await client.get(check_url, headers=headers)
-                    resp.raise_for_status()
-                    body = resp.json()
-                    status = body.get("status", "processing")
-
-                    if status == "complete" and body.get("success"):
-                        # Job completed while server was down — process results
-                        from src.datalab_schema import convert_extract_response
-                        extraction_data = body.get("extraction_schema_json", body)
-                        if isinstance(extraction_data, str):
-                            extraction_data = json.loads(extraction_data)
-
-                        # ── CV verification on RAW extraction data (before convert_extract_response) ──
-                        pdf_path = job.get("file_path", "")
-                        if pdf_path and Path(pdf_path).exists():
-                            from src.checkbox_vision import verify_all, load_page_images
-                            try:
-                                page_images = load_page_images(pdf_path)
-                                extraction_data = verify_all(page_images, extraction_data)
-                            except Exception as e:
-                                logger.warning("CV checkbox verification failed during reconciliation for job=%s: %s — continuing without CV", job_id, e)
-                        else:
-                            logger.info("CV verify: no PDF for job=%s at path=%r — skipping", job_id, pdf_path)
-
-                        data = convert_extract_response(extraction_data)
-
-                        await upsert_ocr_document(
-                            job_id=job_id,
-                            file_name=job.get("file_name", ""),
-                            status="done",
-                            result_json=data,
-                        )
-                        await update_job_status(
-                            job_id=job_id,
-                            status="completed",
-                        )
-                        recovered += 1
-                        logger.info("Reconciliation: recovered job=%s (completed while down)", job_id)
-                    else:
-                        # Still processing or failed — mark as failed
-                        reason = body.get("error", "Server restarted while job was in progress")
-                        await update_job_status(
-                            job_id=job_id,
-                            status="failed",
-                            error_detail=reason,
-                        )
-                        failed += 1
-            except Exception as e:
-                logger.warning("Reconciliation: Datalab check failed for job=%s: %s", job_id, e)
-                await update_job_status(
-                    job_id=job_id,
-                    status="failed",
-                    error_detail=f"Server restart — Datalab check failed: {e}",
-                )
-                failed += 1
-
-        logger.info("Startup reconciliation: %d recovered, %d failed", recovered, failed)
     except Exception as e:
         logger.exception("Startup reconciliation failed: %s", e)
 
@@ -565,7 +472,8 @@ async def stream_batch(job_ids: str):
 async def stream_new_jobs():
     async def event_gen():
         # Send snapshot of existing jobs first
-        yield f"data: {json.dumps({'snapshot': _list_jobs()})}\n\n"
+        jobs_snapshot = await asyncio.to_thread(_list_jobs)
+        yield f"data: {json.dumps({'snapshot': jobs_snapshot})}\n\n"
 
         q: asyncio.Queue = asyncio.Queue(maxsize=100)
         _new_job_queues.append(q)
@@ -613,20 +521,15 @@ async def _run_pipeline_task(job_dir: Path, pdf_path: str) -> None:
 
 
 async def _run_batch_task(job_dir: Path, pdfs_info: list[dict]) -> None:
-    primary_provider = os.environ.get("PRIMARY_PROVIDER", "").lower().strip()
-    if primary_provider == "datalab":
-        # Async submit+collect: no semaphore needed, all PDFs submitted instantly
-        await run_batch_pdfs_pipeline_async(job_dir, pdfs_info)
-    else:
-        try:
-            await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
-        except asyncio.TimeoutError:
-            logger.error("Job %s waited too long for semaphore", job_dir.name)
-            _set_status(job_dir, "error", "Job timed out waiting in queue")
-            return
-        try:
-            await run_batch_pdfs_pipeline(job_dir, pdfs_info)
-        finally:
+    try:
+        await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
+    except asyncio.TimeoutError:
+        logger.error("Job %s waited too long for semaphore", job_dir.name)
+        _set_status(job_dir, "error", "Job timed out waiting in queue")
+        return
+    try:
+        await run_batch_pdfs_pipeline(job_dir, pdfs_info)
+    finally:
             _job_semaphore.release()
 
 
@@ -678,16 +581,24 @@ async def upload(file: UploadFile = File(...)):
                 existing = await get_result_by_file_hash(file_hash)
                 if existing:
                     existing_job_id = existing.get("job_id")
+                    cached_result = None
+                    result_path = BASE_DIR / existing_job_id / "results" / "result.json"
+                    if result_path.exists():
+                        try:
+                            cached_result = json.loads(result_path.read_text())
+                        except Exception:
+                            pass
                     logger.info(
                         "Dedup hit for hash=%s — returning existing job_id=%s",
                         file_hash[:12], existing_job_id,
                     )
                     return {
                         "job_id": existing_job_id,
-                        "status": "duplicate",
+                        "status": "cached" if cached_result else "duplicate",
                         "input_type": "pdf",
                         "dedup": True,
-                        "message": "This file has already been processed",
+                        "result": cached_result,
+                        "message": "Cached result returned" if cached_result else "This file has already been processed",
                     }
             except Exception as e:
                 logger.warning("Dedup check failed for hash=%s: %s — proceeding", file_hash[:12], e)
@@ -996,18 +907,6 @@ async def get_result(job_id: str):
     return {"status": "done", "result": result}
 
 
-@app.get("/tesseract-data/{job_id}")
-async def get_tesseract_data(job_id: str):
-    job_dir = BASE_DIR / job_id
-    if not job_dir.exists():
-        raise HTTPException(404, "Job not found")
-    path = job_dir / "tesseract_data.json"
-    if not path.exists():
-        raise HTTPException(404, "Tesseract data not available yet")
-    with open(path) as f:
-        return json.load(f)
-
-
 @app.get("/pages/{job_id}/{page_num}")
 async def get_page_image(job_id: str, page_num: int, width: int = 0, original: int = 0, pdf_name: str | None = None):
     job_dir = BASE_DIR / job_id
@@ -1222,8 +1121,7 @@ async def update_raw_text(job_id: str, body: dict):
     return {"status": "saved"}
 
 
-@app.get("/metrics")
-async def get_metrics():
+def _compute_metrics() -> dict:
     all_corrections: list[dict] = []
     for d in BASE_DIR.iterdir():
         if not d.is_dir():
@@ -1247,7 +1145,6 @@ async def get_metrics():
     if not all_corrections:
         return {"total_corrections": 0, "message": "No human corrections recorded yet"}
 
-    from collections import Counter
     field_corrections: dict[str, list[dict]] = {}
     for c in all_corrections:
         field_corrections.setdefault(c["label"], []).append(c)
@@ -1266,6 +1163,11 @@ async def get_metrics():
         "total_corrections": len(all_corrections),
         "per_field": per_field,
     }
+
+
+@app.get("/metrics")
+async def get_metrics():
+    return await asyncio.to_thread(_compute_metrics)
 
 
 def _extract_epoch_from_job_id(job_id: str) -> float:
@@ -1331,7 +1233,7 @@ def _list_jobs():
 
 @app.get("/jobs")
 async def list_jobs():
-    return _list_jobs()
+    return await asyncio.to_thread(_list_jobs)
 
 
 @app.delete("/jobs/{job_id}")
@@ -1358,8 +1260,7 @@ async def delete_job(job_id: str):
     raise HTTPException(status_code=404, detail="Job not found")
 
 
-@app.get("/pdfs")
-async def list_uploaded_pdfs():
+def _list_uploaded_pdfs() -> list[dict]:
     pdfs = []
     for d in sorted(BASE_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
         if not d.is_dir():
@@ -1404,6 +1305,11 @@ async def list_uploaded_pdfs():
         pdfs.append(entry)
 
     return pdfs
+
+
+@app.get("/pdfs")
+async def list_uploaded_pdfs():
+    return await asyncio.to_thread(_list_uploaded_pdfs)
 
 
 DOWNLOAD_FORMATS = {
@@ -1461,13 +1367,7 @@ WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 
 @app.post("/api/webhooks/extraction-completed")
 async def webhook_extraction_completed(payload: dict):
-    """Webhook endpoint called by Datalab when extraction completes.
-
-    Datalab webhook payload: { request_id, request_check_url, webhook_secret }
-    This is just a notification — no extraction data in the body.
-    We signal the waiting pipeline worker, which fetches the result via
-    a single rate-limited GET to request_check_url.
-    """
+    """Webhook endpoint called when extraction completes."""
     auth = payload.get("auth_token", "")
     if WEBHOOK_SECRET and auth != WEBHOOK_SECRET:
         raise HTTPException(401, "Invalid auth token")
@@ -1477,10 +1377,6 @@ async def webhook_extraction_completed(payload: dict):
         raise HTTPException(400, "Missing request_id")
 
     logger.info("Webhook received: request_id=%s", request_id)
-
-    # Wake up the waiting pipeline worker — it fetches the result itself
-    from src.datalab_client import signal_webhook
-    signal_webhook(request_id)
 
     return {"status": "acknowledged"}
 
@@ -1513,7 +1409,7 @@ async def download_result(job_id: str, format: str = "json"):
         data = json.load(f)
 
     if format == "md":
-        content = _render_markdown(data, job_id)
+        content = await asyncio.to_thread(_render_markdown, data, job_id)
         media_type = "text/markdown; charset=utf-8"
     else:
         content = _render_text(data, job_id)

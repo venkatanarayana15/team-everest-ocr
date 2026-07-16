@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 POOL_MIN_SIZE = int(os.getenv("DATABASE_POOL_MIN_SIZE", "2"))
-POOL_MAX_SIZE = int(os.getenv("DATABASE_POOL_MAX_SIZE", "10"))
+POOL_MAX_SIZE = int(os.getenv("DATABASE_POOL_MAX_SIZE", "20"))
 POOL_CONNECT_TIMEOUT = float(os.getenv("DATABASE_CONNECT_TIMEOUT", "10"))
 
 _pool: Optional[asyncpg.Pool] = None
@@ -70,6 +70,7 @@ JSONB_ARRAY_COLUMNS: set[str] = {
     "type_of_ceiling",
     "assets_at_home",
     "government_id_verified",
+    "income_type",
 }
 
 TABLE_PARENT_COLUMNS: dict[str, str] = {
@@ -95,6 +96,11 @@ YESNO_PAIR_COLUMNS: set[str] = {
     "owns_other_assets",
 }
 
+# Columns to skip in DB save when value is empty string (not None, not "No" — only "").
+SKIP_IF_EMPTY_COLUMNS: set[str] = {
+    "photograph_kept_at_home",
+}
+
 # Table parent columns keyed by section number — handles both the datalab
 # "parent — Row {n} — column" format and the LLM flat "{parent} - {column}" format.
 _TABLE_BY_NUMBER: dict[str, str] = {
@@ -110,7 +116,7 @@ _NOISE_PAREN_RE = re.compile(r"\s*\(tick all that apply\)", re.IGNORECASE)
 _SEG_SEP_RE = re.compile(r"\s*—\s*|\s*–\s*|\s*--\s*|\s+-\s+")
 _ROW_RE = re.compile(r"^(.*?)\s*(?:—|–|--|-)\s*Row\s+(\d+)\s*(?:—|–|--|-)\s*(.*)$", re.IGNORECASE)
 _STRIKE_CHARS_RE = re.compile(r"[─━═]")
-_STRIKE_LINE_RE = re.compile(r"^[\s─━═\-_~xX]{4,}$")
+_STRIKE_LINE_RE = re.compile(r"^[\s─━═\-_~xX/\\]{4,}$")
 
 _NEG_VALUES = {
     "", "no", "false", "0", "n", "\u2717", "\u2014", "\u2013", "-", "n/a", "nil", "none",
@@ -177,17 +183,39 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
     """
     out: dict[str, Any] = {}
     array_checked: dict[str, list[str]] = {c: [] for c in JSONB_ARRAY_COLUMNS}
-    array_specify_texts: dict[str, str] = {}
+    array_specify_texts: dict[str, dict[str, str]] = {}
     single_checked: dict[str, list[str]] = {}
     yesno_val: dict[str, str] = {}
     table_rows: dict[str, dict[int, dict[str, str]]] = {}
 
     def _add_cell(col: str, row: int, colname: str, value: Any) -> None:
         colname = (colname or "").strip()
-        if colname:
-            if _is_strikethrough(value):
+        if not colname:
+            return
+        # Defensive: if colname contains |, the LLM combined multiple columns.
+        # Split both colname and value by | and add each column separately.
+        if "|" in colname:
+            colnames = [c.strip() for c in colname.split("|") if c.strip()]
+            str_val = str(value or "")
+            values = [v.strip() for v in str_val.split("|")]
+            for i, cn in enumerate(colnames):
+                if i < len(values) and values[i]:
+                    v = values[i]
+                else:
+                    v = ""
+                if _is_strikethrough(v):
+                    v = ""
+                table_rows.setdefault(col, {}).setdefault(row, {})[cn] = v
+            return
+        if isinstance(value, str):
+            v = value.strip()
+            if re.match(r"^[/\\]+$", v):
                 value = ""
-            table_rows.setdefault(col, {}).setdefault(row, {})[colname] = value
+            elif re.search(r"[/\\]$", v):
+                value = ""
+        if _is_strikethrough(value):
+            value = ""
+        table_rows.setdefault(col, {}).setdefault(row, {})[colname] = value
 
     def _set_scalar(col: str, value: Any) -> None:
         if col not in out or (
@@ -232,7 +260,8 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
             if acol is not None:
                 if leaf.lower().endswith("(specify)"):
                     if isinstance(value, str) and value.strip():
-                        array_specify_texts[acol] = value.strip()
+                        base_opt = leaf[: -len("(specify)")].strip()
+                        array_specify_texts.setdefault(acol, {})[base_opt] = value.strip()
                     continue
                 _append_array(acol, leaf, value)
                 continue
@@ -266,13 +295,31 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
                     continue
                 array_checked[acol].append(item)
 
-    for col, text in array_specify_texts.items():
-        if text and text.strip().lower() not in _NEG_VALUES:
+    # Merge scalar notes: "{parent} — Notes" → append to parent's scalar value
+    for f in fields:
+        label = (f.get("label") or "").strip()
+        segs = [s for s in _SEG_SEP_RE.split(label) if s.strip()]
+        if len(segs) == 2 and segs[-1].strip().lower() == "notes":
+            parent_col = _NORM_SCALAR.get(_norm(segs[0]))
+            if parent_col:
+                note_val = (f.get("value") or "").strip()
+                if note_val and note_val.lower() not in _NEG_VALUES:
+                    existing = out.get(parent_col)
+                    if existing and str(existing).strip():
+                        out[parent_col] = f"{existing}: {note_val}"
+                    else:
+                        out[parent_col] = note_val
+
+    for col, opt_texts in array_specify_texts.items():
+        for base_opt, text in opt_texts.items():
+            if not text or text.strip().lower() in _NEG_VALUES:
+                continue
             checked = array_checked.get(col, [])
-            for bare in ("Other", "Others", "Others:"):
+            # Remove the bare option and append "Option: text"
+            for bare in (base_opt, base_opt.rstrip(":"), base_opt + ":"):
                 if bare in checked:
                     checked.remove(bare)
-            array_checked[col].append(f"Other: {text}")
+            array_checked[col].append(f"{base_opt.rstrip(':')}: {text}")
 
     # Dedup: if both bare "Others"/"Others:" and a qualified "Others: ..."
     # (e.g. "Others: old TV") exist for the same column, keep only the latter.
@@ -410,6 +457,8 @@ async def upsert_ocr_document(
             structured = _extract_structured_fields(raw_fields)
             for col, val in structured.items():
                 if val is not None:
+                    if col in SKIP_IF_EMPTY_COLUMNS and isinstance(val, str) and not val.strip():
+                        continue
                     data[col] = val
             logger.debug(
                 "upsert_ocr_document: mapped %d structured columns from %d fields",

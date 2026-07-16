@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from rapidfuzz import fuzz
 from src.server import detect_input_type, detect_item_type, is_image, is_pdf, is_zip, extract_zip, scan_folder, IMAGE_EXTENSIONS
 from src.page_classifier import PageClassifier, PageClassification
-from src.datalab_schema import resolve_checkbox_marks, _validate_field_patterns, _resolve_single_checkbox_marks
 from src.database import _extract_structured_fields
 from src.extraction_pipeline import ExtractionPipeline, StructuredField
 
@@ -346,9 +345,9 @@ def test_extract_structured_fields_llm_format():
     print("PASS: test_extract_structured_fields_llm_format")
 
 
-def test_extract_structured_fields_datalab_format():
-    """Datalab label format (em-dash separators, '— Row {n} —' tables, scalar
-    group values) must continue to map correctly."""
+def test_extract_structured_fields_em_dash_format():
+    """Em-dash label format ('— Row {n} —' tables, scalar group values)
+    must continue to map correctly."""
     fields = [
         {"label": "3.5 Bathroom", "value": "Common for Apartment"},
         {"label": "3.1 House Ownership", "value": "Rented"},
@@ -365,7 +364,7 @@ def test_extract_structured_fields_datalab_format():
     assert json.loads(out["family_members"])[0] == {"Age": "45", "Name": "Ravi"}
     assert json.loads(out["other_assets_details"])[0]["Property Description"] == "Land"
     assert json.loads(out["government_id_verified"]) == ["Aadhaar Card"]
-    print("PASS: test_extract_structured_fields_datalab_format")
+    print("PASS: test_extract_structured_fields_em_dash_format")
 
 
 def test_extract_structured_fields_dash_separators():
@@ -726,87 +725,67 @@ def test_fill_missing_template_fields_row3_row4():
     # No 4.3 blank_text helpers remain (blank_text_below_2_1 still valid on page 1)
     no_blank_43 = all("blank_text_below_4" not in (f.label or "") for f in out)
     assert no_blank_43, [f.label for f in out if "blank_text_below_4" in (f.label or "")]
-
     print("PASS: test_fill_missing_template_fields_row3_row4")
 
 
-def test_resolve_checkbox_marks():
-    extracted = {
-        "kitchen_type_separate_mark": "✗",
-        "kitchen_type_hall_mark": "✓",
-        "house_ownership_rented_mark": "/",
-        "house_ownership_own_mark": "✗",
-    }
-    resolved, ambiguous = resolve_checkbox_marks(extracted)
-    assert resolved.get("kitchen_type") == "Hall with Kitchen"
-    assert resolved.get("house_ownership") == "Rented"
-    assert len(ambiguous) == 0
+def test_split_table_rows_4_6_1():
+    """_split_table_rows must split semicolon-separated 4.6.1 table data into Row 1/Row 2."""
+    fields = [
+        StructuredField(label="4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Sr.No.", value="1; 2", page=4, section_number=4),
+        StructuredField(label="4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Loan Purpose", value="Education; gold loan", page=4, section_number=4),
+        StructuredField(label="4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Loan Amount Taken", value="100000; 210000", page=4, section_number=4),
+        StructuredField(label="4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Pending Loan Amount", value="80000; 200000", page=4, section_number=4),
+    ]
+    out = ExtractionPipeline._split_table_rows(fields)
 
-    # Ambiguous test
-    ambiguous_extracted = {
-        "kitchen_type_separate_mark": "✓",
-        "kitchen_type_hall_mark": "/",
-    }
-    resolved_ambig, ambiguous_fields = resolve_checkbox_marks(ambiguous_extracted)
-    assert "kitchen_type" in ambiguous_fields
-    print("PASS: test_resolve_checkbox_marks")
+    row1_srno = [f for f in out if (f.label or "").endswith("— Row 1 — Sr.No.")]
+    assert len(row1_srno) == 1, f"Expected 1 Row 1 Sr.No., got {len(row1_srno)}"
+    assert row1_srno[0].value == "1"
 
-def test_validate_field_patterns():
-    extracted = {
-        "volunteer_name": "APP-2024-1234",
-        "application_id": "John Doe",
-    }
-    validated = _validate_field_patterns(extracted)
-    assert validated.get("volunteer_name") == "John Doe"
-    assert validated.get("application_id") == "APP-2024-1234"
-    print("PASS: test_validate_field_patterns")
+    row2_srno = [f for f in out if (f.label or "").endswith("— Row 2 — Sr.No.")]
+    assert len(row2_srno) == 1, f"Expected 1 Row 2 Sr.No., got {len(row2_srno)}"
+    assert row2_srno[0].value == "2"
+
+    row1_purpose = [f for f in out if (f.label or "").endswith("— Row 1 — Loan Purpose")]
+    assert len(row1_purpose) == 1, f"Expected 1 Row 1 Loan Purpose, got {len(row1_purpose)}"
+    assert row1_purpose[0].value == "Education"
+
+    row2_purpose = [f for f in out if (f.label or "").endswith("— Row 2 — Loan Purpose")]
+    assert len(row2_purpose) == 1, f"Expected 1 Row 2 Loan Purpose, got {len(row2_purpose)}"
+    assert row2_purpose[0].value == "gold loan"
+
+    row1_amount = [f for f in out if (f.label or "").endswith("— Row 1 — Loan Amount Taken")]
+    assert len(row1_amount) == 1, f"Expected 1 Row 1 Loan Amount Taken, got {len(row1_amount)}"
+    assert row1_amount[0].value == "100000"
+
+    row2_amount = [f for f in out if (f.label or "").endswith("— Row 2 — Loan Amount Taken")]
+    assert len(row2_amount) == 1, f"Expected 1 Row 2 Loan Amount Taken, got {len(row2_amount)}"
+    assert row2_amount[0].value == "210000"
+
+    total_4_6_1 = [f for f in out if (f.label or "").startswith("4.6.1")]
+    assert len(total_4_6_1) == 8, f"Expected 8 fields (4 cols × 2 rows), got {len(total_4_6_1)}"
+
+    print("PASS: test_split_table_rows_4_6_1")
 
 
-def test_resolve_single_checkbox_marks():
-    # Tick → "✓"
-    tick_input = {"asset_washing_machine": "tick"}
-    _resolve_single_checkbox_marks(tick_input)
-    assert tick_input["asset_washing_machine"] == "✓"
-
-    # Slash → "✓"
-    slash_input = {"govt_id_aadhaar": "slash"}
-    _resolve_single_checkbox_marks(slash_input)
-    assert slash_input["govt_id_aadhaar"] == "✓"
-
-    # Cross → None
-    cross_input = {"ceiling_roof": "cross"}
-    _resolve_single_checkbox_marks(cross_input)
-    assert cross_input["ceiling_roof"] is None
-
-    # Empty → None
-    empty_input = {"home_type_individual": "empty"}
-    _resolve_single_checkbox_marks(empty_input)
-    assert empty_input["home_type_individual"] is None
-
-    # None → unchanged (not in extracted dict)
-    none_input = {}
-    _resolve_single_checkbox_marks(none_input)
-    assert len(none_input) == 0
-
-    # Unknown → unchanged
-    unknown_input = {"asset_fridge": "unclear_mark"}
-    _resolve_single_checkbox_marks(unknown_input)
-    assert unknown_input["asset_fridge"] == "unclear_mark"
-
-    # Not in _SINGLE_CHECKBOX_KEYS → unchanged
-    other_input = {"volunteer_name": "tick"}
-    _resolve_single_checkbox_marks(other_input)
-    assert other_input["volunteer_name"] == "tick"
-
-    print("PASS: test_resolve_single_checkbox_marks")
+def test_clean_numeric_preserves_semicolon():
+    """_clean_numeric_fields must skip values containing '; ' separator."""
+    fields = [
+        StructuredField(label="4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Sr.No.", value="1; 2", page=4, section_number=4),
+        StructuredField(label="4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Loan Amount Taken", value="100000; 210000", page=4, section_number=4),
+        StructuredField(label="4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Pending Loan Amount", value="80000; 200000", page=4, section_number=4),
+    ]
+    out = ExtractionPipeline._clean_numeric_fields(fields)
+    srno = [f for f in out if (f.label or "").endswith("- Sr.No.")][0]
+    assert srno.value == "1; 2", f"Expected '1; 2' preserved, got {srno.value!r}"
+    amount = [f for f in out if (f.label or "").endswith("- Loan Amount Taken")][0]
+    assert amount.value == "100000; 210000", f"Expected '100000; 210000', got {amount.value!r}"
+    pending = [f for f in out if (f.label or "").endswith("- Pending Loan Amount")][0]
+    assert pending.value == "80000; 200000"
+    print("PASS: test_clean_numeric_preserves_semicolon")
 
 
 if __name__ == "__main__":
-    # Schema tests
-    test_resolve_checkbox_marks()
-    test_validate_field_patterns()
-    test_resolve_single_checkbox_marks()
-    
     # Existing bbox tests
     test_group_words_into_lines()
     test_find_field_bboxes_label_match()
@@ -817,7 +796,7 @@ if __name__ == "__main__":
     test_find_value_bbox_fallback_to_label()
     test_structured_field_json_roundtrip()
     test_extract_structured_fields_llm_format()
-    test_extract_structured_fields_datalab_format()
+    test_extract_structured_fields_em_dash_format()
     # New input handler tests
     test_is_image()
     test_is_pdf()
@@ -848,4 +827,6 @@ if __name__ == "__main__":
     test_resolve_order_missing_page()
     test_docstring_inference()
     test_fill_missing_template_fields_row3_row4()
+    test_split_table_rows_4_6_1()
+    test_clean_numeric_preserves_semicolon()
     print("\n=== All tests passed! ===")

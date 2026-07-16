@@ -12,14 +12,11 @@ import numpy as np
 
 from src.extraction_pipeline import ExtractionPipeline, KNOWN_TEMPLATE_FIELDS, StructuredField, Config
 from src.model_client import get_model_client
-from src.datalab_schema import DatalabJob
 from src.page_classifier import PageClassifier
 from src.status import (
     _set_status, _save_checkpoint, _load_checkpoint, _cleanup_intermediate,
-    _get_status, _progress_store, _render_markdown, _format_job_datetime,
+    _get_status, _progress_store, _progress_lock, _render_markdown, _format_job_datetime,
 )
-
-from src.tesseract import _save_tesseract_data, run_tesseract_async
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +26,21 @@ _RENDER_SEMAPHORE = asyncio.Semaphore(
 )
 
 _COMBINE_PAGES = os.environ.get("COMBINE_PAGES", "false").lower() in ("1", "true", "yes")
+_BATCH_PRINT_REPORT = os.environ.get("BATCH_PRINT_REPORT", "false").lower() in ("1", "true", "yes")
+
+
+def _cleanup_pdf_job_dir(pdf_job_dir: Path) -> None:
+    pages_dir = pdf_job_dir / "pages"
+    if pages_dir.exists():
+        for p in pages_dir.glob("*.png"):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        try:
+            pages_dir.rmdir()
+        except OSError:
+            pass
 
 
 def _validate_pdf(path: str) -> tuple[bool, str]:
@@ -86,24 +98,25 @@ async def _set_batch_pdf_status(job_dir: Path, pdf_name: str, status: str, pct: 
         json.dump(data, f, indent=2)
     tmp.replace(path)
 
-    existing_progress = _progress_store.get(job_dir.name, {})
-    start_time = existing_progress.get("start_time")
-    if not start_time:
-        start_time = time.time()
-    elapsed = round(time.time() - start_time, 1)
+    async with _progress_lock:
+        existing_progress = _progress_store.get(job_dir.name, {})
+        start_time = existing_progress.get("start_time")
+        if not start_time:
+            start_time = time.time()
+        elapsed = round(time.time() - start_time, 1)
 
-    pdfs_map = existing_progress.get("pdfs", {})
-    pdfs_map[pdf_name] = {"progress": pct, "stage": status, "elapsed": elapsed}
+        pdfs_map = dict(existing_progress.get("pdfs", {}))
+        pdfs_map[pdf_name] = {"progress": pct, "stage": status, "elapsed": elapsed}
 
-    total_pct = sum(item["progress"] for item in pdfs_map.values())
-    overall_pct = round(total_pct / len(pdfs_map)) if pdfs_map else 0
+        total_pct = sum(item["progress"] for item in pdfs_map.values())
+        overall_pct = round(total_pct / len(pdfs_map)) if pdfs_map else 0
 
-    _progress_store[job_dir.name] = {
-        "overall": overall_pct,
-        "pdfs": pdfs_map,
-        "start_time": start_time,
-        "elapsed": elapsed,
-    }
+        _progress_store[job_dir.name] = {
+            "overall": overall_pct,
+            "pdfs": pdfs_map,
+            "start_time": start_time,
+            "elapsed": elapsed,
+        }
 
 
 async def _wait_for_memory(job_dir: Path, min_free_mem_mb: int = 512, timeout: int = 3600) -> bool:
@@ -210,7 +223,6 @@ async def _run_core_extraction(
     status_func,
     use_cache: bool = False,
     checkpoint=None,
-    tesseract_enabled: bool = True,
 ) -> dict:
     coverage = None
     confidence = None
@@ -218,29 +230,14 @@ async def _run_core_extraction(
 
     if checkpoint:
         step, fields, overall_confidence, raw_text, sections_data = checkpoint
-        word_boxes = []
         primary_token_usage = {}
     else:
         await status_func("primary_extraction", f"Running primary extraction ({primary_name})...")
-
-        loop = asyncio.get_running_loop()
-
-        if tesseract_enabled:
-            tesseract_task = asyncio.create_task(
-                run_tesseract_async(loop, pipeline, processed_images, job_dir, use_cache)
-            )
 
         if _COMBINE_PAGES:
             llm_task = asyncio.create_task(pipeline.run_combined_extraction(pdf_path, processed_images))
         else:
             llm_task = asyncio.create_task(pipeline.run_primary_extraction(pdf_path, processed_images))
-
-        if tesseract_enabled:
-            word_boxes = await tesseract_task
-            if not word_boxes:
-                logger.warning("Tesseract returned no word boxes — LLM extraction may produce degraded results")
-        else:
-            word_boxes = []
 
         model_data, primary_token_usage = await llm_task
 
@@ -249,9 +246,6 @@ async def _run_core_extraction(
             logger.warning("Combined extraction returned no data — falling back to per-page extraction")
             llm_task = asyncio.create_task(pipeline.run_primary_extraction(pdf_path, processed_images))
             model_data, primary_token_usage = await llm_task
-
-        if tesseract_enabled:
-            _save_tesseract_data(job_dir, word_boxes)
 
         if model_data:
             overall_confidence = model_data.get("overall_confidence", 0)
@@ -263,22 +257,14 @@ async def _run_core_extraction(
             if bad_fields:
                 logger.warning("Ignoring %d non-dict fields from LLM response", len(bad_fields))
             raw_text = _insert_page_markers(raw_text, raw_fields)
-            fields = pipeline.merge_fields(model_data, word_boxes, prefix=primary_name)
+            fields = pipeline.merge_fields(model_data, prefix=primary_name)
             await status_func("field_mapping", f"Merged {len(fields)} fields.")
         else:
             primary_extraction_failed = True
-            if word_boxes:
-                await status_func("field_mapping", "Primary extraction failed — using Tesseract words.")
-                fields = [
-                    StructuredField(label=wb.text, value=wb.text, confidence=int(wb.confidence),
-                                    page=wb.page_num, bbox=wb.bbox, extracted_by=primary_name)
-                    for wb in word_boxes
-                ]
-            else:
-                await status_func("field_mapping", "Primary extraction failed — no fallback data available.")
-                fields = []
-                overall_confidence = 0
-                raw_text = ""
+            await status_func("field_mapping", "Primary extraction failed — no fallback data available.")
+            fields = []
+            overall_confidence = 0
+            raw_text = ""
 
         sections_data = (model_data or {}).get("sections") or []
         derived = _derive_sections(fields, raw_text)
@@ -330,6 +316,8 @@ async def _run_core_extraction(
     if _provider == "gemini":
         await status_func("gemini_post_process", "Applying Gemini-specific post-processing...")
         fields = ExtractionPipeline._gemini_post_process(fields)
+
+    fields = ExtractionPipeline._normalize_boolean_fields(fields)
 
     sections_data = _derive_sections(fields, raw_text or "")
 
@@ -460,15 +448,14 @@ async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
             status_func=status_func,
             use_cache=True,
             checkpoint=checkpoint,
-            tesseract_enabled=config.tesseract_enabled,
         )
         res["processing_time"] = round(time.time() - t0, 2)
         res["input_type"] = "pdf"
         res["pdf_names"] = [pdf_name]
 
         await _set_status(job_dir, "saving_results", "Saving results...")
-        _save_results(job_dir, res, job_dir.name)
-        _print_field_report(job_dir, res)
+        await asyncio.to_thread(_save_results, job_dir, res, job_dir.name)
+        await asyncio.to_thread(_print_field_report, job_dir, res)
         await _set_status(job_dir, "done", "Extraction complete. Results ready for download.")
         _db_ok = await _save_to_db(job_dir)
         if not _db_ok:
@@ -515,7 +502,6 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                     break
 
                 pdf_name = Path(pdf_info["path"]).name
-                # Use a unique sub-directory for each PDF so they don't overwrite each other's images/tesseract data
                 pdf_job_dir = job_dir / str(idx)
                 pdf_job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -579,7 +565,6 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                         primary_name=primary_name,
                         status_func=batch_status_func,
                         use_cache=False,
-                        tesseract_enabled=config.tesseract_enabled,
                     )
                     res["pdf_name"] = pdf_name
                     res["input_type"] = "batch_" + input_type
@@ -591,7 +576,8 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                         from src.zoho_integration import run_zoho_writeback_for_batch_item
                         await run_zoho_writeback_for_batch_item(job_dir, Path(pdf_info["path"]), pdf_info["zoho_req"], res, input_info)
 
-                    _print_field_report(pdf_job_dir, res, pdf_name)
+                    if _BATCH_PRINT_REPORT:
+                        await asyncio.to_thread(_print_field_report, pdf_job_dir, res, pdf_name)
 
                     all_results.append(res)
                     await _set_batch_pdf_status(job_dir, pdf_name, "done", 100, f"Done ({idx+1}/{len(pdfs_info)})")
@@ -603,8 +589,10 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
 
                 queue.task_done()
 
+                _cleanup_pdf_job_dir(pdf_job_dir)
+
         # Run up to N PDFs concurrently (configurable, default 5)
-        max_batch_conc = int(os.environ.get("BATCH_MAX_CONCURRENCY", "50"))
+        max_batch_conc = int(os.environ.get("BATCH_MAX_CONCURRENCY", "2"))
         num_workers = min(max_batch_conc, len(pdfs_info))
         workers = [asyncio.create_task(batch_worker()) for _ in range(num_workers)]
         await asyncio.gather(*workers)
@@ -666,201 +654,6 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         _cleanup_intermediate(job_dir)
 
 
-async def run_batch_pdfs_pipeline_async(job_dir: Path, pdfs_info: list[dict]) -> None:
-    """Async submit+collect batch pipeline with overlapped per-file workers.
-
-    Design:
-    - Every PDF gets its own worker that handles submit → collect sequentially.
-    - All workers fire concurrently so submit of file N overlaps with collect of file N-1.
-    - Memory: each worker reads its PDF, submits, then frees the bytes immediately.
-      Peak memory = max(PDF size) × max(concurrent submits via client semaphore).
-    - DB tracking, SSE updates, and error isolation per file preserved.
-    """
-    t0 = time.time()
-    try:
-        config = Config()
-        primary = get_model_client("primary")
-
-        from src.model_client import ModelClient
-        if primary.__class__.submit is ModelClient.submit or primary.__class__.collect is ModelClient.collect:
-            logger.info("Primary client does not support async submit/collect — falling back to sync batch")
-            await run_batch_pdfs_pipeline(job_dir, pdfs_info)
-            return
-
-        await _set_status(job_dir, "submitted", f"Submitting {len(pdfs_info)} PDFs to Datalab...")
-
-        db_available = False
-        try:
-            from src.database import create_job, update_job_status, upsert_ocr_document
-            db_available = True
-        except ImportError:
-            pass
-
-        total = len(pdfs_info)
-
-        async def file_worker(idx: int, pdf_info: dict) -> dict:
-            """One PDF: save original → submit → free → collect → save to DB."""
-            t_file = time.time()
-            pdf_path = pdf_info.get("path", "")
-            pdf_name = pdf_info.get("name", Path(pdf_path).name if pdf_path else f"file_{idx}")
-
-            # Save original PDF for lazy page rendering in UI
-            pdf_job_dir = job_dir / str(idx)
-            pdf_job_dir.mkdir(parents=True, exist_ok=True)
-            original_pdf_path = pdf_job_dir / "original.pdf"
-            if pdf_path and Path(pdf_path).exists() and not original_pdf_path.exists():
-                try:
-                    shutil.copy2(pdf_path, str(original_pdf_path))
-                except Exception as e:
-                    logger.warning("Failed to save original PDF for %s: %s", pdf_name, e)
-
-            # Read PDF
-            pdf_data = None
-            if pdf_path and Path(pdf_path).exists():
-                with open(pdf_path, "rb") as f:
-                    pdf_data = f.read()
-
-            if pdf_data is None:
-                logger.warning("Cannot read PDF for %s — skipping", pdf_name)
-                await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, "Cannot read PDF")
-                return {"name": pdf_name, "error": "Cannot read PDF"}
-
-            # Submit
-            job = await primary.submit(pdf_data)
-            pdf_data = None  # free memory immediately
-
-            sub_job_id = f"{job_dir.name}_{idx}"
-
-            if job and db_available:
-                await create_job(
-                    job_id=sub_job_id,
-                    file_name=pdf_name,
-                    file_path=pdf_path,
-                )
-                await update_job_status(
-                    job_id=sub_job_id,
-                    status="collecting",
-                    datalab_request_id=job.request_id,
-                    datalab_check_url=job.check_url,
-                )
-
-            await _set_batch_pdf_status(job_dir, pdf_name, "submitted", 10,
-                                         f"Submitted ({idx+1}/{total})")
-
-            if job is None:
-                return {"name": pdf_name, "error": "Failed to submit to Datalab"}
-
-            # Collect (starts immediately, overlaps with sibling submits/collects)
-            try:
-                await _set_batch_pdf_status(job_dir, pdf_name, "collecting", 50,
-                                             f"Collecting ({idx+1}/{total})")
-
-                result = await primary.collect(job)
-                if not result:
-                    return {"name": pdf_name, "error": "Empty result from Datalab"}
-
-                # ── CV verification on RAW extraction data (before convert_extract_response) ──
-                # Must run here because verify_marks needs mark-description keys like gender_male_mark,
-                # and verify_asset_list needs assets_at_home_list — both are consumed by convert_extract_response.
-                from src.checkbox_vision import verify_all, load_page_images
-                try:
-                    cv_pdf_path = pdf_path
-                    if not cv_pdf_path or not Path(cv_pdf_path).exists():
-                        cv_pdf_path = str(original_pdf_path)
-                    if cv_pdf_path and Path(cv_pdf_path).exists():
-                        logger.info("CV verify: loading pages from %s for %s", cv_pdf_path, pdf_name)
-                        page_images = load_page_images(cv_pdf_path)
-                        raw_data = result.get("extraction_schema_json", result)
-                        if isinstance(raw_data, str):
-                            raw_data = json.loads(raw_data)
-                        if isinstance(raw_data, dict):
-                            raw_data = verify_all(page_images, raw_data)
-                            result["extraction_schema_json"] = raw_data
-                    else:
-                        logger.warning("CV verify: no PDF available for %s (tried path=%r original=%r) — skipping CV", pdf_name, pdf_path, str(original_pdf_path))
-                except Exception as e:
-                    logger.warning("CV checkbox verification failed for %s: %s — continuing without CV", pdf_name, e)
-
-                from src.datalab_schema import convert_extract_response
-                data = convert_extract_response(result)
-
-                data["pdf_name"] = pdf_name
-                data["input_type"] = "batch_pdf"
-
-                _print_field_report(pdf_job_dir, data, pdf_name)
-
-                processing_time = round(time.time() - t_file, 2)
-                confidence_score = data.get("overall_confidence")
-
-                if db_available:
-                    await upsert_ocr_document(
-                        job_id=sub_job_id,
-                        file_name=pdf_name,
-                        status="done",
-                        result_json=data,
-                        processing_time=processing_time,
-                        confidence_score=confidence_score,
-                    )
-                    await update_job_status(
-                        job_id=sub_job_id,
-                        status="completed",
-                    )
-
-                await _set_batch_pdf_status(job_dir, pdf_name, "done", 100,
-                                             f"Done ({idx+1}/{total})")
-                return data
-
-            except Exception as e:
-                logger.exception("Collect failed for pdf=%s: %s", pdf_name, e)
-                if db_available:
-                    await update_job_status(
-                        job_id=sub_job_id,
-                        status="failed",
-                        error_detail=str(e),
-                    )
-                await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, str(e))
-                return {"name": pdf_name, "error": str(e)}
-
-        # Fire one worker per PDF — submission pipelining with collection happens naturally
-        tasks = [asyncio.create_task(file_worker(idx, pdf_info)) for idx, pdf_info in enumerate(pdfs_info)]
-        all_results = await asyncio.gather(*tasks)
-
-        # Save combined results
-        await _set_status(job_dir, "saving_results", "Saving batch results...")
-        combined = {
-            "batch": True,
-            "num_pdfs": total,
-            "pdfs": all_results,
-            "pdf_names": [r.get("pdf_name") or r.get("name", f"file_{i}") for i, r in enumerate(all_results)],
-            "processing_time": round(time.time() - t0, 2),
-        }
-        results_dir = job_dir / "results"
-        results_dir.mkdir(exist_ok=True)
-        with open(results_dir / "result.json", "w") as f:
-            json.dump(combined, f, indent=2)
-
-        success = sum(1 for r in all_results if 'error' not in r)
-        failed = total - success
-        logger.info("ASYNC BATCH REPORT: %d files", total)
-        for r in all_results:
-            name = r.get("pdf_name", r.get("name", "?"))
-            if "error" in r:
-                logger.warning("  ✗ %s — FAILED: %s", name, r['error'])
-            else:
-                fields = r.get("fields", [])
-                cov = r.get("coverage", "?")
-                conf = r.get("confidence", "?")
-                logger.info("  ✓ %s — %d fields, coverage=%s%% confidence=%s%%", name, len(fields), cov, conf)
-        logger.info("FILES: %d total  |  SUCCESS: %d  |  FAILED: %d  |  Time: %ss",
-                     total, success, failed, combined.get('processing_time', '?'))
-        await _set_status(job_dir, "done", f"Batch complete: {success}/{total} succeeded.")
-    except Exception as e:
-        logger.exception("Async batch pipeline failed")
-        await _set_status(job_dir, "error", f"Async batch pipeline failed: {e}")
-    finally:
-        _cleanup_intermediate(job_dir)
-
-
 async def run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None:
     try:
         t0 = time.time()
@@ -885,7 +678,6 @@ async def run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None
             primary_name=type(primary).__name__.replace("Client", ""),
             status_func=status_func,
             use_cache=False,
-            tesseract_enabled=config.tesseract_enabled,
         )
         res["processing_time"] = round(time.time() - t0, 2)
         res["input_type"] = "image_set"
@@ -894,8 +686,8 @@ async def run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None
         res["pdf_names"] = [image_name]
 
         await _set_status(job_dir, "saving_results", "Saving results...")
-        _save_results(job_dir, res, job_dir.name)
-        _print_field_report(job_dir, res)
+        await asyncio.to_thread(_save_results, job_dir, res, job_dir.name)
+        await asyncio.to_thread(_print_field_report, job_dir, res)
         _db_ok = await _save_to_db(job_dir)
         if not _db_ok:
             logger.error("Image pipeline DB save failed | job=%s", job_dir.name)
@@ -1172,6 +964,9 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     p2 = pages[2]
     p2.append("2.3. Is Father/ Mother photograph kept at home?")
     p2.append(f"  {get_radio('2.3 Is Father/Mother photograph kept at home?', 'Yes')} Yes     {get_radio('2.3 Is Father/Mother photograph kept at home?', 'No')} No")
+    notes = get_val('2.3 Is Father/Mother photograph kept at home? — Notes')
+    if notes:
+        p2.append(f"  Notes: {notes}")
     p2.append("")
     p2.append("2.4. Government ID Verified")
     p2.append(f"  {get_check('2.4 Government ID Verified — Aadhaar Card')} Aadhaar Card    {get_check('2.4 Government ID Verified — Ration Card')} Ration Card    {get_check('2.4 Government ID Verified — Driving Licence')} Driving Licence    {get_check('2.4 Government ID Verified — Voter ID')} Voter ID    {get_check('2.4 Government ID Verified — Other')} Other")
@@ -1253,7 +1048,7 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     else:
         p4.append("No other sources of income recorded.")
     p4.append("")
-    p4.append(f"4.5. Income Type:   {get_radio('4.5 Income Type', 'Monthly')} Monthly     {get_radio('4.5 Income Type', 'Daily')} Daily     {get_radio('4.5 Income Type', 'Weekly')} Weekly     {get_radio('4.5 Income Type', 'Ad-Hoc')} Ad-Hoc")
+    p4.append(f"4.5. Income Type:   {get_check('4.5 Income Type — Monthly')} Monthly ({get_val('4.5 Income Type — Monthly (specify)')})     {get_check('4.5 Income Type — Daily')} Daily ({get_val('4.5 Income Type — Daily (specify)')})     {get_check('4.5 Income Type — Weekly')} Weekly ({get_val('4.5 Income Type — Weekly (specify)')})     {get_check('4.5 Income Type — Ad-Hoc')} Ad-Hoc ({get_val('4.5 Income Type — Ad-Hoc (specify)')})")
     p4.append("")
     p4.append("4.6. Do you have any loans?")
     p4.append(f"  {get_radio('4.6 Do you have any loans?', 'Yes')} Yes     {get_radio('4.6 Do you have any loans?', 'No')} No")

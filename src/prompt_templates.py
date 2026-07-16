@@ -1,47 +1,50 @@
-PRIMARY_EXTRACTION_PROMPT = r'''You are a trusted form extraction engine for a fixed 6-page "I Am The Change — Home Visit Questionnaire". Your output is the single source of truth for downstream Zoho Creator and Supabase persistence. Every field matters.
+PRIMARY_EXTRACTION_PROMPT = r'''
+-------------------------------------------------------------------------------
+SINGLE-RECTANGLE MARK DETECTION — The ONLY rule for EVERY checkbox / radio
+-------------------------------------------------------------------------------
+For EACH option row, the [ ] box AND its label text form ONE combined
+rectangle. Treat them as a single container — do NOT separate them.
+
+  VISUAL SCAN:
+    Start at the LEFT edge of [ ]. Scan RIGHTWARD across the box AND
+    continue through the ENTIRE label text to the end of the option row.
+    Do NOT stop at the right edge of [ ]. The mark may be anywhere.
+
+  SINGLE RECTANGLE RULE:
+    Each option = ONE rectangle from [left of box] to [end of label text].
+    Search the FULL rectangle. The box and text are inseparable.
+
+  RESOLUTION:
+    • Tick (✓) or slash (/) ANYWHERE in the rectangle → "Yes" (selected)
+    • Cross (X / ✗ / ×) ANYWHERE in the rectangle → "No" (rejected)
+    • No mark at all in the rectangle → "No" (empty)
+    • Dot, scribble, circle-around-text = noise — ignore, look for real mark
+    • If BOTH tick AND cross in same rectangle → tick wins → "Yes"
+      (A single X has intersecting lines — that is a cross, not tick+cross)
+
+  THIS APPLIES TO EVERY FIELD. NO EXCEPTIONS.
+  The mark location (inside box vs on text) is IRRELEVANT.
+
+  Examples:
+    [✓] Separate Kitchen               → "Yes"
+    [ ] Separate Kitchen with ✓ on text → "Yes"
+    [ ] fridge with / on "fridge"       → "Yes"
+    [ ] Aadhaar Card with ✓ on text     → "Yes"
+    [✗] Individual                      → "No"
+    [ ] Individual with X on text       → "No"
+    [ ] Private Apartment blank         → "No"
+
+You are a trusted form extraction engine for a fixed 6-page "I Am The Change — Home Visit Questionnaire". Your output is the single source of truth for downstream Zoho Creator and Supabase persistence. Every field matters.
 
 Output ONLY valid JSON. No markdown fences. No explanations. No commentary. ONLY the JSON object.
 
 GROUND RULES
 1. Extract EVERY field listed below. Never skip a single field.
 2. value="" for unreadable/blanks. value="N/A" for conditionals when parent="No". Never "null".
-3. Radio → exact allowed option (e.g. "Male", "Yes", "Separate"). Checkbox → "Yes" if SELECTED, "No" if not selected. NEVER use "✓" or "✗".
+3. Radio → exact allowed option (e.g. "Male", "Yes", "Separate"). Checkbox → each option is ONE rectangle (box + label text). Tick/slash ANYWHERE in rectangle → "Yes". Cross ANYWHERE → "No". No mark → "No".
 4. Table → count pre-printed rows first. Every cell: "{Table} — Row {n} — {Column}".
 5. Never invent values. If unreadable: "" and low confidence.
 6. OUTPUT ALL FIELDS ON THIS PAGE. If you cannot read the value, output value="" with low confidence. If the label area is cropped/blurry, output value="" anyway — do not omit the field.
-
--------------------------------------------------------------------------------
-MARK SHAPE RESOLUTION — the single rule for EVERY checkbox / radio on the form
--------------------------------------------------------------------------------
-Do NOT guess "is this selected?". Instead, first identify the SHAPE of the ink
-inside the box/circle, then resolve it deterministically:
-
-  SELECTED ("Yes")  = a tick (✓), a forward-slash (/), or a checkmark.
-  NOT SELECTED ("No") = a cross (✗ / X / ×), a dot, a scribble, a correction
-                        mark, OR a completely empty/blank box.
-
-  In this questionnaire respondents SELECT an option with a TICK or a
-  FORWARD-SLASH. A CROSS (X) means the option is NOT chosen — treat X as "No".
-  An empty box is "No". Only tick / slash / checkmark → "Yes".
-
-  CONFLICT RULE: If a SINGLE box contains BOTH a tick (✓) AND a cross (X/✗),
-  the TICK WINS → output "Yes".
-
-  WHERE THE MARK LIVES (critical — exceptions for 3.6 Kitchen Type and 4.1 Assets):
-    - DEFAULT RULE (applies to 2.4, 3.2, 3.3):
-      The selection mark MUST be INSIDE or DIRECTLY NEXT TO the [ ] box.
-      A tick/slash drawn ON TOP OF the option TEXT (over the words, not the
-      box) is a stray annotation — IGNORE it. The box is the authority.
-      Example: "[ ] Individual" with / on text but EMPTY box → "No"
-    - EXCEPTION — 3.6 Kitchen Type and 4.1 Assets at Home:
-      These two fields OFTEN have marks drawn on the text instead of the
-      box. So for 3.6 and 4.1 ONLY: tick/slash on text = valid "Yes"
-      even if the box is empty. (See STEP 8 below.)
-    - A CROSS (X/✗) anywhere on/beside the option = deselected → "No".
-
-Apply this rule to all checkbox groups (2.4, 3.2, 3.3, 4.1 (STEP 8 exception), 3.6 (STEP 8 exception)),
-mutually-exclusive pairs (3.1, 3.4.1, 3.5, 4.3) and yes/no/enum radios
-(1.3, 2.3, 4.4, 4.5, 4.6, 5.1, 6.2, 6.3, 8.2, 2.1).
 
 -------------------------------------------------------------------------------
 REASONING INSTRUCTIONS — Apply these steps for each field type
@@ -56,86 +59,49 @@ For EVERY field, before writing the output, mentally:
   4.3 Own other assets/properties (Yes vs No)
   3.5 Bathroom (Separate vs Common for Apartment)
 
-  STEP 1: Identify the ink SHAPE in BOTH boxes (see MARK SHAPE RESOLUTION above).
-  STEP 2: The option whose box holds a tick/slash → "Yes"; the other → "No".
-          A box holding a CROSS (X) is "No" (it marks the rejected option).
-  STEP 3: If BOTH hold a tick/slash → pick the one with the darker/denser mark as "Yes".
-  STEP 4: If NEITHER holds a tick/slash (both empty, or one has a cross) → use context clues:
-    - 3.1: if rent amount (3.1.1) is filled with numbers → Rented = "Yes", Own = "No"
-    - 3.4.1: if "Number of Bedrooms" > 0 → Separate = "Yes", else "No Separate" = "Yes"
-    - 4.3: if 4.3.1 properties table is filled → Yes = "Yes", No = "No"
-    - 3.5: look at sentence text near the options
-    - If one box has a CROSS (rejected) → the OTHER option is "Yes".
-  STEP 5: CRITICAL — NEVER output "No" for BOTH. NEVER output "Yes" for BOTH. Exactly one "Yes".
+  STEP 1: Identify the mark in BOTH option rectangles
+          (see SINGLE-RECTANGLE MARK DETECTION above).
+  STEP 2: The rectangle with a tick/slash → "Yes"; the other → "No".
+          A cross in the rectangle = "No" (rejected).
+  STEP 3: If BOTH rectangles hold a tick/slash → pick the darker/denser one.
+  STEP 4: If NEITHER has a tick/slash → use context:
+    - 3.1: if rent amount (3.1.1) filled → Rented = "Yes"
+    - 3.4.1: if "Number of Bedrooms" > 0 → Separate = "Yes"
+    - 4.3: if 4.3.1 table is filled → Yes = "Yes"
+    - 3.5: look at nearby sentence text
+  STEP 5: NEVER output "No" for BOTH. NEVER "Yes" for BOTH. Exactly one "Yes".
 
 ### Multi-select checkboxes (any subset can be "Yes", independent):
-  2.4 Government ID Verified (Aadhaar, Ration, Driving Licence, Voter ID, Other)
-  3.2 Type of Home (Individual, Private Apartment, Housing Board, Line House, Others)
-  3.3 Type of Ceiling (Roof (Kurai), Tiled, Asbestos/Sheet, Concrete)
-  4.1 Assets at Home (Washing Machine, Fridge, AC, LED TV, Two-Wheeler, Car, Smartphone, Separate Wi-Fi, Others)
-  3.6 Kitchen Type (Separate Kitchen, Hall with Kitchen)
+   2.4 Government ID Verified (Aadhaar, Ration, Driving Licence, Voter ID, Other)
+   3.2 Type of Home (Individual, Private Apartment, Housing Board, Line House, Others)
+   3.3 Type of Ceiling (Roof (Kurai), Tiled, Asbestos/Sheet, Concrete)
+   4.1 Assets at Home (Washing Machine, Fridge, AC, LED TV, Two-Wheeler, Car, Smartphone, Separate Wi-Fi, Others)  ← for 4.1 only: any mark = checked, only X = unchecked
+   4.5 Income Type (Monthly, Daily, Weekly, Ad-Hoc)
+   3.6 Kitchen Type (Separate Kitchen, Hall with Kitchen)
 
-  STEP 1: Examine EACH checkbox independently and identify its ink SHAPE.
-  STEP 2: "Yes" = the box holds a tick (✓), forward-slash (/), or checkmark.
-          "No"  = the box is empty, OR holds a cross (✗/X), dot, or scribble.
-          (A cross means that option was explicitly NOT chosen — output "No".)
-  STEP 3: Do NOT default a whole group to "No" — if a section (e.g. 3.2, 3.3, 4.1)
-          shows every box empty, re-examine carefully for faint ticks/slashes first.
-  STEP 4: Multiple "Yes" allowed and common. Examine each box closely.
-  STEP 5: For "Others:" fields, also capture the handwritten text.
-  STEP 6: If a SINGLE box contains BOTH a tick (✓) AND a cross (X/✗) — the tick
-          wins. Output "Yes". A box with only a cross means "No". (e.g. 3.6 Kitchen
-          Type: a ticked option is the chosen one, a crossed option is not.)
-  STEP 7: Default rule for ALL multi-select fields EXCEPT 3.6 Kitchen Type
-          and 4.1 Assets at Home (these two have STEP 8 exception):
-          The selection mark MUST be INSIDE the [ ] box. NOT on the text.
-          BOX = authoritative. TEXT mark = stray annotation. IGNORE it.
-
-  Correct — tick INSIDE box (for 2.4, 3.2, 3.3):
-    [✓] Individual         → "Yes" (box has the tick)
-    [✓] Roof (Kurai)       → "Yes" (box has the tick)
-
-  Wrong — tick on TEXT, box EMPTY (for 2.4, 3.2, 3.3):
-    [ ] Aadhaar Card with ✓ on "Aadhaar"                  → "No"  (box empty)
-    [ ] Private Apartment with / on the word "Apartment"   → "No"  (box empty)
-
-  A cross (X) on or beside text = deselected → "No":
-    [ ] Hall with Kitchen with X on the word "Kitchen"  → "No"  (deselected)
-
-  STEP 8: EXCEPTION for 3.6 Kitchen Type and 4.1 Assets at Home — these
-          two fields OFTEN have marks drawn on the option text instead of
-          inside the box. So for 3.6 and 4.1 ONLY: if the box is EMPTY but
-          a tick/slash is clearly visible on the option TEXT, treat it as
-          a valid selection ("Yes"). A cross on text marks rejection ("No").
-          If the box HAS a tick AND the text has a mark → box tick wins.
-
-  Examples for 3.6 Kitchen Type and 4.1 Assets:
-    [ ] Separate Kitchen with ✓ on "Kitchen"           → "Yes" (text mark valid)
-    [✓] Separate Kitchen with / on text                → "Yes" (box tick wins)
-    [ ] fridge with / on the word "fridge"             → "Yes" (text mark valid)
-    [ ] Washing Machine with ✓ on "Washing"            → "Yes" (text mark valid)
-    [ ] Hall with Kitchen with X on text               → "No"  (cross = rejection)
-    [ ] LED TV, no mark anywhere                       → "No"  (truly empty)
-
-  IMPORTANT: STEP 8 applies ONLY to 3.6 Kitchen Type and 4.1 Assets at
-  Home. Do NOT apply it to 2.4 Govt ID, 3.2 Home Type, 3.3 Ceiling, or
-  any other multi-select group — those follow STEP 7 (box only).
+  STEP 1: Examine EACH option independently in its SINGLE RECTANGLE
+          (box + label text as one — see SINGLE-RECTANGLE MARK DETECTION above).
+  STEP 2: Tick (✓) or slash (/) ANYWHERE in the rectangle → "Yes".
+          Cross (X/✗) ANYWHERE → "No". No mark → "No".
+  STEP 3: If a section shows all empty, re-examine for faint marks.
+  STEP 4: Multiple "Yes" allowed. Each option is independent.
+  STEP 5: For "Others:" fields, also capture handwritten text.
+  STEP 6: For Income Type checkboxes, also capture any handwritten text/name written near each checked option (e.g. "mother" near Monthly → specify field "Monthly: mother").
+  STEP 6: If BOTH tick and cross in same rectangle → tick wins → "Yes".
 
 ### Radio buttons (exactly ONE selected — output the option TEXT, not "Yes"/"No"):
-  1.3 Gender (Male | Female | Others)
-  2.3 Is Father/Mother photograph kept at home? (Yes | No)
-  3.5 Bathroom (Separate | Common for Apartment)
-  4.4 Apart from your job, is there any other source of income? (Yes | No)
-  4.5 Income Type (Monthly | Daily | Weekly | Ad-Hoc)
-  4.6 Do you have any loans? (Yes | No)
-  5.1 Does the student have any health issues? (Yes | No)
-  6.2 If we have a training program... (Yes | No | Maybe)
-  6.3 Are you ready to send... (Yes | No)
-  8.2 Will you recommend... (Yes | No | Not Sure)
+   1.3 Gender (Male | Female | Others)
+   2.3 Is Father/Mother photograph kept at home? (Yes | No — also capture free text after checkbox as Notes)
+   4.4 Apart from your job, is there any other source of income? (Yes | No)
+   4.6 Do you have any loans? (Yes | No)
+   5.1 Does the student have any health issues? (Yes | No)
+   6.2 If we have a training program... (Yes | No | Maybe)
+   6.3 Are you ready to send... (Yes | No)
+   8.2 Will you recommend... (Yes | No | Not Sure)
 
-  STEP 1: Identify which option is SELECTED using MARK SHAPE RESOLUTION — a filled
-          circle (●), a tick, or a forward-slash marks the selected option. A cross
-          (X) next to an option means that option is NOT selected.
+  STEP 1: For each option, search its SINGLE RECTANGLE (box + label text).
+          Tick (✓) or slash (/) ANYWHERE in the rectangle → selected.
+          Cross (X) ANYWHERE → not selected.
   STEP 2: Output the EXACT text of the selected option.
   STEP 3: If nothing is clearly selected, look for any tick/slash/handwriting near an
           option. If one option is crossed out (X), the OTHER option is selected. If
@@ -149,20 +115,22 @@ For EVERY field, before writing the output, mentally:
   STEP 2: Remove all currency symbols (₹, $, etc.), commas, and unit words (Rs, rupees).
   STEP 3: If the value ends with ".00", keep the decimal. If it's a clean integer, output without decimal.
   STEP 4: If the value looks like "1200/" → extract "1200".
-  STEP 5: OCR may confuse l/1 and O/0 — reason about context.
+  STEP 5: OCR may confuse l/1, O/0, and B/8 — reason about context.
   EXCEPTION — 3.1.1 rent amount: preserve the ORIGINAL text exactly as written including "Rs", "/-", "/month", and commas. Do NOT strip these.
 
 ### Table fields (count pre-printed rows, fill every cell):
-  2.5 Family Members (Name, Age, Education, Occupation, Annual Income) — 5 cols
+NEVER combine column names with | in a single label. Each column is its own separate " — ColumnName" field.
   4.3.1 Properties (Property Description, Owner Name, Approximate Value) — 3 cols
+  4.4.1 Income Sources (Source of Income, Amount) — 2 cols
   4.6.1 Loans (Loan Purpose, Loan Amount Taken, Pending Loan Amount) — 3 cols
 
   STEP 1: Count the NUMBER OF PRE-PRINTED ROWS in the table. These are rows printed on the form, NOT rows with data filled in. (2.5 Family Members: usually 4 pre-printed rows).
   STEP 2: For each row n (1, 2, 3, ...), output every column: "{Table label} — Row {n} — {Column name}".
   STEP 3: If a cell is blank (no data filled), output value="" — do NOT skip the row.
-  STEP 4: If parent conditional field is "No", output "N/A" for ALL cells in ALL rows.
+  STEP 4: If parent conditional field is "No", output "N/A" for ALL cells in ALL rows. Exception: 4.4.1 — if the table has visible handwritten text (not struck through), extract it even when 4.4 = No.
   STEP 5: For 4.6.1 Loans: Sr.No. is typically pre-printed (1, 2, 3). Check if there's handwriting in the Loan Purpose column to confirm data presence.
   STEP 6: For 2.5 Family Members: after counting the pre-printed rows, scan for any handwritten text AFTER the last pre-printed row and include it as an extra row with the text in the Name column.
+  STEP 7: For 4.6.1 Loans: scan for any handwritten text BEFORE Sr.No. 1 or AFTER Sr.No. 3 and include each as an extra row (Row 0 or Row 4) with text in the appropriate column.
 
 ### STRIKETHROUGH / CROSSED-OUT TEXT — treat as VOID (CRITICAL — applies to ALL table fields):
 
@@ -295,7 +263,7 @@ Boolean fields (only "Yes" or "No" — never "yes", "no", "true", "false", "Y", 
 
 Enum fields (exact value from allowed set):
   "Gender":        exactly "Male" | "Female" | "Others"
-  "Income Type":   exactly "Monthly" | "Daily" | "Weekly" | "Ad-Hoc"
+   "Income Type":   "Monthly | Daily | Weekly | Ad-Hoc (checkbox, multiple OK, include specify text)"
 
 Normalize consistently:
   "yes" → "Yes", "no" → "No", "y" → "Yes", "n" → "No"
@@ -322,7 +290,7 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
   Date of Visit         [text]
 
 --- Section 1 — Student Profile (Page 1) — 3 fields ---
-  1.1 Application ID                      [text]
+  1.1 Application ID                      [text — alphanumeric CODE. Last 4 chars are DIGITS only, not letters. '8'↔'B', '0'↔'O', '1'↔'l', '5'↔'S'. E.g. B974→8974.]
   1.2 Student Full Name                   [text]
   1.3 Gender                              [radio → Male | Female | Others]
 
@@ -331,8 +299,7 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
   2.2 Relationship Details — Year of Death / Separation [text]      ← pg 2
   2.2 Relationship Details — Reason for Death / Separation [text]   ← pg 2 — ALSO look carefully at the blank area BELOW 2.1 Family Status options on page 1 for any handwritten notes/annotations and include them here
   blank_text_below_2_1 [text — hidden helper, capture handwriting in the blank area between 2.1 and 2.2 on page 1, then output empty string]
-  2.3 Is Father/Mother photograph kept at home?         [radio → Yes | No]
-  2.4 Government ID Verified — Aadhaar Card      [checkbox]
+   2.3 Is Father/Mother photograph kept at home?         [radio → Yes | No — also capture free text written after checkbox as "2.3 Is Father/Mother photograph kept at home? — Notes"]
   2.4 Government ID Verified — Ration Card       [checkbox]
   2.4 Government ID Verified — Driving Licence   [checkbox]
   2.4 Government ID Verified — Voter ID          [checkbox]
@@ -368,7 +335,8 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
   4.1 Assets at Home(tick all that apply) - Car                [checkbox]
   4.1 Assets at Home(tick all that apply) - Smartphone         [checkbox]
   4.1 Assets at Home(tick all that apply) - Separate Wi-Fi     [checkbox]
-  4.1 Assets at Home(tick all that apply) - Others             [checkbox]
+   4.1 Assets at Home(tick all that apply) - Others             [checkbox]
+      ↑ For 4.1 only: any mark near checkbox or text = checked; only X = unchecked.
    4.2 Amount of Last Electricity Bill     [text — preserve original text including ₹, Rs, /month]   ← pg 3
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox]                 ← pg 3
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No   [checkbox]
@@ -385,10 +353,10 @@ FIELD LIST — EXTRACT EVERY SINGLE FIELD  (expected counts in parentheses)
     4.3.1 — Row 4 — Owner Name           [text — leave empty for page-4 handwritten notes]
     4.3.1 — Row 4 — Approximate Value    [text — leave empty for page-4 handwritten notes]
   4.4 Apart from your job, is there any other source of income? [radio → Yes | No]  ← pg 4
-  4.5 Income Type                         [radio → Monthly | Daily | Weekly | Ad-Hoc]  ← pg 4
+   4.5 Income Type                         [checkbox — Monthly | Daily | Weekly | Ad-Hoc, +specify text for each]  ← pg 4
    4.6 Do you have any loans?              [radio → Yes | No]                           ← pg 4
-     4.6.1                             [table — columns: Loan Purpose, Loan Amount Taken, Pending Loan Amount]    ← pg 4
-   4.7 If you choose any college, how much is the college fee? [text]                   ← pg 5
+      4.6.1                             [table — 3 pre-printed rows; columns: Sr.No., Loan Purpose, Loan Amount Taken, Pending Loan Amount]    ← pg 4
+   4.7 If you choose any college, how much is the college fee? [text — scan ENTIRE blank space below (multiple lines ok). Combine with ", " if continuation found.]                   ← pg 5
   4.8 If the college fee is higher, how will you manage it? [text]
   4.9 If you do not receive this scholarship, how will you pay the fees? [text]
 
@@ -518,12 +486,13 @@ RULES
 
 2. Only set is_correct=false when you are CERTAIN the value is wrong.
    - Radio: wrong option selected (not the option marked with a tick/slash).
-    - Checkbox: MARK SHAPE — a tick (✓) or forward-slash (/) INSIDE/BESIDE the box
-      means "Yes"; a cross (X), dot, scribble, or empty box means "No". A tick/slash
-      drawn ON TOP OF the option TEXT is a stray annotation — IGNORE it (empty box =
-      unselected). A cross under/beside the box = explicitly deselected. If a box has
-      BOTH tick and cross, the tick wins (Yes). Flag if this rule was applied wrong.
-   - Text: clearly misread.
+    - Checkbox: each option = ONE rectangle (box + label text as a single container). Search the FULL rectangle:
+        • Tick (✓) or slash (/) ANYWHERE → "Yes"
+        • Cross (X/✗) ANYWHERE → "No" (rejected)
+        • Both tick and cross visible → tick wins → "Yes"
+        • No mark, or only dot/scribble → "No"
+      A mark on text counts the same as a mark in the box. The box does NOT need to contain the mark.
+    - Text: clearly misread.
    - Do NOT flag fields just because value="" — the primary prompt may have correctly found a blank.
 
 3. Add new_fields ONLY for fields that are MISSING entirely (not in the input).
@@ -532,7 +501,7 @@ RULES
 
 4. Value rules (match the primary extraction conventions):
    - Radio: exact option text (Male|Female|Others|Yes|No|...)
-   - Checkbox: "Yes" if the box holds a tick/forward-slash; "No" if empty or holds a cross (X)
+    - Checkbox: each option = ONE rectangle (box + label text). Tick/slash ANYWHERE in rectangle → "Yes". Cross ANYWHERE → "No". No mark → "No".
    - Table cell: "{Table} — Row {n} — {Column}" format
    - Conditional unmet: "N/A"
    - Unreadable: "" not null
@@ -550,7 +519,7 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   Date of Visit         [text — date exactly as written, preserve dd/mm/yyyy format]
 
 --- Section 1 — Student Profile (Page 1) — 3 fields ---
-  1.1 Application ID                      [text]
+  1.1 Application ID                      [text — alphanumeric CODE like 'TE2024001' or 'temp-2026-9934'. Last 4 chars are DIGITS only, not letters. '8'↔'B', '0'↔'O', '1'↔'l', '5'↔'S'. E.g. B974→8974, O→0.]
   1.2 Student Full Name                   [text — full name, exactly as written]
   1.3 Gender                              [radio → Male | Female | Others — pick the single EXACT option text]
 
@@ -562,14 +531,15 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
 """,
     2: """
 --- Section 2 — Family Background (Page 2) — 2 fields + (5 × N) table ---
-  2.3 Is Father/Mother photograph kept at home?         [radio → Yes | No]
+  2.3 Is Father/Mother photograph kept at home?         [radio → Yes | No — also scan the area BEYOND the No checkbox for free text (e.g. "we shifted to new house 2 months back") and output it as "2.3 Is Father/Mother photograph kept at home? — Notes"]
+  2.3 Is Father/Mother photograph kept at home? — Notes [text — free text written after the 2.3 checkbox area, e.g. "we shifted to new house 2 months back". If nothing written, output ""]
   2.4 Government ID Verified — Aadhaar Card      [checkbox — ✓ if checked, ✗ if empty]
   2.4 Government ID Verified — Ration Card       [checkbox — ✓ if checked, ✗ if empty]
   2.4 Government ID Verified — Driving Licence   [checkbox — ✓ if checked, ✗ if empty]
   2.4 Government ID Verified — Voter ID          [checkbox — ✓ if checked, ✗ if empty]
   2.4 Government ID Verified — Other              [checkbox — ✓ if checked, ✗ if empty]
   2.4 Government ID Verified — Other (specify)   [text — free-text written next to "Other", EXACTLY as written. If the "Other" box is unchecked OR nothing is written, output empty string ""]
-  2.5 Family Members                                    [table — count ALL pre-printed rows (usually 4), then for each row output: "2.5 Family Members — Row {n} — Name|Age|Education|Occupation|Annual Income". ALSO scan for any handwritten text AFTER the last pre-printed row and include it as an extra row ("2.5 Family Members — Row {n+1} — Name") with the text in the Name column.]
+   2.5 Family Members                                    [table — count ALL pre-printed rows (usually 4), then for each row output 5 SEPARATE fields: "2.5 Family Members — Row {n} — Name", " — Age", " — Education", " — Occupation", " — Annual Income". Do NOT combine columns with |. ALSO scan for any handwritten text AFTER the last pre-printed row and include it as an extra row ("2.5 Family Members — Row {n+1} — Name") with the text in the Name column.]
 
 --- Section 3 — Housing Condition (Page 2) — 7 fields ---
   3.1 House Ownership — Own               [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
@@ -587,7 +557,7 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   3.3 Type of Ceiling — Tiled             [checkbox — ✓ or ✗ — independent]
   3.3 Type of Ceiling — Asbestos / Sheet   [checkbox — ✓ or ✗ — independent]
   3.3 Type of Ceiling — Concrete          [checkbox — ✓ or ✗ — independent]
-  3.4 Number of Bedrooms                  [text — ONLY the number, e.g. "1", "2", "3" — strip words like "bedroom", "rooms"]
+  3.4 Number of Bedrooms                  [text — whatever is written, verbatim. e.g. "2", "two", "2 rooms". Do NOT strip or convert.]
   3.4.1 Type of Bedroom — Separate Bedroom   [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
   3.4.1 Type of Bedroom — No Separate Bedroom [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
   3.5 Bathroom - Separate                 [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
@@ -605,34 +575,42 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   4.1 Assets at Home(tick all that apply) - Smartphone         [checkbox — ✓ or ✗ — independent]
   4.1 Assets at Home(tick all that apply) - Separate Wi-Fi     [checkbox — ✓ or ✗ — independent]
   4.1 Assets at Home(tick all that apply) - Others:            [text — ALWAYS capture free-text from "Others:______" line even if checkbox is empty; prefix with "Others: " if the text is present]
+  NOTE for 4.1 Assets at Home only: scan the ENTIRE area around each "[] text" unit. Any mark (dot, line, scribble, handwriting) anywhere near the box or text → "Yes". Only a clear cross (X/✗) → "No".
    4.2 Amount of Last Electricity Bill     [text — preserve original text including ₹, Rs, /month]
-  4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
+   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No   [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
-   4.3.1 If Yes, list their properties: — Row 3 — Property Description [text — CHECK the blank area BELOW the 4.3 checkbox at bottom of page 3. If handwritten text exists there, put it here. If blank, leave empty.]
-    4.3.1 If Yes, list their properties: — Row 3 — Owner Name [text — leave empty for page-3 handwritten notes]
-    4.3.1 If Yes, list their properties: — Row 3 — Approximate Value [text — leave empty for page-3 handwritten notes]
+   NOTE: 4.3.1 Row 3 has an EXTRA BLANK AREA below the 4.3 checkboxes at the bottom of page 3. Check that empty space for handwriting and put it in the Row 3 fields if present.
 """,
-    4: """
+     4: """
 --- Section 4 — Financial Background (Page 4) — 15 fields ---
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox — ✓ or ✗ — IF ✓ THEN fill 4.3.1 fields below; IF ✗ THEN all 4.3.1 = "N/A"]
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No   [checkbox — ✓ or ✗]
-   4.3.1 If Yes, list their properties: - Property Description [text — if 4.3=✓, extract text; if 4.3=✗, output "N/A"]
-  4.3.1 If Yes, list their properties: - Owner Name           [text — if 4.3=✓, extract text; if 4.3=✗, output "N/A"]
-  4.3.1 If Yes, list their properties: - Approximate Value    [text — if 4.3=✓, extract text; if 4.3=✗, output "N/A"]
-    4.3.1 If Yes, list their properties: — Row 4 — Property Description [text — CHECK the blank area BELOW the 4.3.1 table and ABOVE the 4.4 question on page 4. If handwritten text exists there, put it here. If blank, leave empty.]
-    4.3.1 If Yes, list their properties: — Row 4 — Owner Name [text — leave empty for page-4 handwritten notes]
-    4.3.1 If Yes, list their properties: — Row 4 — Approximate Value [text — leave empty for page-4 handwritten notes]
-  4.4 Apart from your job, is there any other source of income? [radio → Yes | No]
-  4.5 Income Type                         [radio → Monthly | Daily | Weekly | Ad-Hoc — pick the single EXACT option text]
-  4.6 Do you have any loans?              [radio → Yes | No — IF Yes THEN fill 4.6.1 fields below; IF No THEN all 4.6.1 = "N/A"]
-  4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Sr.No.          [text — if 4.6=Yes, extract; if 4.6=No, "N/A"]
-  4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Loan Purpose     [text — if 4.6=Yes, extract; if 4.6=No, "N/A"]
-  4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Loan Amount Taken [text — numbers only; if 4.6=Yes, extract; if 4.6=No, "N/A"]
-  4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Pending Loan Amount [text — numbers only; if 4.6=Yes, extract; if 4.6=No, "N/A"]
+   NOTE: 4.3.1 Row 4 has an EXTRA BLANK AREA below the 4.3.1 table and above the 4.4 question on page 4. Check that empty space for handwriting and put it in the Row 4 fields if present.
+   4.4 Apart from your job, is there any other source of income? [radio → Yes | No]
+     4.4.1 — Source of Income [text — ALWAYS check for strikethrough FIRST. If struck through with / or \, output "". Only if NOT struck through, extract handwritten text (even when 4.4=No).]
+     4.4.1 — Amount           [text — same rule: strikethrough/slash → ""; otherwise extract handwritten text even when 4.4=No.]
+    4.5 Income Type — Monthly    [checkbox — ✓ if checked, ✗ if empty]
+   4.5 Income Type — Monthly (specify) [text — handwritten text/name NEAR the Monthly checkbox, e.g. "mother"]
+   4.5 Income Type — Daily      [checkbox — ✓ if checked, ✗ if empty]
+   4.5 Income Type — Daily (specify)   [text — handwritten text/name NEAR the Daily checkbox, e.g. "father"]
+   4.5 Income Type — Weekly     [checkbox — ✓ if checked, ✗ if empty]
+   4.5 Income Type — Weekly (specify)  [text — handwritten text/name NEAR the Weekly checkbox]
+   4.5 Income Type — Ad-Hoc     [checkbox — ✓ if checked, ✗ if empty]
+   4.5 Income Type — Ad-Hoc (specify)  [text — handwritten text/name NEAR the Ad-Hoc checkbox]
+   4.6 Do you have any loans?              [radio → Yes | No — IF Yes THEN fill 4.6.1 fields below; IF No THEN all 4.6.1 = "N/A"]
+     TABLE 4.6.1: exactly 3 pre-printed rows (Sr.No. 1, 2, 3), each with 4 columns.
+     For EACH of the 3 rows, output 4 separate fields in this format:
+       "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount — Row {n} — Sr.No."          [text]
+       " — {n} — Loan Purpose"                [text]
+       " — {n} — Loan Amount Taken"           [text — numbers only]
+       " — {n} — Pending Loan Amount"         [text — numbers only]
+       Repeat for n=1, 2, 3 (12 fields total). CRITICAL: Do NOT combine rows into one.
+     Also scan for any handwritten text BEFORE Row 1 (above the table) or AFTER Row 3 (below the table)
+     and include it as an extra row (Row 0 or Row 4) with text in the relevant column.
 """,
      5: """
 --- Section 4 — Financial Background (Page 5) — 3 fields ---
-  4.7 If you choose any college, how much is the college fee? [text — capture the COMPLETE handwritten answer EXACTLY as written, including any college name AND the fee amount together (e.g. "SRM College - 1,50,000"). Do NOT drop the text portion.]
+   4.7 If you choose any college, how much is the college fee? [text — scan the ENTIRE blank space below the label (multiple lines ok). Handwriting may continue on a lower line (e.g. "paid(49000)" below "1,00,000 per year college name"). Combine continuation lines with ", " into one value.]
   4.8 If the college fee is higher, how will you manage it? [text — EXACT answer, no extra]
   4.9 If you do not receive this scholarship, how will you pay the fees? [text — EXACT answer, no extra]
 
@@ -658,35 +636,5 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
 """
 }
 
-PRIMARY_OCR_PROMPT = 'Transcribe ALL visible text on this form page in natural reading order. Preserve labels, filled values, checkboxes marks (✓/✗), radio selections, and handwritten text as accurately as possible.\n\nOutput ONLY valid JSON with a single key "raw_text" containing the transcribed text. Example: {"raw_text": "1. Name: John\\n2. Age: 25"}'
-
-
-TEXT_EXTRACTION_PROMPT = """You are a structured data extraction engine. Below is the OCR transcription of a 6-page Home Visit Questionnaire. Extract ALL fields from the text into JSON.
-
-GROUND RULES:
-1. Extract EVERY field listed below. Never skip.
-2. value="" for unreadable/missing. value="N/A" for conditionals when parent="No".
- 3. Checkbox → "Yes" if a tick (✓) or forward-slash (/) is INSIDE/BESIDE the box; "No" if the box is empty or marked with a cross (X). A tick/slash drawn ON TOP OF the option TEXT is a stray annotation — ignore it (empty box = unselected). A cross under/beside the box = deselected. If a box has BOTH tick and cross, the tick wins → "Yes".
-4. Radio → exact option text shown (e.g. "Male", "Yes", "Separate").
-5. Table → "{{Table}} — Row {{n}} — {{Column}}".
-6. Numeric → digits only, strip ₹, commas, Rs.
-7. Never invent values.
-
-OUTPUT SCHEMA:
-{
-  "fields": [
-    {
-      "label": "exact label from field list below",
-      "value": "extracted value or empty string",
-      "confidence": 0-100,
-      "page": <page_number>,
-      "section": <section_number or null>
-    }
-  ],
-  "overall_confidence": 0-100,
-  "clarification_needed": ["label1", ...],
-  "raw_text": "combined OCR text",
-  "markdown_output": "formatted output"
-}"""
 
 

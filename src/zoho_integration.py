@@ -233,7 +233,6 @@ FIELD_TO_ZOHO: dict[str, str] = {
     "4.2 Amount of Last Electricity Bill": "Amount_of_Last_Electricity_Bill",
     "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?": "Do_you_own_any_other_assets_or_properties_in_the_name_of_grandparents_parent_or_student",
     "4.4 Apart from your job, is there any other source of income?": "Apart_from_your_job_is_there_any_other_source_of_income",
-    "4.5 Income Type": "Income_Type",
     "4.6 Do you have any loans?": "Do_you_have_any_loans",
     "4.7 If you choose any college, how much is the college fee?": "If_you_choose_any_college_how_much_is_the_college_fee",
     "4.8 If the college fee is higher, how will you manage it?": "If_the_college_fee_is_higher_how_will_you_manage_it",
@@ -262,6 +261,7 @@ AGGREGATE_MAP: dict[str, dict[str, str]] = {
     "3.3 Type of Ceiling": {"target": "Type_of_Ceiling", "type": "text"},
     "3.6 Kitchen Type": {"target": "Kitchen_Type", "type": "text"},
     "4.1 Assets at Home": {"target": "Assets_at_Home_tick_all_that_apply", "type": "stringlist"},
+    "4.5 Income Type": {"target": "Income_Type", "type": "stringlist"},
     "3.4.1 Type of Bedroom": {"target": "Type_of_Bedroom", "type": "text"},
     "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?": {
         "target": "Do_you_own_any_other_assets_or_properties_in_the_name_of_grandparents_parent_or_student",
@@ -466,6 +466,7 @@ def _build_creator_payload(result: dict) -> dict:
 
     payload: dict[str, Any] = {}
     aggregates: dict[str, list[str]] = {}
+    aggregate_specify_texts: dict[str, dict[str, str]] = {}
     subform_rows: dict[str, dict[int, dict[str, str]]] = {}
     flat_subform_buffers: dict[str, dict[str, str]] = {}
 
@@ -536,6 +537,13 @@ def _build_creator_payload(result: dict) -> dict:
             if label.startswith(prefix + " — "):
                 option = label[len(prefix) + 3:].strip()
                 if option:
+                    # Handle (specify) sub-options: collect separately, merge during flush
+                    if option.lower().endswith("(specify)"):
+                        base_opt = option[: -len("(specify)")].strip()
+                        if value.strip():
+                            aggregate_specify_texts.setdefault(prefix, {})[base_opt] = value.strip()
+                        matched_agg = True
+                        break
                     lower_val = value.strip().lower()
                     if lower_val in ("✓", "1", "yes", "true", "y"):
                         aggregates.setdefault(prefix, []).append(option)
@@ -587,6 +595,16 @@ def _build_creator_payload(result: dict) -> dict:
             is_agg_parent = any(label == ap for ap in AGGREGATE_MAP)
             if not is_table_parent and not is_agg_parent:
                 logger.warning("Zoho mapping: no match for label %r (value=%r)", label, value)
+
+    # Merge specify texts into aggregate options
+    for prefix, opt_texts in aggregate_specify_texts.items():
+        for base_opt, text in opt_texts.items():
+            if not text or text.strip().lower() in ("", "no", "false", "n/a", "nil", "none", "-"):
+                continue
+            agg_options = aggregates.get(prefix, [])
+            if base_opt in agg_options:
+                agg_options.remove(base_opt)
+            agg_options.append(f"{base_opt}: {text}")
 
     # Flush aggregates
     for prefix, info in AGGREGATE_MAP.items():
@@ -1489,9 +1507,8 @@ async def process_pending_on_startup(base_dir: Path) -> None:
 
     # Trigger batch pipeline
     print(f"  Starting batch pipeline run for {len(pdfs_info)} record(s)...\n")
-    from src.pipeline_runner import run_batch_pdfs_pipeline_async
-    # Put it in a background task so it updates SSE and progress stores properly, but await it
-    await run_batch_pdfs_pipeline_async(batch_job_dir, pdfs_info)
+    from src.pipeline_runner import run_batch_pdfs_pipeline
+    await run_batch_pdfs_pipeline(batch_job_dir, pdfs_info)
 
     print(f"\n{'='*70}")
     print(f"  STARTUP AUTO-PROCESSOR — COMPLETE")
@@ -1637,8 +1654,8 @@ async def _process_pending_from_local(base_dir: Path, csv_path: Path, pdf_dir: P
 
     print(f"  Starting batch pipeline run for {total_eligible} file(s)...\n")
     await _set_status(batch_job_dir, "queued", f"Processing {total_eligible} files...")
-    from src.pipeline_runner import run_batch_pdfs_pipeline_async
-    await run_batch_pdfs_pipeline_async(batch_job_dir, pdfs_info)
+    from src.pipeline_runner import run_batch_pdfs_pipeline
+    await run_batch_pdfs_pipeline(batch_job_dir, pdfs_info)
 
     logger.info("LOCAL BATCH COMPLETE | job=%s | files=%d", batch_job_id, total_eligible)
     print(f"\n{'='*70}")
