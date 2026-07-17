@@ -1,6 +1,6 @@
 export interface Field {
   label: string;
-  value: string;
+  value: string | null;
   confidence: number;
   page: number;
   section_number: number | null;
@@ -14,6 +14,7 @@ export interface Field {
   extracted_by: string | null;
   verified_by: string | null;
   original_value: string | null;
+  is_edited?: boolean;
   position_hint?: string;
 }
 

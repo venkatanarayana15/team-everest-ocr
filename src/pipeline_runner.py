@@ -504,10 +504,11 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 pdf_name = Path(pdf_info["path"]).name
                 pdf_job_dir = job_dir / str(idx)
                 pdf_job_dir.mkdir(parents=True, exist_ok=True)
+                (pdf_job_dir / "original_name.txt").write_text(pdf_name)
 
                 # Save original PDF for lazy page rendering in UI
                 try:
-                    shutil.copy2(pdf_info["path"], pdf_job_dir / "original.pdf")
+                    shutil.copy2(pdf_info["path"], pdf_job_dir / pdf_name)
                 except Exception:
                     logger.warning("Failed to save original PDF for lazy rendering: %s", pdf_name)
 

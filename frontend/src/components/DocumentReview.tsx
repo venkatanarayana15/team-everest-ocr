@@ -131,9 +131,11 @@ export default function DocumentReview({
   onRawTextUpdated,
   pdfName = null,
 }: Props) {
+  const safePages = Math.min(numPages, 6);
   const [fitModes, setFitModes] = useState<Record<number, boolean>>({});
   const [imgDims, setImgDims] = useState<Record<number, { natW: number; natH: number; elW: number; elH: number }>>({});
   const blockRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const allLoadedRef = useRef(false);
 
   const handlePageTextChange = useCallback((pageNum: number, newPageText: string) => {
     const parts = rawText.split(/(--- Page \d+ ---)/);
@@ -154,12 +156,12 @@ export default function DocumentReview({
   }, [currentPage]);
 
   useEffect(() => {
-    // Immediate check for already loaded (cached) images
+    allLoadedRef.current = false;
     const timer = setInterval(() => {
-      let updated = false;
-      const nextDims = { ...imgDims };
-      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-        if (nextDims[pageNum]) continue;
+      if (allLoadedRef.current) return;
+      let allDone = true;
+      const nextDims: Record<number, { natW: number; natH: number; elW: number; elH: number }> = {};
+      for (let pageNum = 1; pageNum <= safePages; pageNum++) {
         const el = document.getElementById(`doc-review-img-${pageNum}`) as HTMLImageElement | null;
         if (el && el.complete && el.naturalWidth > 0 && el.clientWidth > 0) {
           nextDims[pageNum] = {
@@ -168,16 +170,18 @@ export default function DocumentReview({
             elW: el.clientWidth,
             elH: el.clientHeight,
           };
-          updated = true;
+        } else {
+          allDone = false;
         }
       }
-      if (updated) {
-        setImgDims(nextDims);
+      if (Object.keys(nextDims).length > 0) {
+        setImgDims(prev => ({ ...prev, ...nextDims }));
       }
+      if (allDone) allLoadedRef.current = true;
     }, 300);
 
     return () => clearInterval(timer);
-  }, [numPages, jobId, imgDims]);
+  }, [numPages, jobId, pdfName]);
 
   const handleFieldClick = useCallback((field: Field) => {
     onFieldClick(field);
@@ -235,7 +239,7 @@ export default function DocumentReview({
         background: '#fafafa',
         display: 'block',
       }}>
-        {Array.from({ length: numPages }, (_, i) => {
+        {Array.from({ length: safePages }, (_, i) => {
           const pageNum = i + 1;
           const fitMode = fitModes[pageNum] ?? true;
           const dims = imgDims[pageNum];
@@ -244,7 +248,7 @@ export default function DocumentReview({
 
           return (
             <div
-              key={pageNum}
+              key={`${pdfName ?? 'default'}-${pageNum}`}
               ref={el => setBlockRef(pageNum, el)}
               style={{
                 display: 'flex',
@@ -358,34 +362,34 @@ export default function DocumentReview({
         background: 'var(--color-bg)',
         display: 'block',
       }}>
-        {Array.from({ length: numPages }, (_, i) => {
+        {Array.from({ length: safePages }, (_, i) => {
           const pageNum = i + 1;
           return (
             <div key={pageNum} style={{
-              margin: '12px 12px 0 12px',
-              borderRadius: 'var(--radius-xl)',
+              margin: '8px 12px 0 12px',
+              borderRadius: 'var(--radius-md)',
               background: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
+              border: '1px solid #9ca3af',
+              outline: '1px solid #6b7280',
               display: 'flex',
               flexDirection: 'column',
-              boxShadow: 'var(--shadow-sm)',
               overflow: 'hidden',
             }}>
               <div style={{
                 padding: '12px 16px',
-                background: '#fafafa',
+                background: '#374151',
                 borderBottom: '1px solid var(--color-border)',
                 fontWeight: 600,
                 fontSize: 14,
-                color: 'var(--color-text)',
+                color: '#ffffff',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
               }}>
                 <span style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: 24, height: 24, borderRadius: '50%', background: 'var(--color-primary-light)',
-                  color: 'var(--color-primary)', fontSize: 12, fontWeight: 700,
+                  width: 24, height: 24, borderRadius: '50%', background: '#6b7280',
+                  color: '#ffffff', fontSize: 12, fontWeight: 700,
                 }}>
                   {pageNum}
                 </span>

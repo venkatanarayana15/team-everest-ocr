@@ -60,8 +60,15 @@ export async function listJobs() {
 }
 
 export function pageImageUrl(jobId: string, pageNum: number, pdfName?: string | null): string {
-  const query = pdfName ? `?pdf_name=${encodeURIComponent(pdfName)}` : '';
-  return `${API}/pages/${jobId}/${pageNum}${query}`;
+  let url = `${API}/pages/${jobId}/${pageNum}`;
+  const params: string[] = [];
+  if (pdfName) {
+    params.push(`pdf_name=${encodeURIComponent(pdfName)}`);
+  }
+  if (params.length > 0) {
+    url += '?' + params.join('&');
+  }
+  return url;
 }
 
 export function thumbnailUrl(jobId: string, pageNum: number, pdfName?: string | null): string {
@@ -122,8 +129,35 @@ export async function deleteJob(jobId: string): Promise<any> {
   return res.json();
 }
 
-export async function saveToDB(jobId: string): Promise<any> {
-  const res = await fetch(`${API}/save-to-db/${jobId}`, { method: 'POST' });
+export async function saveToDB(jobId: string, corrections?: {label: string; correct_value: string}[]): Promise<any> {
+  const options: RequestInit = { method: 'POST' };
+  if (corrections && corrections.length > 0) {
+    options.headers = { 'Content-Type': 'application/json' };
+    options.body = JSON.stringify({ corrections });
+  }
+  const res = await fetch(`${API}/save-to-db/${jobId}`, options);
   if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function correctField(jobId: string, label: string, correctValue: string, pdfName?: string): Promise<any> {
+  const body: Record<string, string> = { label, correct_value: correctValue };
+  if (pdfName) body.pdf_name = pdfName;
+  const res = await fetch(`${API}/correct/${jobId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error('Failed to correct field');
+  return res.json();
+}
+
+export async function updateRawText(jobId: string, rawText: string): Promise<any> {
+  const res = await fetch(`${API}/update-raw-text/${jobId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw_text: rawText }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

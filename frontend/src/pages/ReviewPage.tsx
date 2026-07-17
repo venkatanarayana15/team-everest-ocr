@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { getResult, saveToDB, getStatus, subscribeToBatch } from '../api/client';
+import { getResult, saveToDB, getStatus, subscribeToBatch, listPDFs, updateRawText, correctField } from '../api/client';
 import type { Field, JobResult, StatusResponse } from '../types';
 import DocumentReview from '../components/DocumentReview';
 import TextViewer from '../components/TextViewer';
@@ -141,18 +141,16 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
     setCurrentPage(1);
     try {
       const data = await getResult(jid);
-      if (data.status !== 'done') {
-        setLoading(false);
-        return;
-      }
-      setResult(data.result);
-      setFields(data.result.fields);
-      setSections(data.result.sections || []);
-      if (data.result.fields.length > 0) {
-        setCurrentPage(data.result.fields[0].page);
+      if (data.status === 'done' && data.result) {
+        setResult(data.result);
+        setFields(data.result.fields);
+        setSections(data.result.sections || []);
+        if (data.result.fields.length > 0) {
+          setCurrentPage(data.result.fields[0].page);
+        }
       }
     } catch (e: any) {
-      console.error(e);
+      console.error('fetchResult failed:', e);
     }
     setLoading(false);
   }, []);
@@ -209,8 +207,7 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
 
   const enrichFilenames = useCallback(async () => {
     try {
-      const res = await fetch('/pdfs');
-      const pdfs = await res.json();
+      const pdfs = await listPDFs();
       if (Array.isArray(pdfs)) {
         const updates: Record<string, BatchStatus> = {};
         for (const p of pdfs) {
@@ -278,14 +275,10 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
   const handleRawTextUpdated = useCallback(async (newRawText: string) => {
     setResult(prev => prev ? { ...prev, raw_text: newRawText } : null);
     try {
-      const res = await fetch(`/update-raw-text/${selectedJobId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw_text: newRawText }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await updateRawText(selectedJobId, newRawText);
     } catch (e) {
       console.error('Failed to update raw text:', e);
+      alert('Failed to persist text edit. Please retry.');
     }
   }, [selectedJobId]);
 
@@ -322,9 +315,7 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
     );
   }
 
-  if (!isJobDone && result) {
-    // result was loaded from cache, still valid
-  } else if (!isJobDone) {
+  if (!isJobDone && !result) {
     return (
       <div style={{
         flex: 1, display: 'flex', fontFamily: 'var(--font-sans)', overflow: 'hidden',
@@ -375,7 +366,7 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
     );
   }
 
-  const totalCorrected = fields.filter((f) => f.original_value !== null).length;
+  const totalCorrected = fields.filter((f) => f.is_edited === true).length;
 
   return (
     <div style={{ flex: 1, display: 'flex', fontFamily: 'var(--font-sans)', overflow: 'hidden' }}>
@@ -490,8 +481,30 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
           <button
             onClick={async () => {
               try {
-                await saveToDB(selectedJobId);
-                alert('Saved to database successfully!');
+                const edited = fields.filter(f => f.is_edited);
+                const pdfName = result?.batch ? result?.pdf_names?.[0] : undefined;
+                const errors: string[] = [];
+                const succeededLabels: string[] = [];
+                for (const f of edited) {
+                  try {
+                    await correctField(selectedJobId, f.label, f.value ?? '', pdfName);
+                    succeededLabels.push(f.label);
+                  } catch (e: any) {
+                    errors.push(`${f.label}: ${e.message || 'Unknown'}`);
+                  }
+                }
+                await saveToDB(selectedJobId, edited.map(f => ({ label: f.label, correct_value: f.value ?? '' })));
+                setFields(prev => prev.map(f => {
+                  if (!f.is_edited || succeededLabels.includes(f.label)) {
+                    return { ...f, original_value: null, is_edited: false, is_verified: true };
+                  }
+                  return f;
+                }));
+                if (errors.length === 0) {
+                  alert('Saved to database successfully!');
+                } else {
+                  alert('Saved to database with ' + errors.length + ' field(s) skipped:\n' + errors.join('\n'));
+                }
               } catch (e: any) {
                 alert('Failed to save to database: ' + (e.message || 'Unknown error'));
               }

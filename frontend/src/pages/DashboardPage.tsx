@@ -59,6 +59,16 @@ export default function DashboardPage({ onSelectBatch }: Props) {
     return unsub;
   }, [onSelectBatch]);
 
+  const allSelected = jobs.length > 0 && selectedJobIds.length === jobs.length;
+
+  const handleSelectAll = () => {
+    if (allSelected) {
+      setSelectedJobIds([]);
+    } else {
+      setSelectedJobIds(jobs.map(j => j.job_id));
+    }
+  };
+
   const handleDeleteSelected = async () => {
     if (selectedJobIds.length === 0) return;
     if (!window.confirm(`Are you sure you want to delete the selected ${selectedJobIds.length} batch(es)?`)) {
@@ -110,22 +120,37 @@ export default function DashboardPage({ onSelectBatch }: Props) {
             {jobs.length} batch{jobs.length !== 1 ? 'es' : ''}
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {selectedJobIds.length > 0 && (
+            <button
+              onClick={handleSelectAll}
+              style={{
+                padding: '6px 12px', fontSize: 12, fontWeight: 600,
+                border: 'none', borderRadius: 'var(--radius-lg)',
+                background: allSelected ? 'var(--color-bg)' : 'var(--color-primary)',
+                color: allSelected ? 'var(--color-text-muted)' : '#fff',
+                cursor: 'pointer',
+                transition: 'all var(--transition-fast)',
+              }}
+            >
+              {allSelected ? 'Deselect All' : 'Select All'}
+            </button>
+          )}
           {selectedJobIds.length > 0 && (
             <button
               onClick={handleDeleteSelected}
               style={{
-                padding: '8px 16px', fontSize: 13, fontWeight: 600,
+                padding: '6px 12px', fontSize: 12, fontWeight: 600,
                 border: 'none', borderRadius: 'var(--radius-lg)',
                 background: 'var(--color-danger)', color: '#fff',
-                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
                 transition: 'all var(--transition-fast)',
                 boxShadow: '0 2px 8px rgba(239,68,68,0.3)',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.filter = 'brightness(1.08)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.filter = 'none'; }}
             >
-              🗑️ Delete Selected ({selectedJobIds.length})
+              🗑️ Delete ({selectedJobIds.length})
             </button>
           )}
           <div style={{ display: 'flex', gap: 2, background: 'var(--color-bg)', borderRadius: 'var(--radius-md)', padding: 2 }}>

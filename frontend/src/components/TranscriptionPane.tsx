@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { correctField } from '../api/client';
 import type { Field } from '../types';
 
 interface Props {
@@ -154,12 +155,7 @@ export default function TranscriptionPane({ rawText, fields, currentPage, onFiel
     if (!editingLabel) return;
     setSaving(true);
     try {
-      const res = await fetch(`/correct/${jobId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: editingLabel, correct_value: editValue }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await correctField(jobId, editingLabel, editValue);
       const updated = fields.map((f) =>
         f.label === editingLabel ? { ...f, value: editValue } : f,
       );

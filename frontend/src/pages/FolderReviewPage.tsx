@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { getResult, getStatus, subscribeToJob } from '../api/client';
+import { getResult, getStatus, subscribeToJob, correctField, saveToDB } from '../api/client';
 import type { Field, JobResult, StatusResponse } from '../types';
 import DocumentReview from '../components/DocumentReview';
 import PipelineProcessingView from '../components/PipelineProcessingView';
@@ -25,6 +25,12 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
   const [logs, setLogs] = useState<Array<{ t: string; msg: string }>>([]);
   const [originalName, setOriginalName] = useState<string>('');
   const [elapsed, setElapsed] = useState<number | null>(null);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [showLogsModal, setShowLogsModal] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadDone, setUploadDone] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [confirmStep, setConfirmStep] = useState(false);
 
   const fetchResult = useCallback(async () => {
     try {
@@ -53,37 +59,49 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
       const pdfsArr: any[] = rawResult.pdfs;
       const names: string[] = rawResult.pdf_names || [];
 
+      setPdfResultsMap(_buildPdfMap(pdfsArr, names, r, originalName, jobId));
       if (pdfsArr && pdfsArr.length > 0) {
-        const map: Record<string, any> = {};
-        for (const pr of pdfsArr) {
-          const name = pr.pdf_name || pr.name || '';
-          if (name) map[name] = pr;
-        }
-        setPdfResultsMap(map);
-
-        const first = names[0] || Object.keys(map)[0] || null;
-        setSelectedPdf(first);
-
+        setSelectedPdf(prev => prev ?? (names[0] || Object.keys(pdfsArr[0] || {})[0] || null));
         const firstSections = pdfsArr[0]?.sections;
         if (firstSections) setSections(firstSections);
       } else {
-        // Single-document fallback
-        const singleName = names[0] || originalName || jobId;
-        const wrapped: Record<string, any> = {};
-        wrapped[singleName] = {
-          fields: r.fields || [],
-          sections: r.sections || [],
-          num_pages: r.num_pages || 1,
-          overall_confidence: r.overall_confidence || 0,
-          pdf_name: singleName,
-        };
-        setPdfResultsMap(wrapped);
-        setSelectedPdf(singleName);
+          setSelectedPdf(prev => prev ?? (names[0] || originalName || jobId));
         setSections(r.sections || []);
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.error('fetchResult failed:', e);
+      setStatus('error');
+      setStatusMessage('Failed to load pipeline results');
+    }
     setLoading(false);
-  }, [jobId, originalName]);
+  }, [jobId]);
+
+  const _buildPdfMap = useCallback((
+    pdfsArr: any[],
+    names: string[],
+    r: JobResult,
+    origName: string,
+    jid: string,
+  ): Record<string, any> => {
+    if (pdfsArr && pdfsArr.length > 0) {
+      const map: Record<string, any> = {};
+      for (const pr of pdfsArr) {
+        const name = pr.pdf_name || pr.name || '';
+        if (name) map[name] = pr;
+      }
+      return map;
+    }
+    const singleName = names[0] || origName || jid;
+    return {
+      [singleName]: {
+        fields: r.fields || [],
+        sections: r.sections || [],
+        num_pages: r.num_pages || 1,
+        overall_confidence: r.overall_confidence || 0,
+        pdf_name: singleName,
+      },
+    };
+  }, []);
 
   useEffect(() => {
     fetchResult();
@@ -135,7 +153,9 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
     setSelectedPdf(name);
     setSelectedField(null);
     setCurrentPage(1);
-  }, []);
+    const pdf = pdfResultsMap[name];
+    if (pdf?.sections) setSections(pdf.sections);
+  }, [pdfResultsMap]);
 
   const handleFieldClick = useCallback((field: Field) => {
     setSelectedField(field);
@@ -149,7 +169,106 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
       if (!entry) return prev;
       return { ...prev, [selectedPdf]: { ...entry, fields: updated } };
     });
+    setConfirmStep(true);
   }, [selectedPdf]);
+
+  const changedFields = useMemo(() =>
+    displayFields.filter(f => f.is_edited === true),
+    [displayFields]
+  );
+
+  const groupedChanges = useMemo(() => {
+    const groups = new Map<string, { label: string; fields: Field[] }>();
+
+    for (const f of changedFields) {
+      const parts = f.label.split(/ — | – | - /);
+      if (parts.length >= 2) {
+        const prefix = parts[0];
+        if (!groups.has(prefix)) {
+          const grpFields = displayFields.filter(df =>
+            df.label.startsWith(prefix + ' — ') ||
+            df.label.startsWith(prefix + ' – ') ||
+            df.label.startsWith(prefix + ' - ')
+          );
+          groups.set(prefix, { label: prefix, fields: grpFields.length > 0 ? grpFields : [f] });
+        }
+      } else {
+        groups.set('__' + f.label, { label: f.label, fields: [f] });
+      }
+    }
+
+    return Array.from(groups.values()).map(grp => {
+      const isCheckboxGroup = grp.fields.length > 1 &&
+        grp.fields.some(f => ['yes', 'no'].includes((f.value ?? '').trim().toLowerCase()));
+
+      if (isCheckboxGroup) {
+        const oldSel: string[] = [];
+        const newSel: string[] = [];
+        for (const f of grp.fields) {
+          const optName = f.label.split(/ — | – | - /).slice(1).join(' — ');
+          const oldVal = f.original_value != null ? f.original_value : f.value;
+          if ((oldVal ?? '').trim().toLowerCase() === 'yes') oldSel.push(optName);
+          if ((f.value ?? '').trim().toLowerCase() === 'yes') newSel.push(optName);
+        }
+        const oldStr = oldSel.join(', ') || '(none)';
+        const newStr = newSel.join(', ') || '(none)';
+        if (oldStr === newStr) return null;
+        return { label: grp.label, oldDisplay: oldStr, newDisplay: newStr };
+      }
+
+      const f = grp.fields[0];
+      return { label: f.label, oldDisplay: f.original_value || '(empty)', newDisplay: f.value || '(empty)' };
+    }).filter(Boolean) as { label: string; oldDisplay: string; newDisplay: string }[];
+  }, [changedFields, displayFields]);
+
+  const handleConfirmUpload = useCallback(async () => {
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const errors: string[] = [];
+      const succeededLabels: string[] = [];
+      for (const f of changedFields) {
+        try {
+          await correctField(jobId, f.label, f.value ?? '', selectedPdf ?? undefined);
+          succeededLabels.push(f.label);
+        } catch (e: any) {
+          errors.push(`${f.label}: ${e.message || 'Unknown'}`);
+        }
+      }
+      await saveToDB(jobId, changedFields.map(f => ({ label: f.label, correct_value: f.value ?? '', pdf_name: selectedPdf })));
+      setPdfResultsMap((prev) => {
+        const next = { ...prev };
+        for (const [pdfName, entry] of Object.entries(next)) {
+          if (!entry?.fields) continue;
+          next[pdfName] = {
+            ...entry,
+            fields: entry.fields.map((f: Field) => {
+              if (!f.is_edited || succeededLabels.includes(f.label)) {
+                return { ...f, original_value: null, is_verified: true, is_edited: false };
+              }
+              return f;
+            }),
+          };
+        }
+        return next;
+      });
+      setConfirmStep(false);
+      setUploadDone(true);
+      if (errors.length > 0) {
+        setUploadError(errors.length + ' field(s) skipped:\n' + errors.join('\n'));
+      }
+    } catch (e: any) {
+      setUploadError(e?.message || 'Upload failed');
+    }
+    setUploading(false);
+  }, [jobId, changedFields, selectedPdf]);
+
+  const handleCloseUpdate = useCallback(() => {
+    setShowUpdateModal(false);
+    setUploadDone(false);
+    setUploadError(null);
+    setUploading(false);
+  }, []);
 
   if (loading && !result) {
     return (
@@ -261,6 +380,49 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
 
       {/* Main area: DocumentReview */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Navbar */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '8px 16px', borderBottom: '1px solid var(--color-border)',
+          background: 'var(--color-surface)', flexShrink: 0,
+        }}>
+          <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--color-text)' }}>
+            📄 Review Fields
+            {confirmStep && groupedChanges.length > 0 && (
+              <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-warning, #d97706)', fontWeight: 500 }}>
+                ({groupedChanges.length} unsaved change{groupedChanges.length > 1 ? 's' : ''})
+              </span>
+            )}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => setShowLogsModal(true)}
+              style={{
+                padding: '6px 14px', fontSize: 12, fontWeight: 600,
+                border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)',
+                background: 'var(--color-bg)', color: 'var(--color-text)',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+              }}
+            >
+              📋 Logs
+            </button>
+            <button
+              onClick={() => setShowUpdateModal(true)}
+              disabled={groupedChanges.length === 0}
+              style={{
+                padding: '6px 14px', fontSize: 12, fontWeight: 600,
+                border: 'none', borderRadius: 'var(--radius-md)',
+                background: groupedChanges.length === 0 ? 'var(--color-border)' : 'var(--color-primary)',
+                color: groupedChanges.length === 0 ? 'var(--color-text-muted)' : '#fff',
+                cursor: groupedChanges.length === 0 ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: 4,
+              }}
+            >
+              ⚡ Update {groupedChanges.length > 0 ? `(${groupedChanges.length})` : ''}
+            </button>
+          </div>
+        </div>
+
         {result && selectedPdf ? (
           <DocumentReview
             jobId={jobId}
@@ -279,6 +441,211 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
           </div>
         )}
       </div>
+
+      {/* ── Update Modal ── */}
+      {showUpdateModal && (
+        <div
+          onClick={handleCloseUpdate}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--color-surface)', borderRadius: 12,
+              width: 560, maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+            }}
+          >
+            {uploadDone ? (
+              /* ── Success state: centered message + Done button ── */
+              <div style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                padding: '80px 20px', gap: 24,
+              }}>
+                <div style={{
+                  width: 72, height: 72, borderRadius: '50%',
+                  background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 36, color: '#16a34a', fontWeight: 700,
+                }}>
+                  ✓
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: '#166534' }}>
+                  Saved Successfully
+                </div>
+                <button
+                  onClick={handleCloseUpdate}
+                  style={{
+                    marginTop: 12, padding: '10px 48px', fontSize: 15, fontWeight: 600,
+                    border: 'none', borderRadius: 'var(--radius-md)',
+                    background: 'var(--color-primary)', color: '#fff',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Header */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '16px 20px', borderBottom: '1px solid var(--color-border)',
+                }}>
+                  <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text)' }}>
+                    ⚡ Update Changes
+                    {groupedChanges.length > 0 && (
+                      <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 500, color: 'var(--color-text-muted)' }}>
+                        ({groupedChanges.length} field{groupedChanges.length > 1 ? 's' : ''})
+                      </span>
+                    )}
+                  </span>
+                  <button
+                    onClick={handleCloseUpdate}
+                    style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--color-text-muted)', padding: 4 }}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Body */}
+                <div style={{ flex: 1, overflow: 'auto', padding: '12px 20px' }}>
+                  {groupedChanges.length === 0 ? (
+                    <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
+                      No changes detected. Edit field values to see them here.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {groupedChanges.map(g => (
+                        <div key={g.label} style={{
+                          padding: '10px 12px', borderRadius: 8,
+                          border: '1px solid var(--color-border)',
+                          background: 'var(--color-bg)',
+                        }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text)', marginBottom: 4 }}>
+                            {g.label}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                            <span style={{
+                              background: '#fee2e2', color: '#991b1b', padding: '2px 8px',
+                              borderRadius: 4, fontFamily: 'var(--font-mono)', fontSize: 12,
+                              textDecoration: 'line-through', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis',
+                            }}>
+                              {g.oldDisplay}
+                            </span>
+                            <span style={{ color: 'var(--color-text-muted)' }}>→</span>
+                            <span style={{
+                              background: '#dcfce7', color: '#166534', padding: '2px 8px',
+                              borderRadius: 4, fontFamily: 'var(--font-mono)', fontSize: 12,
+                              fontWeight: 600, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis',
+                            }}>
+                              {g.newDisplay}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div style={{
+                  display: 'flex', justifyContent: 'flex-end', gap: 8,
+                  padding: '12px 20px', borderTop: '1px solid var(--color-border)',
+                }}>
+                  <button
+                    onClick={handleCloseUpdate}
+                    disabled={uploading}
+                    style={{
+                      padding: '8px 20px', fontSize: 13, fontWeight: 600,
+                      border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)',
+                      background: 'var(--color-bg)', color: 'var(--color-text)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConfirmUpload}
+                    disabled={uploading || groupedChanges.length === 0}
+                    style={{
+                      padding: '8px 20px', fontSize: 13, fontWeight: 600,
+                      border: 'none', borderRadius: 'var(--radius-md)',
+                      background: groupedChanges.length === 0 ? 'var(--color-border)' : '#16a34a',
+                      color: groupedChanges.length === 0 ? 'var(--color-text-muted)' : '#fff',
+                      cursor: groupedChanges.length === 0 || uploading ? 'not-allowed' : 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                    }}
+                  >
+                    {uploading ? '⏳ Uploading...' : '✓ Confirm Upload'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Logs Modal ── */}
+      {showLogsModal && (
+        <div
+          onClick={() => setShowLogsModal(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--color-surface)', borderRadius: 12,
+              width: 520, maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+            }}
+          >
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '16px 20px', borderBottom: '1px solid var(--color-border)',
+            }}>
+              <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text)' }}>
+                📋 Processing Logs
+              </span>
+              <button
+                onClick={() => setShowLogsModal(false)}
+                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--color-text-muted)', padding: 4 }}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: '12px 20px' }}>
+              {logs.length === 0 ? (
+                <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
+                  No logs available.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {logs.map((entry, i) => (
+                    <div key={i} style={{
+                      display: 'flex', gap: 8, fontSize: 12,
+                      color: entry.msg.includes('error') || entry.msg.includes('fail') ? '#dc2626' : 'var(--color-text)',
+                      fontFamily: 'var(--font-mono)', padding: '2px 0',
+                    }}>
+                      <span style={{ color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+                        {entry.t}
+                      </span>
+                      <span>{entry.msg}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

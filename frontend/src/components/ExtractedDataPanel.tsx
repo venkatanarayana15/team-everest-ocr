@@ -7,7 +7,17 @@ const TABLE_ROW_RE = /^(.+?)\s*[—–-]\s*Row\s+(\d+)\s*[—–-]\s*(.+)$/;
 const CHECKBOX_VALS = new Set(['yes', 'no', 'true', 'false', '✓', '✗', '?']);
 
 function isCheckbox(field: Field): boolean {
-  return CHECKBOX_VALS.has(field.value.trim().toLowerCase());
+  return CHECKBOX_VALS.has((field.value ?? '').trim().toLowerCase());
+}
+
+function valuesEqual(a: string | null | undefined, b: string | null | undefined): boolean {
+  const va = (a ?? '').trim();
+  const vb = (b ?? '').trim();
+  if (va === vb) return true;
+  if (CHECKBOX_VALS.has(va.toLowerCase()) || CHECKBOX_VALS.has(vb.toLowerCase())) {
+    return va.toLowerCase() === vb.toLowerCase();
+  }
+  return false;
 }
 
 function confidenceColor(c: number): string {
@@ -20,8 +30,8 @@ function confidenceLabel(c: number): string {
   return `${c}%`;
 }
 
-function checkboxDisplay(val: string): { icon: string; color: string } {
-  const v = val.trim().toLowerCase();
+function checkboxDisplay(val: string | null): { icon: string; color: string } {
+  const v = (val ?? '').trim().toLowerCase();
   if (v === 'yes' || v === 'true' || v === '✓') return { icon: '✓', color: '#16a34a' };
   if (v === 'no' || v === 'false' || v === '✗') return { icon: '✗', color: '#dc2626' };
   return { icon: '?', color: '#94a3b8' };
@@ -35,7 +45,7 @@ function parseDateToYmd(val: string): string {
   if (isoMatch) return isoMatch[0];
   
   // Try DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY (with 2 or 4 digit year)
-  const slashMatch = v.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2}|\d{4})/);
+  const slashMatch = v.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4}|\d{2})/);
   if (slashMatch) {
     const dd = slashMatch[1].padStart(2, '0');
     const mm = slashMatch[2].padStart(2, '0');
@@ -45,7 +55,7 @@ function parseDateToYmd(val: string): string {
   }
   
   // Try DD-MMM-YYYY, DD MMM YYYY, etc.
-  const dashMatch = v.match(/(\d{1,2})[\/\-\s]+([a-zA-Z]{3,})[\/\-\s]+(\d{2}|\d{4})/);
+  const dashMatch = v.match(/(\d{1,2})[\/\-\s]+([a-zA-Z]{3,})[\/\-\s]+(\d{4}|\d{2})/);
   if (dashMatch) {
     const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
     const monthIndex = months.findIndex(m => dashMatch[2].toLowerCase().startsWith(m));
@@ -72,8 +82,8 @@ function formatYmdToDdMmmYyyy(ymd: string): string {
 
 function getRadioOptions(label: string): string[] | null {
   const lbl = label.toLowerCase();
-  if (lbl.includes('number of bedrooms')) {
-    return ['0', '1', '2', '3', '4', 'More than 4', 'N/A'];
+  if (lbl.includes('1.3 gender')) {
+    return ['Male', 'Female', 'Others'];
   }
   if (lbl.includes('3.5 bathroom')) {
     return ['Separate', 'Common for Apartment', 'None', 'N/A'];
@@ -89,7 +99,6 @@ function getRadioOptions(label: string): string[] | null {
     lbl.includes('apart from your job') ||
     lbl.includes('do you have any loans') ||
     lbl.includes('does the student have any health issues') ||
-    lbl.includes('will you study college for three years') ||
     lbl.includes('ready to send your son/daughter') ||
     lbl.includes('photograph kept at home')
   ) {
@@ -97,6 +106,9 @@ function getRadioOptions(label: string): string[] | null {
   }
   if (lbl.includes('training program within 15 km')) {
     return ['Yes', 'No', 'Maybe'];
+  }
+  if (lbl.includes('8.2 will you recommend')) {
+    return ['Yes', 'No', 'Not Sure'];
   }
   if (lbl.includes('4.5 income type')) {
     return ['Monthly', 'Daily', 'Weekly', 'Ad-Hoc'];
@@ -139,18 +151,46 @@ function Badge({ children, color }: { children: string; color: string }) {
 }
 
 function InlineEditor({
-  value, onSave, onCancel,
+  value, onSave, onCancel, multiline,
 }: {
-  value: string;
+  value: string | null;
   onSave: (v: string) => void;
   onCancel: () => void;
+  multiline?: boolean;
 }) {
-  const [editVal, setEditVal] = useState(value);
+  const [editVal, setEditVal] = useState(value ?? '');
 
   const handleKey = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') onSave(editVal);
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSave(editVal); }
     if (e.key === 'Escape') onCancel();
   }, [editVal, onSave, onCancel]);
+
+  const baseStyle: React.CSSProperties = {
+    width: '100%',
+    border: '2px solid var(--color-primary)',
+    borderRadius: 'var(--radius-sm)',
+    padding: '2px 6px',
+    fontSize: 13,
+    fontFamily: 'var(--font-sans)',
+    outline: 'none',
+    boxSizing: 'border-box',
+    background: 'var(--color-surface)',
+    boxShadow: '0 0 0 3px rgba(37,99,235,0.1)',
+  };
+
+  if (multiline) {
+    return (
+      <textarea
+        autoFocus
+        value={editVal}
+        onChange={e => setEditVal(e.target.value)}
+        onKeyDown={handleKey}
+        onBlur={() => onSave(editVal)}
+        rows={6}
+        style={{ ...baseStyle, resize: 'vertical', minHeight: 120, fontFamily: 'var(--font-sans)', lineHeight: 1.5, padding: '6px 8px' }}
+      />
+    );
+  }
 
   return (
     <input
@@ -159,18 +199,7 @@ function InlineEditor({
       onChange={e => setEditVal(e.target.value)}
       onKeyDown={handleKey}
       onBlur={() => onSave(editVal)}
-      style={{
-        width: '100%',
-        border: '2px solid var(--color-primary)',
-        borderRadius: 'var(--radius-sm)',
-        padding: '2px 6px',
-        fontSize: 13,
-        fontFamily: 'var(--font-sans)',
-        outline: 'none',
-        boxSizing: 'border-box',
-        background: 'var(--color-surface)',
-        boxShadow: '0 0 0 3px rgba(37,99,235,0.1)',
-      }}
+      style={baseStyle}
     />
   );
 }
@@ -216,29 +245,31 @@ function FieldValue({
   }, []);
 
   const isCheckboxField = isCheckbox(field);
-  const wasCorrected = field.original_value !== null;
+  const wasCorrected = field.is_edited === true;
+
+  const isMultiSelect = field.label.includes('2.1 ') || /^(4\.4 |4\.6 |8\.2 )/.test(field.label);
 
   const containerStyle: React.CSSProperties = {
-    border: `1px solid ${isSelected ? 'var(--color-primary)' : wasCorrected ? 'var(--color-success-border)' : 'var(--color-border)'}`,
-    borderRadius: 'var(--radius-md)',
-    padding: '6px 8px',
-    marginBottom: 4,
+    padding: '12px 16px',
+    borderBottom: '1px solid var(--color-border)',
     cursor: 'pointer',
-    transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast)',
-    background: isSelected ? 'var(--color-primary-light)' : wasCorrected ? 'var(--color-success-light)' : hovered ? 'var(--color-surface-hover)' : 'var(--color-surface)',
-    boxShadow: isSelected ? '0 0 0 1px rgba(37,99,235,0.15)' : 'none',
+    background: isSelected ? 'var(--color-primary-light)' : wasCorrected ? 'var(--color-success-light)' : hovered ? 'var(--color-surface-hover)' : 'transparent',
     fontFamily: 'var(--font-sans)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    transition: 'background var(--transition-fast)',
   };
 
   const labelStyle: React.CSSProperties = {
-    fontSize: 11,
-    fontWeight: 500,
-    color: 'var(--color-text-secondary)',
-    marginBottom: 2,
+    fontSize: 13,
+    fontWeight: 700,
+    color: '#000000', // Absolute black color for questions
     display: 'flex',
-    alignItems: 'center',
-    gap: 4,
+    alignItems: 'flex-start',
+    gap: 6,
     flexWrap: 'wrap',
+    lineHeight: 1.4,
   };
 
   const editBtnStyle: React.CSSProperties = {
@@ -261,7 +292,7 @@ function FieldValue({
       onMouseLeave={() => setHovered(false)}
     >
       <div style={labelStyle}>
-        <span style={{ color: 'var(--color-label)' }}>{field.label}</span>
+        <span style={{ color: '#000000', fontWeight: 700 }}>{field.label}</span>
         <Badge color={confidenceColor(field.confidence)}>
           {confidenceLabel(field.confidence)}
         </Badge>
@@ -277,106 +308,49 @@ function FieldValue({
         if (lbl.includes('date of visit')) {
           // Convert current value (which might be DD-MMM-YYYY or raw text) to DD-MM-YYYY for editing
           const ymd = parseDateToYmd(field.value);
-          let initialMasked = field.value;
+          let displayVal = field.value;
           if (ymd) {
             const parts = ymd.split('-');
-            if (parts.length === 3) initialMasked = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            if (parts.length === 3) displayVal = `${parts[2]}-${parts[1]}-${parts[0]}`;
           }
 
           return (
-            <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 4 }}>
+            <div onMouseDown={(e) => e.stopPropagation()} style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>📅</span>
               <input
                 type="text"
                 placeholder="DD-MM-YYYY"
-                value={initialMasked}
-                onChange={(e) => {
-                  let val = e.target.value.replace(/\D/g, ''); // keep only digits
-                  if (val.length > 8) val = val.slice(0, 8); // max 8 digits
-                  
+                defaultValue={displayVal}
+                key={field.value}
+                onBlur={(e) => {
+                  const val = e.target.value.replace(/\D/g, '').slice(0, 8);
+                  if (!val) { onValueChange(''); return; }
                   let formatted = val;
-                  if (val.length >= 5) {
-                    formatted = `${val.slice(0, 2)}-${val.slice(2, 4)}-${val.slice(4)}`;
-                  } else if (val.length >= 3) {
-                    formatted = `${val.slice(0, 2)}-${val.slice(2)}`;
-                  }
-                  
+                  if (val.length >= 5) formatted = `${val.slice(0, 2)}-${val.slice(2, 4)}-${val.slice(4)}`;
+                  else if (val.length >= 3) formatted = `${val.slice(0, 2)}-${val.slice(2)}`;
                   onValueChange(formatted);
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                }}
+                onFocus={(e) => e.target.select()}
+                onClick={(e) => e.stopPropagation()}
                 style={{
-                  padding: '4px 6px',
-                  borderRadius: 'var(--radius-sm)',
+                  padding: '6px 10px',
+                  borderRadius: 6,
                   border: '1px solid var(--color-border)',
                   background: 'var(--color-surface)',
                   color: 'var(--color-text)',
-                  fontSize: 13,
+                  fontSize: 14,
                   outline: 'none',
-                  width: '120px',
-                  fontFamily: 'var(--font-mono)'
+                  fontFamily: 'var(--font-mono)',
+                  width: 120,
                 }}
               />
             </div>
           );
         }
 
-        if (lbl.includes('government id verified')) {
-          const idOptions = ['Aadhaar Card', 'Ration Card', 'Voter ID', 'Driving Licence'];
-          let currentSelection: string[] = [];
-          try {
-            if (field.value.startsWith('[')) {
-              currentSelection = JSON.parse(field.value);
-            } else if (field.value && field.value !== '—') {
-              currentSelection = field.value.split(',').map((s: string) => s.trim());
-            }
-          } catch {
-            currentSelection = [];
-          }
-
-          return (
-            <div 
-              style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {idOptions.map(opt => {
-                const isChecked = currentSelection.includes(opt);
-                const toggle = () => {
-                  let next: string[];
-                  if (isChecked) {
-                    next = currentSelection.filter(s => s !== opt);
-                  } else {
-                    next = [...currentSelection, opt];
-                  }
-                  onValueChange(JSON.stringify(next));
-                };
-                return (
-                  <div
-                    key={opt}
-                    onClick={toggle}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      padding: '3px 6px',
-                      borderRadius: 'var(--radius-sm)',
-                      border: `1px solid ${isChecked ? 'var(--color-success-border)' : 'var(--color-border-light)'}`,
-                      background: isChecked ? 'var(--color-success-light)' : 'var(--color-bg)',
-                      fontSize: 11,
-                      cursor: 'pointer',
-                      userSelect: 'none',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      readOnly
-                      style={{ pointerEvents: 'none', marginRight: 2 }}
-                    />
-                    <span style={{ color: 'var(--color-text)' }}>{opt}</span>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        }
 
         const radioOpts = getRadioOptions(field.label);
         if (radioOpts) {
@@ -386,7 +360,7 @@ function FieldValue({
               onClick={(e) => e.stopPropagation()}
             >
               {radioOpts.map(opt => {
-                const isChecked = field.value.trim().toLowerCase() === opt.toLowerCase();
+                const isChecked = (field.value ?? '').trim().toLowerCase() === opt.toLowerCase();
                 return (
                   <label 
                     key={opt} 
@@ -401,10 +375,13 @@ function FieldValue({
                     }}
                   >
                     <input
-                      type="radio"
+                      type={isMultiSelect ? "checkbox" : "radio"}
                       name={field.label}
                       checked={isChecked}
-                      onChange={() => onValueChange(opt)}
+                      onChange={() => {
+                        if (isMultiSelect && isChecked) onValueChange('');
+                        else onValueChange(opt);
+                      }}
                     />
                     {opt}
                   </label>
@@ -413,17 +390,24 @@ function FieldValue({
             </div>
           );
         }
-        if (isCheckboxField) {
+        if (isCheckboxField && !field.label.startsWith('7.1 ') && !field.label.startsWith('6.1 ')) {
+          const fv = (field.value ?? '').trim().toLowerCase();
+          const isChecked = fv === 'yes' || fv === 'true' || fv === '✓';
           return (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+            <div 
+              onClick={(e) => { e.stopPropagation(); onValueChange(isChecked ? 'no' : 'yes'); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, cursor: 'pointer' }}
+            >
               <CheckboxIcon value={field.value} />
-              <span style={{ fontSize: 13, color: 'var(--color-text)' }}>{field.value}</span>
+              <span style={{ fontSize: 13, color: 'var(--color-text)' }}>{field.value ?? 'empty'}</span>
             </div>
           );
         }
         if (editing) {
           return (
-            <InlineEditor value={field.value} onSave={handleSave} onCancel={handleCancel} />
+            <div style={{ flex: 1 }}>
+              <InlineEditor value={field.value} onSave={handleSave} onCancel={handleCancel} multiline={field.label.includes('8.1') || field.label.includes('8.3')} />
+            </div>
           );
         }
         return null;
@@ -431,19 +415,20 @@ function FieldValue({
         <div
           onDoubleClick={handleStartEdit}
           style={{
-            fontSize: 13,
+            flex: 1,
+            fontSize: 14,
             color: 'var(--color-text)',
-            lineHeight: 1.4,
+            lineHeight: 1.5,
             padding: '2px 0',
-            minHeight: 18,
+            minHeight: 20,
             wordBreak: 'break-word',
             display: 'flex',
             alignItems: 'center',
-            gap: 6,
+            gap: 8,
           }}
         >
-          <span style={{ flex: 1 }}>
-            {field.value || <span style={{ color: 'var(--color-text-placeholder)', fontStyle: 'italic' }}>empty</span>}
+          <span style={{ flex: 1, fontSize: 14, fontWeight: 500, color: field.value ? 'var(--color-primary-dark)' : 'var(--color-text-placeholder)', borderBottom: '1px solid var(--color-border-light)', paddingBottom: 2, minHeight: 20 }}>
+            {field.value || <span style={{ fontStyle: 'italic' }}>empty</span>}
           </span>
           {hovered && (
             <button
@@ -507,7 +492,7 @@ function TableCell({ field, isSelected, onFieldClick, onFieldUpdate }: {
 }) {
   const [editing, setEditing] = useState(false);
   const [hovered, setHovered] = useState(false);
-  const wasCorrected = field.original_value !== null;
+  const wasCorrected = field.is_edited === true;
   const cb = isCheckbox(field);
   const { icon, color } = cb ? checkboxDisplay(field.value) : { icon: '', color: '' };
 
@@ -527,11 +512,11 @@ function TableCell({ field, isSelected, onFieldClick, onFieldUpdate }: {
   return (
     <td
       onClick={() => onFieldClick(field)}
+      onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
         padding: '4px 6px',
-        borderBottom: '1px solid var(--color-border-light)',
         cursor: 'pointer',
         background: isSelected ? 'var(--color-primary-light)' : wasCorrected ? 'var(--color-success-light)' : 'transparent',
         borderRadius: 'var(--radius-sm)',
@@ -587,6 +572,17 @@ function TableView({
       columns.add(column);
       if (!rows.has(rowKey)) rows.set(rowKey, new Map());
       rows.get(rowKey)!.set(column, f);
+    } else if (f.label.includes('4.4.1') || f.label.includes('4.3.1') || f.label.includes('4.6.1')) {
+      // Special case for tables that might not have 'Row N'
+      const parts = f.label.split(/ — | - | – /);
+      if (parts.length >= 2) {
+        const column = parts.slice(1).join(' ').trim();
+        const prefix = parts[0].trim(); // e.g. 4.4.1 Income Sources
+        const rowKey = `${prefix}|1`;
+        columns.add(column);
+        if (!rows.has(rowKey)) rows.set(rowKey, new Map());
+        rows.get(rowKey)!.set(column, f);
+      }
     }
   }
 
@@ -594,49 +590,74 @@ function TableView({
     return (
       <div style={{ padding: '4px 0' }}>
         {fields.map(f => (
-          <FieldRow key={f.label} field={f} isSelected={selectedField === f} onSelect={() => onFieldClick(f)} onValueChange={(v) => onFieldUpdate(f, v)} />
+          <FieldRow key={f.label} field={f} isSelected={selectedField?.label === f.label} onSelect={() => onFieldClick(f)} onValueChange={(v) => onFieldUpdate(f, v)} />
         ))}
       </div>
     );
   }
 
   const colArr = Array.from(columns);
+  const firstMatch = fields[0]?.label.match(TABLE_ROW_RE);
+  let tableTitle = firstMatch ? firstMatch[1] : '';
+  if (!tableTitle) {
+    const label = fields[0]?.label;
+    if (label) {
+      const parts = label.split(/ — | - | – /);
+      if (parts.length >= 2) {
+        tableTitle = parts.slice(0, -1).join(' — ');
+      }
+    }
+  }
 
   return (
-    <div style={{ overflowX: 'auto', padding: '4px 0' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign: 'left', padding: '4px 6px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', fontWeight: 600, whiteSpace: 'nowrap' }}>#</th>
-            {colArr.map(col => (
-              <th key={col} style={{ textAlign: 'left', padding: '4px 6px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', fontWeight: 600, whiteSpace: 'nowrap' }}>{col}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {Array.from(rows.entries()).map(([rowKey, cols]) => {
-            const [, rowNum] = rowKey.split('|');
-            return (
-              <tr key={rowKey}>
-                <td style={{ padding: '4px 6px', borderBottom: '1px solid var(--color-border-light)', color: 'var(--color-text-muted)', fontSize: 11, whiteSpace: 'nowrap', verticalAlign: 'top' }}>{rowNum}</td>
-                {colArr.map(col => {
-                  const f = cols.get(col);
-                  if (!f) return <td key={col} style={{ padding: '4px 6px', borderBottom: '1px solid var(--color-border-light)' }}><span style={{ color: 'var(--color-text-placeholder)', fontStyle: 'italic' }}>—</span></td>;
-                  return (
-                    <TableCell
-                      key={col}
-                      field={f}
-                      isSelected={selectedField === f}
-                      onFieldClick={onFieldClick}
-                      onFieldUpdate={onFieldUpdate}
-                    />
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div style={{ padding: '8px 12px 16px 12px' }}>
+      {tableTitle && (
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#000000', marginBottom: 8 }}>
+          {tableTitle}
+        </div>
+      )}
+      <div style={{ 
+        overflowX: 'auto', 
+        border: '1px solid var(--color-border)', 
+        borderRadius: 'var(--radius-md)',
+        background: 'var(--color-surface)',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+      }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: '#f8fafc' }}>
+              <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '2px solid var(--color-border)', color: '#000000', fontWeight: 700, whiteSpace: 'nowrap' }}>#</th>
+              {colArr.map(col => (
+                <th key={col} style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '2px solid var(--color-border)', color: '#000000', fontWeight: 700, whiteSpace: 'nowrap' }}>{col}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from(rows.entries()).map(([rowKey, cols], rowIdx) => {
+              const [, rowNum] = rowKey.split('|');
+              const isEven = rowIdx % 2 === 0;
+              return (
+                <tr key={rowKey} style={{ background: isEven ? 'transparent' : '#f8fafc', borderBottom: '1px solid var(--color-border-light)' }}>
+                  <td style={{ padding: '8px 12px', color: 'var(--color-text-muted)', fontSize: 12, whiteSpace: 'nowrap', verticalAlign: 'top', fontWeight: 500 }}>{rowNum}</td>
+                  {colArr.map(col => {
+                    const f = cols.get(col);
+                    if (!f) return <td key={col} style={{ padding: '8px 12px' }}><span style={{ color: 'var(--color-text-placeholder)', fontStyle: 'italic' }}>—</span></td>;
+                    return (
+                      <TableCell
+                        key={col}
+                        field={f}
+                        isSelected={selectedField?.label === f.label}
+                        onFieldClick={onFieldClick}
+                        onFieldUpdate={onFieldUpdate}
+                      />
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -650,7 +671,7 @@ function CheckboxItem({ field, isSelected, onFieldClick, onFieldUpdate }: {
   const [cbEdit, setCbEdit] = useState(false);
   const [cbHover, setCbHover] = useState(false);
   const { icon, color } = checkboxDisplay(field.value);
-  const wasCorrected = field.original_value !== null;
+  const wasCorrected = field.is_edited === true;
 
   if (cbEdit) {
     return (
@@ -663,6 +684,7 @@ function CheckboxItem({ field, isSelected, onFieldClick, onFieldUpdate }: {
   return (
     <div
       onClick={() => onFieldClick(field)}
+      onDoubleClick={(e) => { e.stopPropagation(); setCbEdit(true); }}
       onMouseEnter={() => setCbHover(true)}
       onMouseLeave={() => setCbHover(false)}
       style={{
@@ -676,10 +698,10 @@ function CheckboxItem({ field, isSelected, onFieldClick, onFieldUpdate }: {
         transition: 'border-color var(--transition-fast)',
       }}
     >
-      <span style={{ color: 'var(--color-label)', fontWeight: 500 }}>{field.label}</span>
+      <span style={{ color: '#000000', fontWeight: 700 }}>{field.label}</span>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--color-text)' }}>
-        <CheckboxIcon value={field.value} />
-        {field.value}
+          <CheckboxIcon value={field.value} />
+            {field.value ?? 'empty'}
       </span>
       {cbHover && (
         <button
@@ -697,181 +719,65 @@ function CheckboxItem({ field, isSelected, onFieldClick, onFieldUpdate }: {
   );
 }
 
-function CheckboxDropdownGroup({
-  groupLabel,
-  fields,
-  selectedField,
-  onFieldClick,
-  onFieldUpdate,
-}: {
-  groupLabel: string;
-  fields: Field[];
-  selectedField: Field | null;
+function SpecifyItem({ field, onFieldClick, onFieldUpdate }: {
+  field: Field;
   onFieldClick: (f: Field) => void;
   onFieldUpdate: (f: Field, newVal: string) => void;
 }) {
-  const activeSelected = fields.find(f => {
-    const v = f.value.trim().toLowerCase();
-    return v === 'yes' || v === 'true' || v === '✓';
-  });
+  const [editing, setEditing] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
-  const isGroupSelected = selectedField ? fields.includes(selectedField) : false;
-
-  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const chosenLabel = e.target.value;
-    fields.forEach(f => {
-      const parts = f.label.split(' — ');
-      const optName = parts[1] || parts[0];
-      const isChosen = optName === chosenLabel;
-      const newVal = isChosen ? 'yes' : 'no';
-      if (f.value !== newVal) {
-        onFieldUpdate(f, newVal);
-      }
-    });
-  };
-
-  const options = fields.map(f => {
-    const parts = f.label.split(' — ');
-    return parts[1] || parts[0];
-  });
-
-  const currentVal = activeSelected ? (activeSelected.label.split(' — ')[1] || activeSelected.label) : '';
-
-  return (
-    <div
-      onClick={() => onFieldClick(activeSelected || fields[0])}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4,
-        padding: '6px 10px',
-        border: `1px solid ${isGroupSelected ? 'var(--color-primary)' : 'var(--color-border)'}`,
-        borderRadius: 'var(--radius-md)',
-        background: isGroupSelected ? 'var(--color-primary-light)' : 'var(--color-surface)',
-        marginBottom: 6,
-        cursor: 'pointer',
-        boxSizing: 'border-box',
-        width: '100%',
-      }}
-    >
-      <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)', userSelect: 'none' }}>
-        {groupLabel}
-      </label>
-      <select
-        value={currentVal}
-        onChange={handleChange}
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%',
-          padding: '6px 8px',
-          borderRadius: 'var(--radius-sm)',
-          border: '1px solid var(--color-border)',
-          background: 'var(--color-surface)',
-          color: 'var(--color-text)',
-          fontSize: 13,
-          outline: 'none',
-        }}
-      >
-        <option value="">-- Select Option --</option>
-        {options.map(opt => (
-          <option key={opt} value={opt}>
-            {opt}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-function CheckboxMultiSelectGroup({
-  groupLabel,
-  fields,
-  selectedField,
-  onFieldClick,
-  onFieldUpdate,
-}: {
-  groupLabel: string;
-  fields: Field[];
-  selectedField: Field | null;
-  onFieldClick: (f: Field) => void;
-  onFieldUpdate: (f: Field, newVal: string) => void;
-}) {
-  const isGroupSelected = selectedField ? fields.includes(selectedField) : false;
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        padding: '8px 10px',
-        border: `1px solid ${isGroupSelected ? 'var(--color-primary)' : 'var(--color-border)'}`,
-        borderRadius: 'var(--radius-md)',
-        background: 'var(--color-surface)',
-        marginBottom: 6,
-        width: '100%',
-        boxSizing: 'border-box',
-      }}
-    >
-      <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)', userSelect: 'none' }}>
-        {groupLabel} (Multi-Select)
-      </label>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-        {fields.map(f => {
-          const optName = f.label.split(' — ')[1] || f.label;
-          const isChecked = f.value.trim().toLowerCase() === 'yes' || f.value.trim().toLowerCase() === 'true' || f.value.trim().toLowerCase() === '✓';
-          const isItemSel = selectedField === f;
-
-          const toggleChecked = (e: React.MouseEvent) => {
-            e.stopPropagation();
-            onFieldClick(f);
-            onFieldUpdate(f, isChecked ? 'no' : 'yes');
-          };
-
-          return (
-            <div
-              key={f.label}
-              onClick={toggleChecked}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '4px 8px',
-                borderRadius: 'var(--radius-sm)',
-                border: `1px solid ${isItemSel ? 'var(--color-primary)' : isChecked ? 'var(--color-success-border)' : 'var(--color-border-light)'}`,
-                background: isItemSel ? 'var(--color-primary-light)' : isChecked ? 'var(--color-success-light)' : 'var(--color-bg)',
-                fontSize: 12,
-                cursor: 'pointer',
-                userSelect: 'none',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={isChecked}
-                readOnly
-                style={{ pointerEvents: 'none', marginRight: 4 }}
-              />
-              <span style={{ color: 'var(--color-text)' }}>{optName}</span>
-            </div>
-          );
-        })}
+  if (editing) {
+    return (
+      <div style={{ padding: '2px 0' }}>
+        <InlineEditor value={field.value} onSave={(v) => { onFieldUpdate(field, v); setEditing(false); }} onCancel={() => setEditing(false)} />
       </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={() => onFieldClick(field)}
+      onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', position: 'relative' }}
+    >
+      <span style={{ color: 'var(--color-text-secondary)' }}>(specify)</span>
+      <span style={{ color: 'var(--color-text)', borderBottom: '1px solid var(--color-border)', minWidth: 80, padding: '0 4px' }}>
+        {field.value || <span style={{ fontStyle: 'italic', color: 'var(--color-text-placeholder)' }}>empty</span>}
+      </span>
+      {hovered && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+          style={{
+            border: 'none', background: 'transparent', cursor: 'pointer',
+            fontSize: 12, color: 'var(--color-text-muted)', padding: '1px 3px', borderRadius: 2,
+            position: 'absolute', right: -24
+          }}
+          title="Edit value"
+        >
+          ✎
+        </button>
+      )}
     </div>
   );
 }
 
 function CheckboxGroupView({
   fields, selectedField, onFieldClick, onFieldUpdate,
+  onBulkFieldUpdate,
 }: {
   fields: Field[];
   selectedField: Field | null;
   onFieldClick: (f: Field) => void;
   onFieldUpdate: (f: Field, newVal: string) => void;
+  onBulkFieldUpdate?: (updates: {field: Field, newVal: string}[]) => void;
 }) {
   const groups = useMemo(() => {
     const map = new Map<string, Field[]>();
     fields.forEach(f => {
-      const parts = f.label.split(' — ');
+      const parts = f.label.split(/ — | - | – /);
       const prefix = parts[0];
       if (!map.has(prefix)) {
         map.set(prefix, []);
@@ -882,30 +788,93 @@ function CheckboxGroupView({
   }, [fields]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', padding: '4px 0' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
       {groups.map(([groupLabel, grpFields]) => {
-        const isMulti = groupLabel.toLowerCase().includes('assets at home');
-        if (isMulti) {
-          return (
-            <CheckboxMultiSelectGroup
-              key={groupLabel}
-              groupLabel={groupLabel}
-              fields={grpFields}
-              selectedField={selectedField}
-              onFieldClick={onFieldClick}
-              onFieldUpdate={onFieldUpdate}
-            />
-          );
-        }
+        const isSingleSelectCol = /^(1\.3|3\.1|3\.2|3\.3|3\.4\.1|3\.5|3\.6|4\.3|4\.4|4\.6)/.test(groupLabel);
         return (
-          <CheckboxDropdownGroup
+          <div
             key={groupLabel}
-            groupLabel={groupLabel}
-            fields={grpFields}
-            selectedField={selectedField}
-            onFieldClick={onFieldClick}
-            onFieldUpdate={onFieldUpdate}
-          />
+            style={{
+              padding: '12px 16px',
+              borderBottom: '1px solid var(--color-border)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'stretch',
+              gap: 8,
+            }}
+          >
+            <label style={{ fontSize: 13, fontWeight: 700, color: '#000000', userSelect: 'none', flex: 'none', lineHeight: 1.4 }}>
+              {groupLabel}
+            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, flex: 1, alignItems: 'center' }}>
+              {grpFields.map(f => {
+                const parts = f.label.split(/ — | - | – /);
+                const optName = parts.slice(1).join(' — ') || f.label;
+                
+                const hasSpecifySibling = grpFields.some(sibling => {
+                  const sn = sibling.label.split(/ — | - | – /).slice(1).join(' — ').toLowerCase();
+                  return sn.includes('specify');
+                });
+                const isOthersText = /^(other|others)\s*:?\s*$/i.test(optName.trim()) && !hasSpecifySibling;
+                const isSpecify = optName.toLowerCase().includes('specify') || isOthersText;
+                if (isSpecify) {
+                  return (
+                    <SpecifyItem
+                      key={f.label}
+                      field={f}
+                      onFieldClick={onFieldClick}
+                      onFieldUpdate={onFieldUpdate}
+                    />
+                  );
+                }
+
+                const fv = (f.value ?? '').trim().toLowerCase();
+                const isChecked = fv === 'yes' || fv === 'true' || fv === '✓';
+                const isItemSel = selectedField?.label === f.label;
+
+                const toggleChecked = () => {
+                  onFieldClick(f);
+
+                  if (isSingleSelectCol && onBulkFieldUpdate) {
+                    const willCheck = !isChecked;
+                    if (willCheck) {
+                      onBulkFieldUpdate(grpFields.map(sibling => ({
+                        field: sibling,
+                        newVal: sibling === f ? 'yes' : 'no',
+                      })));
+                    } else {
+                      onFieldUpdate(f, 'no');
+                    }
+                  } else {
+                    onFieldUpdate(f, isChecked ? 'no' : 'yes');
+                  }
+                };
+
+                return (
+                  <label
+                    key={f.label}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: 14,
+                      cursor: 'pointer',
+                      color: isItemSel ? 'var(--color-primary)' : 'var(--color-text)',
+                      userSelect: 'none',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleChecked()}
+                      style={{ width: 14, height: 14, margin: 0 }}
+                    />
+                    {optName}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
         );
       })}
     </div>
@@ -914,12 +883,34 @@ function CheckboxGroupView({
 
 // ── Main component ──────────────────────────────────────────────────────────
 
+function fieldSortKey(f: Field): number[] {
+  const m = f.label.match(/^(\d+(?:\.\d+)*)/);
+  if (m) {
+    return m[1].split('.').map(Number);
+  }
+  return [-1];
+}
+
+function fieldCompare(a: Field, b: Field): number {
+  const ka = fieldSortKey(a);
+  const kb = fieldSortKey(b);
+  for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+    const va = ka[i] ?? 0;
+    const vb = kb[i] ?? 0;
+    if (va !== vb) return va - vb;
+  }
+  return 0;
+}
+
+type UIBlock =
+  | { type: 'field'; field: Field }
+  | { type: 'table'; prefix: string; fields: Field[] }
+  | { type: 'checkbox_group'; prefix: string; fields: Field[] };
+
 interface SectionGroup {
   sectionNumber: number | null;
   sectionName: string;
-  fields: Field[];
-  tables: Field[][];
-  checkboxGroups: Field[][];
+  blocks: UIBlock[];
 }
 
 interface Props {
@@ -942,7 +933,7 @@ export default function ExtractedDataPanel({
   const [collapsedSections, setCollapsedSections] = useState<Set<number | null>>(new Set());
 
   const pageFields = useMemo(() =>
-    fields.filter(f => f.page === currentPage),
+    fields.filter(f => f.page === currentPage && !(f.page === 3 && f.label.startsWith('4.3.1'))),
     [fields, currentPage]
   );
 
@@ -957,11 +948,31 @@ export default function ExtractedDataPanel({
 
   const handleValueChange = useCallback((field: Field, newVal: string) => {
     onFieldsUpdated(fields.map(f => {
-      if (f === field) {
+      if (f.label === field.label) {
+        if (valuesEqual(newVal, f.value)) return f;
+        const isReverted = f.original_value != null && valuesEqual(newVal, f.original_value);
         return {
           ...f,
           value: newVal,
-          original_value: f.original_value ?? f.value,
+          original_value: isReverted ? null : (f.original_value ?? f.value),
+          is_edited: isReverted ? false : true,
+        };
+      }
+      return f;
+    }));
+  }, [fields, onFieldsUpdated]);
+
+  const handleBulkValueChange = useCallback((updates: {field: Field, newVal: string}[]) => {
+    onFieldsUpdated(fields.map(f => {
+      const update = updates.find(u => u.field.label === f.label);
+      if (update) {
+        if (valuesEqual(update.newVal, f.value)) return f;
+        const isReverted = f.original_value != null && valuesEqual(update.newVal, f.original_value);
+        return {
+          ...f,
+          value: update.newVal,
+          original_value: isReverted ? null : (f.original_value ?? f.value),
+          is_edited: !isReverted,
         };
       }
       return f;
@@ -987,9 +998,25 @@ export default function ExtractedDataPanel({
       sectionNames.set(s.number, s.name);
     }
 
+    // Filter out hidden helpers or internal fields that don't correspond to PDF questions
+    const visibleFields = pageFields.filter(f => {
+      const lbl = f.label.trim().toLowerCase();
+      if (lbl.includes('blank_text_below')) return false;
+      if (lbl.endsWith('notes') && (lbl.includes(' - ') || lbl.includes(' — ') || lbl.includes(' – '))) return false;
+      
+      // Filter out old aggregated parent fields that cause duplicates because they are now extracted individually
+      if (lbl === '2.4 government id verified') return false;
+      if (lbl === '4.5 income type') return false;
+
+      // Deduplicate 4.4.1 fields — keep verbose labels, drop short duplicates
+      if (lbl.startsWith('4.4.1') && !lbl.includes('if yes,')) return false;
+      
+      return true;
+    });
+
     // Group fields by section_number and detect tables/checkbox groups
     const fieldsBySection = new Map<number | null, Field[]>();
-    for (const f of pageFields) {
+    for (const f of visibleFields) {
       const sn = f.section_number;
       if (!fieldsBySection.has(sn)) fieldsBySection.set(sn, []);
       fieldsBySection.get(sn)!.push(f);
@@ -998,37 +1025,75 @@ export default function ExtractedDataPanel({
     for (const [sn, secFields] of fieldsBySection) {
       const name = sn !== null ? sectionNames.get(sn) || `Section ${sn}` : 'Header';
 
-      // Detect tables: fields sharing the same section prefix in label
-      const tableFields = new Map<string, Field[]>();
-      const checkboxFields: Field[] = [];
-      const otherFields: Field[] = [];
+      const blocks: UIBlock[] = [];
+      let currentTable: { prefix: string; fields: Field[] } | null = null;
+      let currentCheckboxGroup: { prefix: string; fields: Field[] } | null = null;
 
-      for (const f of secFields) {
+      const sortedSecFields = [...secFields].sort(fieldCompare);
+
+      const flushTable = () => {
+        if (currentTable) {
+          blocks.push({ type: 'table', prefix: currentTable.prefix, fields: currentTable.fields });
+          currentTable = null;
+        }
+      };
+      const flushCheckboxGroup = () => {
+        if (currentCheckboxGroup) {
+          blocks.push({ type: 'checkbox_group', prefix: currentCheckboxGroup.prefix, fields: currentCheckboxGroup.fields });
+          currentCheckboxGroup = null;
+        }
+      };
+
+      for (const f of sortedSecFields) {
         const match = f.label.match(TABLE_ROW_RE);
-        if (match) {
-          const sectionPrefix = match[1];
-          if (!tableFields.has(sectionPrefix)) tableFields.set(sectionPrefix, []);
-          tableFields.get(sectionPrefix)!.push(f);
-        } else if (isCheckbox(f) && (f.label.includes(' — ') || f.label.includes(' - ') || f.label.includes(' – '))) {
-          checkboxFields.push(f);
+        const is441 = f.label.includes('4.4.1');
+        const is431 = f.label.includes('4.3.1');
+        const is461 = f.label.includes('4.6.1');
+        
+        if (match || is441 || is431 || is461) {
+          flushCheckboxGroup();
+          let sectionPrefix = match ? match[1] : '';
+          if (!sectionPrefix) {
+            const parts = f.label.split(/ — | - | – /);
+            if (parts.length >= 2) {
+              sectionPrefix = parts.slice(0, -1).join(' — ');
+            }
+          }
+          if (currentTable && currentTable.prefix !== sectionPrefix) {
+            flushTable();
+          }
+          if (!currentTable) {
+            currentTable = { prefix: sectionPrefix, fields: [] };
+          }
+          currentTable.fields.push(f);
+        } else if (
+          (f.label.includes(' — ') || f.label.includes(' - ') || f.label.includes(' – ')) &&
+          !f.label.toLowerCase().includes('notes') &&
+          !f.label.includes('2.2 Relationship Details')
+        ) {
+          flushTable();
+          const parts = f.label.split(/ — | - | – /);
+          const prefix = parts[0];
+          if (currentCheckboxGroup && currentCheckboxGroup.prefix !== prefix) {
+            flushCheckboxGroup();
+          }
+          if (!currentCheckboxGroup) {
+            currentCheckboxGroup = { prefix, fields: [] };
+          }
+          currentCheckboxGroup.fields.push(f);
         } else {
-          otherFields.push(f);
+          flushTable();
+          flushCheckboxGroup();
+          blocks.push({ type: 'field', field: f });
         }
       }
-
-      const cbPrefixes = new Set<string>();
-      for (const f of checkboxFields) {
-        const parts = f.label.split(' — ');
-        cbPrefixes.add(parts[0]);
-      }
-      const filteredOtherFields = otherFields.filter(f => !cbPrefixes.has(f.label));
+      flushTable();
+      flushCheckboxGroup();
 
       map.set(sn, {
         sectionNumber: sn,
         sectionName: name,
-        fields: filteredOtherFields,
-        tables: Array.from(tableFields.values()),
-        checkboxGroups: checkboxFields.length > 0 ? [checkboxFields] : [],
+        blocks,
       });
     }
 
@@ -1044,11 +1109,11 @@ export default function ExtractedDataPanel({
   }, [pageFields, sections]);
 
   const sectionTitleStyle: React.CSSProperties = {
-    fontSize: 12,
-    fontWeight: 600,
-    color: 'var(--color-text)',
-    padding: '8px 12px',
-    background: 'var(--color-bg)',
+    fontSize: 13,
+    fontWeight: 700,
+    color: '#ffffff',
+    padding: '6px 10px',
+    background: '#4b5563',
     borderBottom: '1px solid var(--color-border)',
     display: 'flex',
     alignItems: 'center',
@@ -1065,6 +1130,7 @@ export default function ExtractedDataPanel({
       display: 'flex',
       flexDirection: 'column',
       fontFamily: 'var(--font-sans)',
+      background: '#f3f4f6',
     }}>
       {/* ── Toolbar ── */}
       {!hideToolbar && (
@@ -1116,7 +1182,7 @@ export default function ExtractedDataPanel({
       )}
 
       {/* ── Section list ── */}
-      <div style={{ flex: 1, overflowY: hideToolbar ? 'visible' : 'auto', overflowX: 'hidden' }}>
+      <div style={{ flex: 1, overflowY: hideToolbar ? 'visible' : 'auto', overflowX: 'hidden', background: '#f3f4f6', border: '1px solid var(--color-border)' }}>
         {sectionGroups.length === 0 && (
           <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
             No fields on this page.
@@ -1125,22 +1191,28 @@ export default function ExtractedDataPanel({
 
         {sectionGroups.map(group => {
           const isCollapsed = collapsedSections.has(group.sectionNumber);
-          const hasContent = group.fields.length > 0 || group.tables.length > 0 || group.checkboxGroups.length > 0;
+          const hasContent = group.blocks.length > 0;
 
           return (
-            <div key={group.sectionNumber ?? '__header__'} style={{ borderBottom: '1px solid var(--color-border)' }}>
+            <div key={group.sectionNumber ?? '__header__'} style={{ 
+              border: '1px solid #e5e7eb', 
+              borderRadius: 'var(--radius-md)', 
+              margin: '8px 12px', 
+              background: '#f9fafb',
+              overflow: 'hidden'
+            }}>
               {/* Section header */}
               <div
                 style={sectionTitleStyle}
                 onClick={() => toggleSection(group.sectionNumber)}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-active)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-bg)'; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#6b7280'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = '#4b5563'; }}
               >
                 <Chevron expanded={!isCollapsed} />
                 <span>{group.sectionName}</span>
                 {hasContent && (
                   <span style={{ color: 'var(--color-text-muted)', fontSize: 11, fontWeight: 400 }}>
-                    ({group.fields.length + group.tables.reduce((s, t) => s + t.length, 0) + group.checkboxGroups.reduce((s, g) => s + g.length, 0)})
+                    ({group.blocks.reduce((acc, b) => acc + (b.type === 'field' ? 1 : b.fields.length), 0)})
                   </span>
                 )}
               </div>
@@ -1148,43 +1220,43 @@ export default function ExtractedDataPanel({
               {/* Section content */}
               {!isCollapsed && hasContent && (
                 <div style={{ padding: '4px 12px 8px' }}>
-                  {/* Regular fields */}
-                  {group.fields.map(f => (
-                    <FieldRow
-                      key={f.label}
-                      field={f}
-                      isSelected={selectedField === f}
-                      onSelect={() => onFieldClick(f)}
-                      onValueChange={(v) => handleValueChange(f, v)}
-                    />
-                  ))}
-
-                  {/* Tables */}
-                  {group.tables.map((tbl, idx) => (
-                    <div key={`table-${idx}`} style={{ marginTop: 6 }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 4 }}>
-                        Table {idx + 1}
-                      </div>
-                      <TableView
-                        fields={tbl}
-                        selectedField={selectedField}
-                        onFieldClick={onFieldClick}
-                        onFieldUpdate={handleValueChange}
-                      />
-                    </div>
-                  ))}
-
-                  {/* Checkbox groups */}
-                  {group.checkboxGroups.map((grp, idx) => (
-                    <div key={`cb-${idx}`} style={{ marginTop: 4 }}>
-                      <CheckboxGroupView
-                        fields={grp}
-                        selectedField={selectedField}
-                        onFieldClick={onFieldClick}
-                        onFieldUpdate={handleValueChange}
-                      />
-                    </div>
-                  ))}
+                  {group.blocks.map((block, idx) => {
+                    if (block.type === 'field') {
+                      return (
+                        <FieldRow
+                          key={block.field.label}
+                          field={block.field}
+                          isSelected={selectedField?.label === block.field.label}
+                          onSelect={() => onFieldClick(block.field)}
+                          onValueChange={(v) => handleValueChange(block.field, v)}
+                        />
+                      );
+                    } else if (block.type === 'table') {
+                      return (
+                        <div key={`table-${idx}`} style={{ marginTop: 6, marginBottom: 6 }}>
+                          <TableView
+                            fields={block.fields}
+                            selectedField={selectedField}
+                            onFieldClick={onFieldClick}
+                            onFieldUpdate={handleValueChange}
+                          />
+                        </div>
+                      );
+                    } else if (block.type === 'checkbox_group') {
+                      return (
+                        <div key={`cb-${idx}`} style={{ marginTop: 4, marginBottom: 4 }}>
+                          <CheckboxGroupView
+                            fields={block.fields}
+                            selectedField={selectedField}
+                            onFieldClick={onFieldClick}
+                            onFieldUpdate={handleValueChange}
+                            onBulkFieldUpdate={handleBulkValueChange}
+                          />
+                        </div>
+                      );
+                    }
+                    return null;
+                  })}
                 </div>
               )}
 

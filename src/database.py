@@ -449,24 +449,32 @@ async def upsert_ocr_document(
         rj["job_id"] = job_id
         data["result_json"] = json.dumps(rj)
 
-        # ambiguous_fields is embedded in result_json._ambiguous_fields
-        # and does not need a separate migration-dependent column
-
-        raw_fields = rj.get("fields", [])
+        # Collect fields from both single-doc (fields) and batch (pdfs[n].fields) modes
+        raw_fields: list[dict] = list(rj.get("fields", []) or [])
+        if not raw_fields and isinstance(rj.get("pdfs"), list):
+            for pdf in rj["pdfs"]:
+                pdf_fields = pdf.get("fields", [])
+                if pdf_fields:
+                    raw_fields.extend(pdf_fields)
         if raw_fields:
+            sample_labels = [f.get("label","")[:60] for f in raw_fields[:10]]
+            logger.info(
+                "upsert_ocr_document: raw_fields=%d, sample_labels=%s",
+                len(raw_fields), sample_labels,
+            )
             structured = _extract_structured_fields(raw_fields)
+            logger.info(
+                "upsert_ocr_document: extracted %d structured columns: %s",
+                len(structured), list(structured.keys())[:8],
+            )
             for col, val in structured.items():
                 if val is not None:
                     if col in SKIP_IF_EMPTY_COLUMNS and isinstance(val, str) and not val.strip():
                         continue
                     data[col] = val
-            logger.debug(
-                "upsert_ocr_document: mapped %d structured columns from %d fields",
-                len(structured), len(raw_fields),
-            )
 
-    logger.debug(
-        "Upsert payload columns: %s (values omitted for PII safety)",
+    logger.info(
+        "upsert_ocr_document: payload columns=%s",
         list(data.keys()),
     )
 

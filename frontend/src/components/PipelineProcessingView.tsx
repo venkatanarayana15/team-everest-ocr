@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 
 interface FieldSummary {
   label: string;
-  value: string;
+  value: string | null;
   confidence: number;
   page: number;
 }

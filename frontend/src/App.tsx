@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import ErrorBoundary from './components/ErrorBoundary';
 import DashboardPage from './pages/DashboardPage';
 import ReviewPage from './pages/ReviewPage';
 import FolderReviewPage from './pages/FolderReviewPage';
@@ -26,30 +27,26 @@ export default function App() {
     setView('folder');
   }, []);
 
-  if (view === 'review' && selectedJobId) {
-    return (
-      <ReviewPage
-        jobIds={jobIds}
-        selectedJobId={selectedJobId}
-        onBack={handleBack}
-        onJobChange={handleJobChange}
-        onJobsUpdate={setJobIds}
-      />
-    );
-  }
-
-  if (view === 'folder' && selectedJobId) {
-    return (
-      <FolderReviewPage
-        jobId={selectedJobId}
-        onBack={handleBack}
-      />
-    );
-  }
-
   return (
-    <DashboardPage
-      onSelectBatch={handleSelectBatch}
-    />
+    <ErrorBoundary>
+      {view === 'review' && selectedJobId ? (
+        <ReviewPage
+          jobIds={jobIds}
+          selectedJobId={selectedJobId}
+          onBack={handleBack}
+          onJobChange={handleJobChange}
+          onJobsUpdate={setJobIds}
+        />
+      ) : view === 'folder' && selectedJobId ? (
+        <FolderReviewPage
+          jobId={selectedJobId}
+          onBack={handleBack}
+        />
+      ) : (
+        <DashboardPage
+          onSelectBatch={handleSelectBatch}
+        />
+      )}
+    </ErrorBoundary>
   );
 }

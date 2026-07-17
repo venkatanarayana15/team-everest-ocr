@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Field } from '../types';
+import { correctField } from '../api/client';
 import ConfidenceBar from './ConfidenceBar';
 
 interface Props {
@@ -35,12 +36,12 @@ function statusBadge(field: Field): { label: string; color: string } | null {
 
 const CHECKBOX_VALUES = new Set(['✓', '✗', '?', '[✓]', '[✗]', '[—]', 'yes', 'no']);
 
-function isCheckbox(val: string): boolean {
-  return CHECKBOX_VALUES.has(val.toLowerCase().trim());
+function isCheckbox(val: string | null): boolean {
+  return CHECKBOX_VALUES.has((val ?? '').toLowerCase().trim());
 }
 
-function CheckboxDisplay({ value }: { value: string }) {
-  const v = value.trim();
+function CheckboxDisplay({ value }: { value: string | null }) {
+  const v = (value ?? '').trim();
   if (v === '✓' || v === '[✓]') {
     return (
       <span style={{
@@ -106,7 +107,7 @@ const FONT_BASE = 16;
 
 export default function FieldCard({ field, isSelected, onClick, jobId, onCorrected }: Props) {
   const [editing, setEditing] = useState(false);
-  const [editValue, setEditValue] = useState(field.value);
+  const [editValue, setEditValue] = useState(field.value ?? '');
   const [saving, setSaving] = useState(false);
   const checkbox = isCheckbox(field.value);
 
@@ -117,39 +118,29 @@ export default function FieldCard({ field, isSelected, onClick, jobId, onCorrect
   const isCorrected = field.original_value !== null && field.original_value !== '';
 
   const toggleCheckbox = () => {
-    const cur = field.value.trim();
-    if (cur === '✓') setEditValue('✗');
-    else if (cur === '✗') setEditValue('✓');
-    else setEditValue('✓');
-    // auto-save after toggle
-    setTimeout(() => {
-      const newVal = cur === '✓' ? '✗' : '✓';
-      fetch(`/correct/${jobId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: field.label, correct_value: newVal }),
-      }).then(r => r.ok && onCorrected(field.label, newVal));
-    }, 0);
+    const newVal = (field.value ?? '').trim() === '✓' ? '✗' : '✓';
+    setEditValue(newVal);
+    correctField(jobId, field.label, newVal).then(
+      () => onCorrected(field.label, newVal),
+      (e) => console.error('Toggle checkbox failed:', e),
+    );
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`/correct/${jobId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: field.label, correct_value: editValue }),
-      });
-      if (res.ok) {
-        onCorrected(field.label, editValue);
-        setEditing(false);
-      }
-    } catch {}
+      await correctField(jobId, field.label, editValue);
+      onCorrected(field.label, editValue);
+      setEditing(false);
+    } catch (e) {
+      console.error('Save correction failed:', e);
+      alert('Failed to save correction. Please try again.');
+    }
     setSaving(false);
   };
 
   const handleCancel = () => {
-    setEditValue(field.value);
+    setEditValue(field.value ?? '');
     setEditing(false);
   };
 
@@ -261,7 +252,7 @@ export default function FieldCard({ field, isSelected, onClick, jobId, onCorrect
                 {field.original_value}
               </span>
             )}
-            {field.value ? <CheckboxDisplay value={field.value} /> : <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>empty</span>}
+            {field.value != null && field.value !== '' ? <CheckboxDisplay value={field.value} /> : <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>empty</span>}
             <span style={{ fontSize: 12, fontWeight: 600, color: pill.color, background: pill.bg, padding: '2px 8px', borderRadius: 999 }}>
               {field.confidence}%
             </span>

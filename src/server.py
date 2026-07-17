@@ -214,6 +214,10 @@ root_logger.addHandler(handler)
 for _noisy in ("httpx", "httpcore", "google.genai", "google_genai", "google.api_core", "google.auth", "urllib3"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
+# Suppress uvicorn's "Exception in ASGI application" tracebacks on Ctrl+C
+# CancelledError during shutdown is normal, not actionable
+logging.getLogger("uvicorn.protocols.http.httptools_impl").setLevel(logging.CRITICAL)
+
 
 
 def _validate_env() -> None:
@@ -247,10 +251,17 @@ async def lifespan(app: FastAPI):
     logger.info("Auto-cleanup thread started (every %ds, max age %ds)", CLEANUP_INTERVAL_SEC, JOB_MAX_AGE_SEC)
     _create_task(_safe_startup_poller())
     _create_task(_reconcile_stuck_jobs_on_startup())
-    yield
-    _stop_cleanup_thread()
-    if DB_AVAILABLE:
-        await close_pool()
+    try:
+        yield
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _stop_cleanup_thread()
+        if DB_AVAILABLE:
+            try:
+                await close_pool()
+            except Exception:
+                pass
 
 
 async def _safe_startup_poller() -> None:
@@ -909,6 +920,8 @@ async def get_result(job_id: str):
 
 @app.get("/pages/{job_id}/{page_num}")
 async def get_page_image(job_id: str, page_num: int, width: int = 0, original: int = 0, pdf_name: str | None = None):
+    if page_num < 1 or page_num > 6:
+        raise HTTPException(422, f"Page number {page_num} out of range (1-6)")
     job_dir = BASE_DIR / job_id
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
@@ -927,45 +940,44 @@ async def get_page_image(job_id: str, page_num: int, width: int = 0, original: i
             except Exception:
                 pass
 
-        if idx == -1:
+        if idx >= 0:
+            pages_dir = job_dir / str(idx) / "pages"
+        else:
             for sub in job_dir.iterdir():
                 if sub.is_dir():
                     if sub.name.startswith("pdf_"):
                         orig_path = sub / "original_name.txt"
                         if orig_path.exists() and orig_path.read_text().strip() == pdf_name:
                             pages_dir = sub / "pages"
+                            pages_dir.mkdir(parents=True, exist_ok=True)
                             break
                     elif sub.name.isdigit():
                         orig_path = sub / "original_name.txt"
                         if orig_path.exists() and orig_path.read_text().strip() == pdf_name:
                             pages_dir = sub / "pages"
+                            pages_dir.mkdir(parents=True, exist_ok=True)
                             break
-        else:
-            batch_pages = job_dir / str(idx) / "pages"
-            if batch_pages.exists():
-                pages_dir = batch_pages
 
         logger.info("get_page_image job=%s page=%d pdf_name=%s idx=%s pages_dir=%s",
                      job_id, page_num, pdf_name, idx, pages_dir)
 
-    if not pages_dir.exists():
+    image_path = pages_dir / (f"page_{page_num}_original.png" if original else f"page_{page_num}.png")
+    if not image_path.exists():
         original_pdf = _find_original_pdf(job_dir, pdf_name)
         if original_pdf:
+            pages_dir.mkdir(parents=True, exist_ok=True)
             return _render_pdf_page(original_pdf, page_num, width, pages_dir)
-        raise HTTPException(404, "Pages directory not found")
-
-    image_path = pages_dir / (f"page_{page_num}_original.png" if original else f"page_{page_num}.png")
-    if image_path.exists():
-        pass
-    else:
-        png_files = sorted(
-            p for p in pages_dir.iterdir()
-            if p.suffix == ".png" and ("_original" in p.stem) == bool(original) and "_ocr" not in p.stem
-        )
-        if 0 <= page_num - 1 < len(png_files):
-            image_path = png_files[page_num - 1]
+        if pages_dir.exists():
+            png_files = sorted(
+                p for p in pages_dir.iterdir()
+                if p.suffix == ".png" and ("_original" in p.stem) == bool(original) and "_ocr" not in p.stem
+            )
+            if 0 <= page_num - 1 < len(png_files):
+                image_path = png_files[page_num - 1]
+            else:
+                raise HTTPException(404, f"Page {page_num} not found")
         else:
-            raise HTTPException(404, f"Page {page_num} not found")
+            raise HTTPException(404, "Pages directory not found and original PDF not available")
 
     if width > 0:
         from PIL import Image
@@ -977,16 +989,20 @@ async def get_page_image(job_id: str, page_num: int, width: int = 0, original: i
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
-        return Response(content=buf.read(), media_type="image/png")
+        return Response(content=buf.read(), media_type="image/png",
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
-    return FileResponse(str(image_path), media_type="image/png")
+    return FileResponse(str(image_path), media_type="image/png",
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 def _find_original_pdf(job_dir: Path, pdf_name: str | None = None) -> str | None:
     if pdf_name:
         pdf_path = job_dir / "pdfs" / pdf_name
         if pdf_path.exists():
+            logger.info("_find_original_pdf: found %s in pdfs/", pdf_name)
             return str(pdf_path)
+        logger.info("_find_original_pdf: %s not in pdfs/, checking result.json...", pdf_name)
         result_path = job_dir / "results" / "result.json"
         if result_path.exists():
             try:
@@ -995,14 +1011,20 @@ def _find_original_pdf(job_dir: Path, pdf_name: str | None = None) -> str | None
                 pdf_names = r.get("pdf_names", [])
                 if pdf_name in pdf_names:
                     idx = pdf_names.index(pdf_name)
-                    sub_original = job_dir / str(idx) / "original.pdf"
+                    sub_original = job_dir / str(idx) / pdf_name
                     if sub_original.exists():
+                        logger.info("_find_original_pdf: found %s at idx=%s", pdf_name, idx)
                         return str(sub_original)
-            except Exception:
-                pass
+                    logger.warning("_find_original_pdf: idx=%d but %s missing at %s", idx, pdf_name, sub_original)
+                else:
+                    logger.warning("_find_original_pdf: pdf_name=%s not in pdf_names=%s", pdf_name, pdf_names)
+            except Exception as e:
+                logger.warning("_find_original_pdf: error reading %s: %s", result_path, e)
     pdf_path = job_dir / "input.pdf"
     if pdf_path.exists():
+        logger.info("_find_original_pdf: falling back to input.pdf")
         return str(pdf_path)
+    logger.warning("_find_original_pdf: no original PDF found for pdf_name=%s in %s", pdf_name, job_dir)
     return None
 
 
@@ -1045,7 +1067,8 @@ def _render_pdf_page(pdf_path: str, page_num: int, width: int, pages_dir: Path) 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
-    return Response(content=buf.read(), media_type="image/png")
+    return Response(content=buf.read(), media_type="image/png",
+                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 @app.post("/correct/{job_id}")
@@ -1056,8 +1079,14 @@ async def correct_field(job_id: str, body: dict):
 
     label = body.get("label", "")
     correct_value = body.get("correct_value", "")
+    pdf_name = body.get("pdf_name")  # optional, for batch disambiguation
     if not label:
         raise HTTPException(400, "label is required")
+
+    logger.info(
+        "/correct: job=%s pdf_name=%r label=%r correct_value=%r",
+        job_id, pdf_name, label, correct_value,
+    )
 
     corrections_path = job_dir / "corrections.json"
     corrections = []
@@ -1071,22 +1100,59 @@ async def correct_field(job_id: str, body: dict):
         json.dump(corrections, f, indent=2)
     os.replace(tmp, corrections_path)
 
+    found = False
     result_path = job_dir / "results" / "result.json"
     if result_path.exists():
         with open(result_path) as f:
             result_data = json.load(f)
-        for field in result_data.get("fields", []):
-            if field["label"] == label:
-                if "original_value" not in field or not field["original_value"]:
-                    field["original_value"] = field["value"]
-                field["value"] = correct_value
-                field["confidence"] = 100
-                field["needs_clarification"] = False
-                break
-        tmp = result_path.with_suffix(".tmp")
-        with open(tmp, "w") as f:
-            json.dump(result_data, f, indent=2)
-        os.replace(tmp, result_path)
+
+        def _apply_correction(fields: list[dict]) -> bool:
+            for field in fields:
+                if field["label"] == label:
+                    old_val = field.get("value", "")
+                    if "original_value" not in field or not field.get("original_value"):
+                        field["original_value"] = field.get("value", "")
+                    field["value"] = correct_value
+                    field["confidence"] = 100
+                    field["needs_clarification"] = False
+                    logger.info(
+                        "/correct: APPLIED — label=%r old=%r new=%r",
+                        label, old_val, correct_value,
+                    )
+                    return True
+            logger.warning("/correct: label %r not found in fields list (len=%d)", label, len(fields))
+            return False
+
+        # If pdf_name provided, only search that PDF's fields
+        if pdf_name and isinstance(result_data.get("pdfs"), list):
+            for pdf in result_data["pdfs"]:
+                pdf_file = pdf.get("pdf_name") or pdf.get("filename") or pdf.get("name", "")
+                if pdf_file == pdf_name and isinstance(pdf.get("fields"), list):
+                    logger.info("/correct: searching PDF pdf_name=%r (matched %r)", pdf_name, pdf_file)
+                    found = _apply_correction(pdf["fields"])
+                    break
+                else:
+                    logger.info("/correct: skipping PDF pdf_name=%r (got %r)", pdf_name, pdf_file)
+        else:
+            found = _apply_correction(result_data.get("fields", []))
+            if not found and isinstance(result_data.get("pdfs"), list):
+                for pdf in result_data["pdfs"]:
+                    if isinstance(pdf.get("fields"), list):
+                        if _apply_correction(pdf["fields"]):
+                            found = True
+                            break
+
+        if found:
+            tmp = result_path.with_suffix(".tmp")
+            with open(tmp, "w") as f:
+                json.dump(result_data, f, indent=2)
+            os.replace(tmp, result_path)
+            logger.info("/correct: written result.json for job=%s", job_id)
+        else:
+            logger.warning("/correct: field %r not found — will raise 404", label)
+
+    if not found:
+        raise HTTPException(404, f"Field with label {label!r} not found in job {job_id}")
 
     return {"status": "saved"}
 
@@ -1321,7 +1387,7 @@ DOWNLOAD_FORMATS = {
 
 
 @app.post("/save-to-db/{job_id}")
-async def save_result_to_db(job_id: str):
+async def save_result_to_db(job_id: str, body: dict = {}):
     if not DB_AVAILABLE:
         raise HTTPException(503, "Database not available")
 
@@ -1336,23 +1402,130 @@ async def save_result_to_db(job_id: str):
     with open(result_path) as f:
         result_data = json.load(f)
 
+    logger.info("/save-to-db: read result.json — top keys=%s, has_fields=%s, has_pdfs=%s, pdfs_count=%d",
+        list(result_data.keys()),
+        "fields" in result_data,
+        "pdfs" in result_data,
+        len(result_data.get("pdfs", [])),
+    )
+
+    # Apply optional corrections from body as safety net
+    corrections = body.get("corrections", [])
+    logger.info("/save-to-db: %d corrections in body", len(corrections))
+    if corrections:
+        def _apply(fields_list: list[dict], label: str, correct_value: str) -> bool:
+            for field in fields_list:
+                if field["label"] == label:
+                    old_val = field.get("value", "")
+                    if "original_value" not in field or not field.get("original_value"):
+                        field["original_value"] = field.get("value", "")
+                    field["value"] = correct_value
+                    field["confidence"] = 100
+                    field["needs_clarification"] = False
+                    logger.info(
+                        "/save-to-db: APPLIED — label=%r old=%r new=%r",
+                        label, old_val, correct_value,
+                    )
+                    return True
+            return False
+
+        applied_count = 0
+        for c in corrections:
+            lbl = c.get("label", "")
+            val = c.get("correct_value", "")
+            pdf_name = c.get("pdf_name", "")
+            if not lbl:
+                continue
+            found = False
+            if pdf_name and isinstance(result_data.get("pdfs"), list):
+                # Only search the named PDF's fields
+                for pdf in result_data["pdfs"]:
+                    pdf_file = pdf.get("pdf_name") or pdf.get("filename") or pdf.get("name", "")
+                    if pdf_file == pdf_name and isinstance(pdf.get("fields"), list):
+                        found = _apply(pdf["fields"], lbl, val)
+                        break
+            else:
+                found = _apply(result_data.get("fields", []), lbl, val)
+                if not found and isinstance(result_data.get("pdfs"), list):
+                    for pdf in result_data["pdfs"]:
+                        if isinstance(pdf.get("fields"), list):
+                            if _apply(pdf["fields"], lbl, val):
+                                found = True
+                                break
+            if found:
+                applied_count += 1
+            else:
+                logger.warning("/save-to-db: correction not found — label=%r", lbl)
+
+        logger.info("/save-to-db: applied %d/%d corrections in-memory", applied_count, len(corrections))
+
+        tmp = result_path.with_suffix(".tmp")
+        with open(tmp, "w") as f:
+            json.dump(result_data, f, indent=2)
+        os.replace(tmp, result_path)
+        logger.info("/save-to-db: written result.json after in-memory corrections")
+
     name_path = job_dir / "original_name.txt"
     orig_name = name_path.read_text().strip() if name_path.exists() else f"job_{job_id}.pdf"
 
     logger.info("/save-to-db: START — job=%s file=%r", job_id, orig_name)
 
-    doc_id = await upsert_ocr_document(
-        job_id=job_id,
-        file_name=orig_name,
-        status="done",
-        processing_time=result_data.get("processing_time"),
-        confidence_score=result_data.get("overall_confidence"),
-        num_pdfs=result_data.get("num_pdfs"),
-        result_json=result_data,
-    )
+    is_batch = isinstance(result_data.get("pdfs"), list)
+    doc_id = ""
+
+    if is_batch:
+        for i, pdf_data in enumerate(result_data["pdfs"]):
+            if "error" in pdf_data or not isinstance(pdf_data.get("fields"), list):
+                continue
+            pdf_job_id = f"{job_id}_{i}"
+            pdf_file_name = pdf_data.get("pdf_name") or pdf_data.get("name", f"file_{i}")
+            pdf_fields = pdf_data["fields"]
+            if any(f.get("value") for f in pdf_fields):
+                logger.info("/save-to-db: upserting PDF row %s (file=%s fields=%d)", pdf_job_id, pdf_file_name, len(pdf_fields))
+                pdf_doc_id = await upsert_ocr_document(
+                    job_id=pdf_job_id,
+                    file_name=pdf_file_name,
+                    status="done",
+                    processing_time=result_data.get("processing_time"),
+                    confidence_score=pdf_data.get("overall_confidence"),
+                    num_pdfs=None,
+                    result_json=pdf_data,
+                )
+                if pdf_doc_id:
+                    logger.info("/save-to-db: PDF row SUCCESS — %s doc_id=%s", pdf_job_id, pdf_doc_id)
+                    if not doc_id:
+                        doc_id = pdf_doc_id
+                else:
+                    logger.warning("/save-to-db: PDF row FAILED — %s", pdf_job_id)
+    else:
+        doc_id = await upsert_ocr_document(
+            job_id=job_id,
+            file_name=orig_name,
+            status="done",
+            processing_time=result_data.get("processing_time"),
+            confidence_score=result_data.get("overall_confidence"),
+            num_pdfs=result_data.get("num_pdfs"),
+            result_json=result_data,
+        )
 
     if doc_id:
         logger.info("/save-to-db: SUCCESS — job=%s doc_id=%s", job_id, doc_id)
+
+        def _clear_sync_markers(fields_list: list[dict]):
+            for f in fields_list:
+                f.pop("original_value", None)
+                f["is_verified"] = True
+
+        if isinstance(result_data.get("pdfs"), list):
+            for pdf in result_data["pdfs"]:
+                if isinstance(pdf.get("fields"), list):
+                    _clear_sync_markers(pdf["fields"])
+        elif isinstance(result_data.get("fields"), list):
+            _clear_sync_markers(result_data["fields"])
+
+        with open(result_path, "w") as f:
+            json.dump(result_data, f, indent=2, ensure_ascii=False)
+        logger.info("/save-to-db: final result.json written back (markers cleared)")
     else:
         logger.warning("/save-to-db: upsert returned no id — job=%s", job_id)
 
@@ -1457,3 +1630,20 @@ async def test_zoho_update(req: OcrExtractRequest):
         return {"success": True, "message": f"OCR_Status=Yes set on {req.zoho_record_id}"}
     except Exception as e:
         raise HTTPException(500, f"Zoho update failed: {e}")
+
+
+def main():
+    import atexit
+
+    atexit.register(lambda: print("Server stopped.", flush=True))
+
+    import uvicorn
+
+    try:
+        uvicorn.run("src.server:app", host="0.0.0.0", port=8000, reload=True)
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+
+
+if __name__ == "__main__":
+    main()
