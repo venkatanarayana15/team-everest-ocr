@@ -810,20 +810,54 @@ FIELD LIST BY PAGE:
         self,
         model_data: dict,
         word_boxes: list | None = None,
+        page_dims: dict[int, tuple[int, int]] | None = None,
         prefix: str = "",
     ) -> list[StructuredField]:
         fields: list[StructuredField] = []
         raw_fields = [f for f in model_data.get("fields", []) if isinstance(f, dict)]
 
         for gf in raw_fields:
-            fields.append(self._create_structured_field(gf, prefix))
+            gf_page = gf.get("page", 1)
+            dims = (page_dims or {}).get(gf_page)
+            fields.append(self._create_structured_field(gf, prefix, page_dims=dims))
 
         return fields
+
+    @staticmethod
+    def _parse_bbox(raw, page_dims: tuple[int, int] | None = None) -> tuple[int, int, int, int] | None:
+        """Parse a normalized 0–1000 bbox from LLM output and denormalize to
+        absolute pixels given the page image's (width, height) in pixels.
+
+        Accepts either normalized 0–1000 coords (default) or, when page_dims is
+        provided, converts them to absolute pixel coordinates matching the
+        rendered page image that the frontend overlays on.
+
+        Returns None if the input is invalid, missing, or cannot be parsed.
+        """
+        if not isinstance(raw, (list, tuple)) or len(raw) != 4:
+            return None
+        try:
+            coords = [float(c) for c in raw]
+        except (TypeError, ValueError):
+            return None
+        x1, y1, x2, y2 = coords
+        if not (0 <= x1 <= 1000 and 0 <= y1 <= 1000 and 0 <= x2 <= 1000 and 0 <= y2 <= 1000):
+            return None
+        if x2 <= x1 or y2 <= y1:
+            return None
+        if page_dims is not None:
+            w, h = page_dims
+            x1 = x1 / 1000.0 * w
+            y1 = y1 / 1000.0 * h
+            x2 = x2 / 1000.0 * w
+            y2 = y2 / 1000.0 * h
+        return (int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)))
 
     def _create_structured_field(
         self,
         gf: dict,
         prefix: str = "",
+        page_dims: tuple[int, int] | None = None,
     ) -> StructuredField:
         label = gf.get("label", "")
         value = gf.get("value", "")
@@ -834,14 +868,17 @@ FIELD LIST BY PAGE:
             section_number = self._infer_section_from_label(label)
         needs_clarification = gf.get("needs_clarification", False)
 
+        bbox = self._parse_bbox(gf.get("bbox"))
+        value_bbox = self._parse_bbox(gf.get("value_bbox"))
+
         return StructuredField(
             label=label,
             value=value,
             confidence=confidence,
             page=page,
             section_number=section_number,
-            bbox=None,
-            value_bbox=None,
+            bbox=bbox,
+            value_bbox=value_bbox,
             needs_clarification=needs_clarification,
             reason=gf.get("reason"),
             extracted_by=prefix or None,

@@ -235,8 +235,28 @@ FIELD OBJECT
   "confidence": 0-100,
   "confidence_reason": string,
   "page":  int,  "section":  int|null,  "needs_clarification": bool,
-  "reason":  string|null,  "position_hint": "same_line_colon"|"right_of_label"|...
+  "reason":  string|null,  "position_hint": "same_line_colon"|"right_of_label"|...,
+  "bbox":          [x1, y1, x2, y2] | null,
+  "value_bbox":    [x1, y1, x2, y2] | null
 }
+
+-------------------------------------------------------------------------------
+SPATIAL GROUNDING — bbox / value_bbox (REQUIRED for every field when visible)
+-------------------------------------------------------------------------------
+For EACH field, provide TWO bounding boxes in NORMALIZED 0–1000 coordinates
+(where 0 = top/left edge of the page image, 1000 = bottom/right edge).
+  • "bbox":       rectangle around the FIELD LABEL (the printed/asked question text).
+  • "value_bbox": rectangle around the FIELD VALUE (the answer — ticked box, filled
+                  text, selected option, or handwritten entry).
+Format: [x1, y1, x2, y2]  with x1<x2 and y1<y2, all integers in 0..1000.
+Rules:
+  • Coordinates are relative to the SAME page image you are viewing for that field.
+  • If the label or value is not visible / cannot be located, use null (never omit
+    the key — include "bbox": null explicitly).
+  • For checkbox groups, value_bbox should cover the specific checked box + its option text.
+  • For table cells, bbox covers the cell label/header area, value_bbox covers the cell content.
+  • Be precise: tightly bound the text region, do not pad excessively.
+  • This grounding is used to draw a highlight on the PDF, so accuracy matters.
 
 -------------------------------------------------------------------------------
 VALUE RULES — APPLY TO EVERY FIELD

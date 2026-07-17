@@ -149,6 +149,21 @@ def _ensure_page_images(pages_dir: Path) -> dict[int, str]:
     }
 
 
+def _get_page_dims(processed_images: dict[int, str]) -> dict[int, tuple[int, int]]:
+    """Return {page_num: (width, height)} for each processed page image, used to
+    denormalize LLM box coordinates into absolute pixels."""
+    from PIL import Image
+
+    dims: dict[int, tuple[int, int]] = {}
+    for p, path in processed_images.items():
+        try:
+            with Image.open(path) as img:
+                dims[p] = (img.width, img.height)
+        except Exception:
+            continue
+    return dims
+
+
 def _fields_to_dict(fields: list[StructuredField]) -> list[dict]:
     return [
         {
@@ -261,7 +276,8 @@ async def _run_core_extraction(
             if bad_fields:
                 logger.warning("Ignoring %d non-dict fields from LLM response", len(bad_fields))
             raw_text = _insert_page_markers(raw_text, raw_fields)
-            fields = pipeline.merge_fields(model_data, prefix=primary_name)
+            page_dims = _get_page_dims(processed_images)
+            fields = pipeline.merge_fields(model_data, page_dims=page_dims, prefix=primary_name)
             await status_func("field_mapping", f"Merged {len(fields)} fields.")
         else:
             primary_extraction_failed = True
