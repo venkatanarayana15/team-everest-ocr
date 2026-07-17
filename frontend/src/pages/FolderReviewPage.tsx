@@ -125,9 +125,6 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
     const unsub = subscribeToJob(jobId, (data) => {
       setStatus(data.status);
       setStatusMessage(data.message || '');
-      if (data.log) {
-        setLogs(data.log);
-      }
       if (data.original_name) {
         setOriginalName(data.original_name);
       }

@@ -417,7 +417,7 @@ export default function PipelineProcessingView({
                 {logs.length} entries
               </span>
             </div>
-            <LogViewer logs={logs} autoScroll height="100%" emptyText="Waiting for pipeline logs to stream…" />
+            <LogViewer logs={logs} autoScroll height="100%" emptyText="No logs yet — full extraction log loads when processing completes." />
           </div>
           {/* Action Buttons */}
           {(status === 'error' || status === 'done' || status === 'incomplete') && (
