@@ -548,13 +548,27 @@ CORE OUTPUT SCHEMA (keep output compact — do NOT add extra keys):
       "confidence": 0-100,
       "page":  {page},  "section":  int|null,  "needs_clarification": bool,
       "reason":  string|null  — ONLY when needs_clarification is true, else omit,
-      "position_hint": "same_line_colon"|"right_of_label"|...
+      "position_hint": "same_line_colon"|"right_of_label"|...,
+      "bbox":          [x1, y1, x2, y2] | null,
+      "value_bbox":    [x1, y1, x2, y2] | null
     }}
   ],
   "overall_confidence": 0-100,
   "clarification_needed": ["label1", "label2", ...],
   "raw_text": "concise transcription of this page — labels + filled values only, skip long pre-printed instructions"
 }}
+
+SPATIAL GROUNDING — bbox / value_bbox (REQUIRED for every field when visible):
+  Provide TWO bounding boxes in NORMALIZED 0–1000 coordinates (0 = top/left edge of
+  THIS page image, 1000 = bottom/right edge):
+    • "bbox":       rectangle around the FIELD LABEL (the printed/asked question text).
+    • "value_bbox": rectangle around the FIELD VALUE (the answer — ticked box, filled
+                   text, selected option, or handwritten entry).
+  Format: [x1, y1, x2, y2] with x1<x2 and y1<y2, all integers 0..1000.
+  If a label or value is not visible, use null (include the key as null explicitly).
+  For checkbox groups, value_bbox covers the specific checked box + its option text.
+  For table cells, bbox covers the cell header/label, value_bbox covers the cell content.
+  Tightly bound the text; this is used to draw a highlight on the PDF, so be precise.
 
 FIELD LIST FOR PAGE {page}:
 {PAGE_FIELD_MAPPINGS.get(page, "")}
