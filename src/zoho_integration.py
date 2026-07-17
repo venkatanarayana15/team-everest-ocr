@@ -1658,12 +1658,12 @@ async def _process_pending_from_local(base_dir: Path, csv_path: Path, pdf_dir: P
     await run_batch_pdfs_pipeline(batch_job_dir, pdfs_info)
 
     logger.info("LOCAL BATCH COMPLETE | job=%s | files=%d", batch_job_id, total_eligible)
-    print(f"\n{'='*70}")
-    print(f"  LOCAL BATCH — COMPLETE")
-    print(f"{'─'*70}")
-    print(f"  Batch Job ID: {batch_job_id}")
-    print(f"  Total processed: {total_eligible}")
-    print(f"{'='*70}\n")
+    logger.info("%s", "=" * 70)
+    logger.info("  LOCAL BATCH — COMPLETE")
+    logger.info("%s", "─" * 70)
+    logger.info("  Batch Job ID: %s", batch_job_id)
+    logger.info("  Total processed: %d", total_eligible)
+    logger.info("%s", "=" * 70)
 
 
 async def run_zoho_writeback_for_batch_item(job_dir: Path, pdf_path: Path, zoho_req_dict: dict, ocr_result: dict, input_info: dict | None = None) -> None:

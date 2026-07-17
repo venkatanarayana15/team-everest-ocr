@@ -81,7 +81,7 @@ logger = logging.getLogger(__name__)
 TEXT_FIELD_TIPS: dict[str, str] = {
     "Volunteer Name": "A person's name. Common misreads: 'n'↔'u', 'a'↔'o', 'l'↔'t', 'r'↔'v'. Read each character individually.",
     "Co-Volunteer Name": "A person's name. Common misreads: 'n'↔'u', 'a'↔'o', 'l'↔'t', 'r'↔'v'.",
-    "Date of Visit": "A date like DD/MM/YYYY or written as text.",
+    "Date of Visit": "Read the date exactly as written on the form. Do NOT convert or reformat — e.g. '6th June 2026' stays as '6th June 2026'.",
     "1.1 Application ID": "An alphanumeric CODE like 'TE2024001' or 'temp-2026-9934', NOT a name. The last 4 characters in the suffix are NUMERICAL digits only (not letters). Critical confusions: '8'↔'B' (e.g. B974 should be 8974), '0'↔'O', '1'↔'l', '5'↔'S'. Reason letter vs digit by position.",
     "1.2 Student Full Name": "The student's full name. Common misreads: 'n'↔'u', 'a'↔'o'. Read each character.",
     "2.2 Relationship Details — Year of Death / Separation": "A year (e.g. '2020'). ONLY the year digits.",
@@ -1046,7 +1046,30 @@ FIELD LIST BY PAGE:
         return fields
 
     @staticmethod
+    def _normalize_461_bare_row_numbers(fields: list[StructuredField]) -> list[StructuredField]:
+        """Rewrite LLM-emitted bare-digit 4.6.1 row labels ('... — N — Column')
+        to canonical '... — Row N — Column' so TABLE_ROW_RE matches downstream."""
+        for f in fields:
+            label = f.label or ""
+            if not label.startswith("4.6.1"):
+                continue
+            m = re.match(
+                r"^(4\.6\.1.*?)"          # everything up to the row-number marker
+                r"\s*[—–-]\s*"            # separator
+                r"(\d+)"                  # bare row number
+                r"\s*[—–-]\s*"            # separator
+                r"(.+)$",                 # column name
+                label,
+            )
+            if not m:
+                continue
+            parent_part, row_num, column = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+            f.label = f"{parent_part} — Row {row_num} — {column}"
+        return fields
+
+    @staticmethod
     def fill_missing_template_fields(fields: list[StructuredField], pdf_path: str | None = None, provider: str = "") -> list[StructuredField]:
+        fields = ExtractionPipeline._normalize_461_bare_row_numbers(fields)
         fields = ExtractionPipeline._sanitize_checkbox_values(fields)
         fields = ExtractionPipeline._fix_concatenated_parents(fields)
         fields = ExtractionPipeline._detect_concatenated_parents(fields)
@@ -1054,9 +1077,29 @@ FIELD LIST BY PAGE:
         fields = ExtractionPipeline._fix_mutual_exclusivity(fields)
         fields = ExtractionPipeline._clean_numeric_fields(fields)
         existing_labels = {f.label for f in fields}
+        # Build set of table-row prefixes that already have " — Row N — " variants
+        table_row_prefixes: set[str] = set()
+        for f in fields:
+            if not f.label or not f.label.startswith("4.6.1"):
+                continue
+            rm = re.match(r"^(.*?)\s*—\s*Row\s+\d+\s*—", f.label, re.IGNORECASE)
+            if rm:
+                table_row_prefixes.add(rm.group(1).strip())
         for tpl in KNOWN_TEMPLATE_FIELDS:
             if tpl["label"] in existing_labels:
                 continue
+            # Skip flat 4.6.1 template fields ("... - Column") when Row N variants already exist
+            if tpl["label"].startswith("4.6.1") and " - " in tpl["label"]:
+                flat_col = tpl["label"].rsplit(" - ", 1)[-1].strip()
+                if any(
+                    (f.label or "").startswith("4.6.1")
+                    and re.search(
+                        rf"\s*[—–-]\s*Row\s+\d+\s*[—–-]\s*{re.escape(flat_col)}\s*$",
+                        f.label, re.IGNORECASE,
+                    )
+                    for f in fields
+                ):
+                    continue
             if ExtractionPipeline._checkbox_sub_option(tpl["label"]):
                 continue
             fields.append(StructuredField(

@@ -26,7 +26,6 @@ _RENDER_SEMAPHORE = asyncio.Semaphore(
 )
 
 _COMBINE_PAGES = os.environ.get("COMBINE_PAGES", "false").lower() in ("1", "true", "yes")
-_BATCH_PRINT_REPORT = os.environ.get("BATCH_PRINT_REPORT", "false").lower() in ("1", "true", "yes")
 
 
 def _cleanup_pdf_job_dir(pdf_job_dir: Path) -> None:
@@ -107,6 +106,11 @@ async def _set_batch_pdf_status(job_dir: Path, pdf_name: str, status: str, pct: 
 
         pdfs_map = dict(existing_progress.get("pdfs", {}))
         pdfs_map[pdf_name] = {"progress": pct, "stage": status, "elapsed": elapsed}
+        orig_name_path = job_dir / "original_name.txt"
+        if orig_name_path.exists():
+            batch_name = orig_name_path.read_text().strip()
+            if batch_name in pdfs_map and batch_name != pdf_name:
+                pdfs_map.pop(batch_name, None)
 
         total_pct = sum(item["progress"] for item in pdfs_map.values())
         overall_pct = round(total_pct / len(pdfs_map)) if pdfs_map else 0
@@ -456,6 +460,7 @@ async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
         await _set_status(job_dir, "saving_results", "Saving results...")
         await asyncio.to_thread(_save_results, job_dir, res, job_dir.name)
         await asyncio.to_thread(_print_field_report, job_dir, res)
+        await asyncio.to_thread(_log_field_data, job_dir, res)
         await _set_status(job_dir, "done", "Extraction complete. Results ready for download.")
         _db_ok = await _save_to_db(job_dir)
         if not _db_ok:
@@ -489,7 +494,13 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         await _set_status(job_dir, "preprocessing", f"Batch: processing {len(pdfs_info)} PDFs...")
 
         all_results: list[dict] = []
-        
+
+        # Submission order matches the 0/, 1/, ... physical directory layout.
+        # Keep this stable so result.json pdf_names, DB job_ids, and physical
+        # folders all index the same way (completion order used to diverge here).
+        submission_names: list[str] = [Path(p["path"]).name for p in pdfs_info]
+        pdf_name_to_submission_idx: dict[str, int] = {name: i for i, name in enumerate(submission_names)}
+
         queue = asyncio.Queue()
         for idx, pdf_info in enumerate(pdfs_info):
             queue.put_nowait((idx, pdf_info))
@@ -577,8 +588,8 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                         from src.zoho_integration import run_zoho_writeback_for_batch_item
                         await run_zoho_writeback_for_batch_item(job_dir, Path(pdf_info["path"]), pdf_info["zoho_req"], res, input_info)
 
-                    if _BATCH_PRINT_REPORT:
-                        await asyncio.to_thread(_print_field_report, pdf_job_dir, res, pdf_name)
+                    await asyncio.to_thread(_print_field_report, pdf_job_dir, res, pdf_name)
+                    await asyncio.to_thread(_log_field_data, pdf_job_dir, res, pdf_name)
 
                     all_results.append(res)
                     await _set_batch_pdf_status(job_dir, pdf_name, "done", 100, f"Done ({idx+1}/{len(pdfs_info)})")
@@ -590,7 +601,10 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
 
                 queue.task_done()
 
-                _cleanup_pdf_job_dir(pdf_job_dir)
+                # NOTE: Do NOT call _cleanup_pdf_job_dir here.
+                # Page PNGs are needed by the review UI via /pages/<job_id>/<n>?pdf_name=...
+                # Deleting them immediately causes 404s while the frontend still needs
+                # the images. They will be cleaned up by a separate TTL janitor later.
 
         # Run up to N PDFs concurrently (configurable, default 5)
         max_batch_conc = int(os.environ.get("BATCH_MAX_CONCURRENCY", "2"))
@@ -603,7 +617,7 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
             "batch": True,
             "num_pdfs": len(pdfs_info),
             "pdfs": all_results,
-            "pdf_names": [r.get("pdf_name") or r.get("name", f"file_{i}") for i, r in enumerate(all_results)],
+            "pdf_names": submission_names,
             "processing_time": round(time.time() - t0, 2),
         }
         results_dir = job_dir / "results"
@@ -619,9 +633,11 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 continue
             pdf_result = r.copy()
             pdf_result["processing_time"] = combined.get("processing_time", 0)
+            pdf_name_val = r.get("pdf_name", r.get("name", "?"))
+            submission_idx = pdf_name_to_submission_idx.get(pdf_name_val, all_results.index(r))
             doc_id = await _batch_upsert(
-                job_id=f"{job_dir.name}_{all_results.index(r)}",
-                file_name=r.get("pdf_name", f"file_{all_results.index(r)}"),
+                job_id=f"{job_dir.name}_{submission_idx}",
+                file_name=pdf_name_val,
                 status="done",
                 processing_time=pdf_result.get("processing_time"),
                 confidence_score=pdf_result.get("overall_confidence"),
@@ -689,6 +705,7 @@ async def run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None
         await _set_status(job_dir, "saving_results", "Saving results...")
         await asyncio.to_thread(_save_results, job_dir, res, job_dir.name)
         await asyncio.to_thread(_print_field_report, job_dir, res)
+        await asyncio.to_thread(_log_field_data, job_dir, res)
         _db_ok = await _save_to_db(job_dir)
         if not _db_ok:
             logger.error("Image pipeline DB save failed | job=%s", job_dir.name)
@@ -1105,7 +1122,6 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
     p6.append("")
     p6.append(f"8.3. Any other comments you want to share?  {get_val('8.3 Any other comments you want to share?')}")
 
-    # Center-alignment configurations
     import os
     try:
         term_width = os.get_terminal_size().columns
@@ -1140,3 +1156,16 @@ def _print_field_report(job_dir: Path, res: dict, pdf_name: str | None = None) -
             print(f"{ind_str}\033[90m│\033[0m {pad_line(entry, C_WIDTH)} \033[90m│\033[0m")
         print(f"{ind_str}{bottom_border}")
         print()
+
+
+def _log_field_data(job_dir: Path, res: dict, pdf_name: str | None = None) -> None:
+    name_path = job_dir / "original_name.txt"
+    display_name = pdf_name or (name_path.read_text().strip() if name_path.exists() else job_dir.name)
+    fields = res.get("fields", [])
+    logger.info("📄 %s", display_name)
+    for f in fields:
+        label = f.get("label", "")
+        value = str(f.get("value", "")).strip()
+        if label and value:
+            logger.info("  %s: %s", label, value)
+

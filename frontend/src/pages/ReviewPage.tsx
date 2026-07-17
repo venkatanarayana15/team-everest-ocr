@@ -368,6 +368,21 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
 
   const totalCorrected = fields.filter((f) => f.is_edited === true).length;
 
+  const [showMetrics, setShowMetrics] = useState(false);
+  const [metricsData, setMetricsData] = useState<any>(null);
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsTab, setMetricsTab] = useState<'flat' | 'db'>('db');
+
+  const loadMetrics = useCallback(async () => {
+    setMetricsLoading(true);
+    await Promise.all([
+      fetch('/metrics?top=20').then(r => r.json()).then(setMetricsData).catch(() => setMetricsData(null)),
+      fetch('/analytics/frequently-edited?limit=20').then(r => r.json()).then(setAnalyticsData).catch(() => setAnalyticsData(null)),
+    ]);
+    setMetricsLoading(false);
+  }, []);
+
   return (
     <div style={{ flex: 1, display: 'flex', fontFamily: 'var(--font-sans)', overflow: 'hidden' }}>
       {sidebarOpen && (
@@ -474,6 +489,24 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
             title={textView ? 'Switch to side-by-side view' : 'Switch to full text view'}
           >
             {textView ? '🖼️ Side-by-Side' : '📝 Full Text'}
+          </button>
+
+          <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px' }} />
+
+          <button
+            onClick={() => { loadMetrics(); setShowMetrics(true); }}
+            style={{
+              padding: '6px 12px', fontSize: 12, fontWeight: 600,
+              border: '1px solid var(--color-border-hover)',
+              borderRadius: 'var(--radius-md)',
+              cursor: 'pointer',
+              background: 'var(--color-surface)',
+              color: 'var(--color-text-secondary)',
+              transition: 'all var(--transition-fast)',
+            }}
+            title="View frequently corrected fields"
+          >
+            📊 Metrics
           </button>
 
           <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px' }} />
@@ -594,6 +627,189 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
           )}
         </div>
       </div>
+
+      {showMetrics && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }} onClick={() => setShowMetrics(false)}>
+          <div style={{
+            background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)',
+            padding: 24, maxWidth: 700, width: '90%', maxHeight: '80vh',
+            overflow: 'auto', boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              marginBottom: 16,
+            }}>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
+                📊 Field Correction Metrics
+              </h2>
+              <button onClick={() => setShowMetrics(false)} style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                fontSize: 20, color: 'var(--color-text-muted)',
+              }}>✕</button>
+            </div>
+
+            {metricsLoading && <p style={{ color: 'var(--color-text-secondary)', fontSize: 14 }}>Loading...</p>}
+
+            {!metricsLoading && (
+              <>
+                <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
+                  <button
+                    onClick={() => setMetricsTab('db')}
+                    style={{
+                      padding: '6px 14px', fontSize: 12, fontWeight: 600, border: 'none',
+                      borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                      background: metricsTab === 'db' ? 'var(--color-primary)' : 'var(--color-border-light)',
+                      color: metricsTab === 'db' ? '#fff' : 'var(--color-text-secondary)',
+                    }}
+                  >📀 All Time (DB)</button>
+                  <button
+                    onClick={() => setMetricsTab('flat')}
+                    style={{
+                      padding: '6px 14px', fontSize: 12, fontWeight: 600, border: 'none',
+                      borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                      background: metricsTab === 'flat' ? 'var(--color-primary)' : 'var(--color-border-light)',
+                      color: metricsTab === 'flat' ? '#fff' : 'var(--color-text-secondary)',
+                    }}
+                  >📁 Current Session (File)</button>
+                </div>
+
+                {metricsTab === 'db' && !analyticsData && (
+                  <p style={{ color: 'var(--color-text-secondary)', fontSize: 14 }}>DB analytics unavailable.</p>
+                )}
+
+                {metricsTab === 'db' && analyticsData && analyticsData.total_fields === 0 && (
+                  <p style={{ color: 'var(--color-text-secondary)', fontSize: 14 }}>No corrections logged yet.</p>
+                )}
+
+                {metricsTab === 'db' && analyticsData && analyticsData.total_fields > 0 && (
+                  <>
+                    <p style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
+                      Frequently edited fields in DB: <strong>{analyticsData.total_fields}</strong>
+                    </p>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
+                          <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700 }}>#</th>
+                          <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700 }}>Field Label</th>
+                          <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700 }}>Edit Count</th>
+                          <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700 }}>Last Edited</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {analyticsData.frequently_edited.map((item: any, i: number) => (
+                          <tr key={item.field_label} style={{
+                            borderBottom: '1px solid var(--color-border-light)',
+                            background: i % 2 === 0 ? 'transparent' : 'var(--color-bg)',
+                          }}>
+                            <td style={{ padding: '6px 8px', color: 'var(--color-text-muted)' }}>{i + 1}</td>
+                            <td style={{ padding: '6px 8px', fontWeight: 500 }}>{item.field_label}</td>
+                            <td style={{
+                              padding: '6px 8px', textAlign: 'right',
+                              color: item.edit_count > 10 ? '#dc2626' : item.edit_count < 3 ? '#16a34a' : 'var(--color-text)',
+                              fontWeight: item.edit_count > 10 ? 700 : 400,
+                            }}>{item.edit_count}</td>
+                            <td style={{
+                              padding: '6px 8px', textAlign: 'right',
+                              color: 'var(--color-text-muted)', fontSize: 12,
+                            }}>
+                              {item.last_edited ? new Date(item.last_edited).toLocaleDateString() : '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+
+                {metricsTab === 'flat' && !metricsData && (
+                  <p style={{ color: 'var(--color-text-secondary)', fontSize: 14 }}>No file-based metrics.</p>
+                )}
+
+                {metricsTab === 'flat' && metricsData && metricsData.total_corrections === 0 && (
+                  <p style={{ color: 'var(--color-text-secondary)', fontSize: 14 }}>
+                    {metricsData.message || 'No human corrections recorded yet.'}
+                  </p>
+                )}
+
+                {metricsTab === 'flat' && metricsData && metricsData.total_corrections > 0 && (
+                  <>
+                    <p style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
+                      Total corrections across all jobs: <strong>{metricsData.total_corrections}</strong>
+                    </p>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
+                          <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700 }}>#</th>
+                          <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700 }}>Field Label</th>
+                          <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700 }}>Times Corrected</th>
+                          <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700 }}>Stability %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(Object.entries(metricsData.per_field || {}) as [string, any][]).map(([label, info], i) => (
+                          <tr key={label} style={{
+                            borderBottom: '1px solid var(--color-border-light)',
+                            background: i % 2 === 0 ? 'transparent' : 'var(--color-bg)',
+                          }}>
+                            <td style={{ padding: '6px 8px', color: 'var(--color-text-muted)' }}>{i + 1}</td>
+                            <td style={{ padding: '6px 8px', fontWeight: 500 }}>{label}</td>
+                            <td style={{
+                              padding: '6px 8px', textAlign: 'right',
+                              color: info.total_corrections > 10 ? '#dc2626' : info.total_corrections < 3 ? '#16a34a' : 'var(--color-text)',
+                              fontWeight: info.total_corrections > 10 ? 700 : 400,
+                            }}>{info.total_corrections}</td>
+                            <td style={{
+                              padding: '6px 8px', textAlign: 'right',
+                              color: info.stability_pct < 50 ? '#dc2626' : info.stability_pct < 80 ? '#d97706' : '#16a34a',
+                              fontWeight: 500,
+                            }}>{info.stability_pct}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+
+                    {metricsData.per_page && Object.keys(metricsData.per_page).length > 0 && (
+                      <>
+                        <h3 style={{ margin: '20px 0 8px', fontSize: 14, fontWeight: 600 }}>
+                          Per-Page Breakdown
+                        </h3>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                          <thead>
+                            <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
+                              <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700 }}>Page</th>
+                              <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700 }}>Corrections</th>
+                              <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700 }}>Fields</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(Object.entries(metricsData.per_page) as [string, any][]).map(([page, info]) => (
+                              <tr key={page} style={{
+                                borderBottom: '1px solid var(--color-border-light)',
+                              }}>
+                                <td style={{ padding: '6px 8px', fontWeight: 500 }}>
+                                  {page === '0' ? 'Header / Global' : `Section ${page}`}
+                                </td>
+                                <td style={{ padding: '6px 8px', textAlign: 'right' }}>{info.total_corrections}</td>
+                                <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)', fontSize: 12 }}>
+                                  {info.fields?.length || 0} fields
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

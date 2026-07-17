@@ -1,6 +1,7 @@
 """Unit tests for the extraction pipeline bbox logic and new input features."""
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -768,6 +769,126 @@ def test_split_table_rows_4_6_1():
     print("PASS: test_split_table_rows_4_6_1")
 
 
+def test_normalize_461_bare_row_numbers():
+    """Bare-digit 4.6.1 row labels must be rewritten to 'Row N' format."""
+    short_form = [
+        StructuredField(label="4.6.1 — 1 — Loan Purpose",               value="Education",  page=4, section_number=4),
+        StructuredField(label="4.6.1 — 2 — Loan Purpose",               value="Gold loan",  page=4, section_number=4),
+        StructuredField(label="4.6.1 — 1 — Loan Amount Taken",          value="100000",     page=4, section_number=4),
+    ]
+    out = ExtractionPipeline._normalize_461_bare_row_numbers(short_form)
+    assert out[0].label == "4.6.1 — Row 1 — Loan Purpose"
+    assert out[1].label == "4.6.1 — Row 2 — Loan Purpose"
+    assert out[2].label == "4.6.1 — Row 1 — Loan Amount Taken"
+
+    long_form = [
+        StructuredField(
+            label="4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount — 1 — Loan Purpose",
+            value="Education", page=4, section_number=4,
+        ),
+    ]
+    out = ExtractionPipeline._normalize_461_bare_row_numbers(long_form)
+    assert out[0].label == "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount — Row 1 — Loan Purpose"
+
+    already_canonical = [
+        StructuredField(label="4.6.1 — Row 3 — Loan Purpose", value="Agri loan", page=4, section_number=4),
+    ]
+    out = ExtractionPipeline._normalize_461_bare_row_numbers(already_canonical)
+    assert out[0].label == "4.6.1 — Row 3 — Loan Purpose"
+
+    other_sections = [
+        StructuredField(label="4.3.1 — 1 — Property Description", value="Land", page=3, section_number=4),
+    ]
+    out = ExtractionPipeline._normalize_461_bare_row_numbers(other_sections)
+    assert out[0].label == "4.3.1 — 1 — Property Description"
+
+    non_row_bare_digit = [
+        StructuredField(label="7.1 Income Type - 1 - Spec: 2", value="Daily", page=6, section_number=7),
+    ]
+    out = ExtractionPipeline._normalize_461_bare_row_numbers(non_row_bare_digit)
+    assert out[0].label == "7.1 Income Type - 1 - Spec: 2"
+
+    print("PASS: test_normalize_461_bare_row_numbers")
+
+
+def test_461_normalize_plus_fill_no_duplicate_flat():
+    """Bare-digit 4.6.1 labels must be normalized to Row N format, and flat
+    template fields must NOT be added for columns that already have Row N variants.
+    Missing columns (not extracted by LLM) are still correctly filled as flat templates."""
+    bare_fields = [
+        StructuredField(label="4.6.1 — 1 — Sr.No.",             value="1",         page=4, section_number=4),
+        StructuredField(label="4.6.1 — 1 — Loan Purpose",       value="Education", page=4, section_number=4),
+        StructuredField(label="4.6.1 — 2 — Sr.No.",             value="2",         page=4, section_number=4),
+        StructuredField(label="4.6.1 — 2 — Loan Purpose",       value="Gold loan", page=4, section_number=4),
+    ]
+    out = ExtractionPipeline.fill_missing_template_fields(bare_fields)
+
+    # Columns that the LLM supplied must be in Row N format (not flat)
+    supplied = {"Sr.No.", "Loan Purpose"}
+    label_by_col: dict[str, str] = {}
+    for f in out:
+        col = (f.label or "").rsplit(" — ", 1)[-1].strip()
+        label_by_col[col] = f.label
+
+    for col in supplied:
+        lbl = label_by_col.get(col, "")
+        assert " — Row " in lbl, f"Column {col!r} should be Row N, got: {lbl!r}"
+        assert " - " not in lbl.rsplit(" — ", 1)[0], f"Expected no flat template for {col!r}, got: {lbl!r}"
+
+    # Missing columns (Loan Amount Taken, Pending Loan Amount) must appear
+    assert "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Loan Amount Taken" in {f.label for f in out}
+    assert "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Pending Loan Amount" in {f.label for f in out}
+
+    print("PASS: test_461_normalize_plus_fill_no_duplicate_flat")
+
+
+def test_461_normalize_plus_extract_single_table_block():
+    """End-to-end: bare-digit 4.6.1 labels → processed → _extract_structured_fields
+    must produce one loan_details table with 2 rows, no comma-concatenated values."""
+    import json
+    from src.database import _extract_structured_fields
+
+    bare_fields = [
+        StructuredField(label="4.6.1 — 1 — Sr.No.",              value="1",         page=4, section_number=4),
+        StructuredField(label="4.6.1 — 1 — Loan Purpose",        value="Education", page=4, section_number=4),
+        StructuredField(label="4.6.1 — 1 — Loan Amount Taken",   value="100000",    page=4, section_number=4),
+        StructuredField(label="4.6.1 — 1 — Pending Loan Amount", value="80000",     page=4, section_number=4),
+        StructuredField(label="4.6.1 — 2 — Sr.No.",              value="2",         page=4, section_number=4),
+        StructuredField(label="4.6.1 — 2 — Loan Purpose",        value="Gold loan", page=4, section_number=4),
+        StructuredField(label="4.6.1 — 2 — Loan Amount Taken",   value="210000",    page=4, section_number=4),
+        StructuredField(label="4.6.1 — 2 — Pending Loan Amount", value="200000",    page=4, section_number=4),
+    ]
+    processed = ExtractionPipeline.fill_missing_template_fields(bare_fields)
+    dict_fields = [
+        {"label": f.label, "value": f.value, "section_number": f.section_number, "page": f.page}
+        for f in processed
+    ]
+
+    flat_461 = [f for f in processed
+                if f.label.startswith("4.6.1")
+                and " - " in f.label
+                and " — " not in f.label.replace("4.6.1", "")]
+    assert flat_461 == [], f"Flat 4.6.1 template fields leaked: {[f.label for f in flat_461]}"
+
+    result = _extract_structured_fields(dict_fields)
+    loan_details = json.loads(result.get("loan_details", "[]"))
+
+    assert len(loan_details) == 2, f"Expected 2 rows, got {len(loan_details)}: {loan_details}"
+    assert loan_details[0] == {
+        "Sr.No.": "1",
+        "Loan Purpose": "Education",
+        "Loan Amount Taken": "100000",
+        "Pending Loan Amount": "80000",
+    }
+    assert loan_details[1] == {
+        "Sr.No.": "2",
+        "Loan Purpose": "Gold loan",
+        "Loan Amount Taken": "210000",
+        "Pending Loan Amount": "200000",
+    }
+    print("PASS: test_461_normalize_plus_extract_single_table_block")
+
+
 def test_clean_numeric_preserves_semicolon():
     """_clean_numeric_fields must skip values containing '; ' separator."""
     fields = [
@@ -828,5 +949,8 @@ if __name__ == "__main__":
     test_docstring_inference()
     test_fill_missing_template_fields_row3_row4()
     test_split_table_rows_4_6_1()
+    test_normalize_461_bare_row_numbers()
+    test_461_normalize_plus_fill_no_duplicate_flat()
+    test_461_normalize_plus_extract_single_table_block()
     test_clean_numeric_preserves_semicolon()
     print("\n=== All tests passed! ===")

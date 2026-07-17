@@ -3,6 +3,7 @@ import { getResult, getStatus, subscribeToJob, correctField, saveToDB } from '..
 import type { Field, JobResult, StatusResponse } from '../types';
 import DocumentReview from '../components/DocumentReview';
 import PipelineProcessingView from '../components/PipelineProcessingView';
+import LogViewer from '../components/LogViewer';
 
 interface Props {
   jobId: string;
@@ -32,13 +33,23 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [confirmStep, setConfirmStep] = useState(false);
 
+  const fetchFullLogs = useCallback(async () => {
+    try {
+      const res = await fetch(`/logs/${jobId}?lines=9999`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.log) setLogs(data.log);
+    } catch (e) {
+      console.error('fetchFullLogs failed:', e);
+    }
+  }, [jobId]);
+
   const fetchResult = useCallback(async () => {
     try {
       try {
         const st = await getStatus(jobId);
         setStatus(st.status);
         setStatusMessage(st.message || '');
-        if (st.log) setLogs(st.log);
         if ((st as any).original_name) setOriginalName((st as any).original_name);
       } catch { /* status fetch failed, proceed to result */ }
 
@@ -133,10 +144,17 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
       }
       if (data.status === 'done') {
         fetchResult();
+        unsub();
+      } else if (data.status === 'error' || data.status === 'incomplete') {
+        unsub();
       }
     });
     return () => unsub();
   }, [jobId]);
+
+  useEffect(() => {
+    if (status === 'done') fetchFullLogs();
+  }, [status, fetchFullLogs]);
 
   const currentPdfResult = selectedPdf ? pdfResultsMap[selectedPdf] : null;
   const displayFields: Field[] = currentPdfResult?.fields || [];
@@ -282,10 +300,13 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
     );
   }
 
-  if (status !== 'done') {
-    const filesList = Object.keys(perPdfProgress).length > 0
-      ? Object.keys(perPdfProgress).map((name) => ({ name }))
-      : (result as any)?.pdf_names?.map((name: string) => ({ name })) || (pdfNames.length > 0 ? pdfNames.map((name) => ({ name })) : null) || (originalName ? [{ name: originalName }] : []);
+  if (status !== 'done' || !result) {
+    const progressKeys = Object.keys(perPdfProgress);
+    const filteredKeys = progressKeys.filter(k => k !== originalName);
+    const fileKeys = filteredKeys.length > 0 ? filteredKeys : progressKeys;
+    const filesList = fileKeys.length > 0
+      ? fileKeys.map((name) => ({ name }))
+      : (result as any)?.pdf_names?.map((name: string) => ({ name })) || [];
 
     return (
       <PipelineProcessingView
@@ -603,7 +624,7 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
             onClick={(e) => e.stopPropagation()}
             style={{
               background: 'var(--color-surface)', borderRadius: 12,
-              width: 520, maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+              width: 760, maxWidth: '92vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column',
               boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
             }}
           >
@@ -621,26 +642,13 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
                 ✕
               </button>
             </div>
-            <div style={{ flex: 1, overflow: 'auto', padding: '12px 20px' }}>
+            <div style={{ flex: 1, overflow: 'hidden', padding: '16px 20px', display: 'flex', flexDirection: 'column' }}>
               {logs.length === 0 ? (
                 <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
                   No logs available.
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {logs.map((entry, i) => (
-                    <div key={i} style={{
-                      display: 'flex', gap: 8, fontSize: 12,
-                      color: entry.msg.includes('error') || entry.msg.includes('fail') ? '#dc2626' : 'var(--color-text)',
-                      fontFamily: 'var(--font-mono)', padding: '2px 0',
-                    }}>
-                      <span style={{ color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                        {entry.t}
-                      </span>
-                      <span>{entry.msg}</span>
-                    </div>
-                  ))}
-                </div>
+                <LogViewer logs={logs} height="100%" emptyText="No logs available." />
               )}
             </div>
           </div>

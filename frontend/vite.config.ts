@@ -24,6 +24,8 @@ export default defineConfig({
       '/process-folder': 'http://127.0.0.1:8000',
       '/stream': 'http://127.0.0.1:8000',
       '/stream-batch': 'http://127.0.0.1:8000',
+      '/analytics': 'http://127.0.0.1:8000',
+      '/logs': 'http://127.0.0.1:8000',
     },
   },
 })

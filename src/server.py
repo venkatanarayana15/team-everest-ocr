@@ -8,12 +8,28 @@ import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+import re
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse as _StreamingResponse
+
+
+class SafeSSEResponse(_StreamingResponse):
+    """StreamingResponse that catches CancelledError on shutdown.
+    starlette 1.3.1 doesn't handle CancelledError (which is a BaseException
+    in Python 3.13+), so Ctrl+C during an active SSE connection logs a
+    spurious ERROR trace from uvicorn. This subclass suppresses it.
+    """
+    async def __call__(self, scope, receive, send):
+        try:
+            return await super().__call__(scope, receive, send)
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            pass
+        except Exception:
+            pass
 
 
 from src.extraction_pipeline import ExtractionPipeline, StructuredField, Config
@@ -152,12 +168,14 @@ try:
     from src.database import (
         init_pool,
         init_jobs_table,
+        init_corrections_log_table,
         get_incomplete_jobs,
         update_job_status,
         get_pool,
         close_pool,
         upsert_ocr_document,
         get_result_by_file_hash,
+        log_correction,
 
     )
     DB_AVAILABLE = True
@@ -243,7 +261,8 @@ async def lifespan(app: FastAPI):
         try:
             await init_pool()
             await init_jobs_table()
-            logger.info("Database pool + jobs table initialized")
+            await init_corrections_log_table()
+            logger.info("Database pool + jobs table + corrections_log table initialized")
         except Exception as e:
             logger.warning("Failed to init DB pool: %s — disabling DB features", e)
             DB_AVAILABLE = False
@@ -409,7 +428,7 @@ async def stream_status(job_id: str):
         finally:
             _status_queues.pop(job_id, None)
 
-    return StreamingResponse(event_gen(), media_type="text/event-stream")
+    return SafeSSEResponse(event_gen(), media_type="text/event-stream")
 
 
 @app.get("/stream-batch")
@@ -476,34 +495,37 @@ async def stream_batch(job_ids: str):
             for jid in ids:
                 _status_queues.pop(jid, None)
 
-    return StreamingResponse(event_gen(), media_type="text/event-stream")
+    return SafeSSEResponse(event_gen(), media_type="text/event-stream")
 
 
 @app.get("/stream-new-jobs")
 async def stream_new_jobs():
     async def event_gen():
-        # Send snapshot of existing jobs first
-        jobs_snapshot = await asyncio.to_thread(_list_jobs)
-        yield f"data: {json.dumps({'snapshot': jobs_snapshot})}\n\n"
-
-        q: asyncio.Queue = asyncio.Queue(maxsize=100)
-        _new_job_queues.append(q)
         try:
-            while True:
+            # Send snapshot of existing jobs first
+            jobs_snapshot = await asyncio.to_thread(_list_jobs)
+            yield f"data: {json.dumps({'snapshot': jobs_snapshot})}\n\n"
+
+            q: asyncio.Queue = asyncio.Queue(maxsize=100)
+            _new_job_queues.append(q)
+            try:
+                while True:
+                    try:
+                        payload = await asyncio.wait_for(q.get(), timeout=30)
+                        yield f"data: {payload}\n\n"
+                    except asyncio.TimeoutError:
+                        yield f"data: {json.dumps({'heartbeat': True})}\n\n"
+            except asyncio.CancelledError:
+                pass
+            finally:
                 try:
-                    payload = await asyncio.wait_for(q.get(), timeout=30)
-                    yield f"data: {payload}\n\n"
-                except asyncio.TimeoutError:
-                    yield f"data: {json.dumps({'heartbeat': True})}\n\n"
+                    _new_job_queues.remove(q)
+                except ValueError:
+                    pass
         except asyncio.CancelledError:
             pass
-        finally:
-            try:
-                _new_job_queues.remove(q)
-            except ValueError:
-                pass
 
-    return StreamingResponse(event_gen(), media_type="text/event-stream")
+    return SafeSSEResponse(event_gen(), media_type="text/event-stream")
 
 
 async def _create_job_dir(original_name: str, status_msg: str, initial_stage: str = "queued", prefix: str = "") -> tuple[str, Path]:
@@ -898,6 +920,40 @@ async def get_status(job_id: str):
     return _get_status(job_dir)
 
 
+_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d{3}\s+\w+\s+(.*)$")
+
+def _parse_log_line(line: str) -> dict | None:
+    m = _TS_RE.match(line)
+    if m:
+        ts = m.group(1)
+        parts = ts.split(" ")
+        t = parts[1] if len(parts) >= 2 else ts
+        return {"t": t, "msg": m.group(2)}
+    return None
+
+
+@app.get("/logs/{job_id}")
+async def get_logs(job_id: str, lines: int = 200):
+    job_dir = BASE_DIR / job_id
+    if not job_dir.exists():
+        raise HTTPException(404, "Job not found")
+    log_path = job_dir / "result.logs"
+    if not log_path.exists():
+        return {"log": [], "total": 0}
+    try:
+        content = log_path.read_text(encoding="utf-8", errors="replace")
+        all_lines = content.splitlines()
+        parsed = []
+        for line in all_lines[-lines:]:
+            entry = _parse_log_line(line)
+            if entry:
+                parsed.append(entry)
+        return {"log": parsed, "total": len(all_lines)}
+    except Exception as e:
+        logger.error("GET /logs/%s: failed to read — %s", job_id, e)
+        raise HTTPException(500, "Failed to read logs")
+
+
 @app.get("/result/{job_id}")
 async def get_result(job_id: str):
     job_dir = BASE_DIR / job_id
@@ -1088,23 +1144,66 @@ async def correct_field(job_id: str, body: dict):
         job_id, pdf_name, label, correct_value,
     )
 
+    found = False
+    original_value = ""
+    result_path = job_dir / "results" / "result.json"
+    result_data = None
+    if result_path.exists():
+        with open(result_path) as f:
+            result_data = json.load(f)
+
+    # Find original value from current state (before patch)
+    def _lookup_original(fields_list: list[dict]) -> str:
+        for field in fields_list:
+            if field["label"] == label:
+                return field.get("original_value", "") or field.get("value", "")
+        return ""
+
+    if pdf_name and result_data and isinstance(result_data.get("pdfs"), list):
+        for pdf in result_data["pdfs"]:
+            pdf_file = pdf.get("pdf_name") or pdf.get("filename") or pdf.get("name", "")
+            if pdf_file == pdf_name and isinstance(pdf.get("fields"), list):
+                original_value = _lookup_original(pdf["fields"])
+                break
+    elif result_data:
+        original_value = _lookup_original(result_data.get("fields", []))
+        if not original_value and isinstance(result_data.get("pdfs"), list):
+            for pdf in result_data["pdfs"]:
+                if isinstance(pdf.get("fields"), list):
+                    original_value = _lookup_original(pdf["fields"])
+                    if original_value:
+                        break
+
+    now = datetime.now(timezone.utc)
     corrections_path = job_dir / "corrections.json"
     corrections = []
     if corrections_path.exists():
         with open(corrections_path) as f:
             corrections = json.load(f)
 
-    corrections.append({"label": label, "correct_value": correct_value})
+    corrections.append({
+        "label": label,
+        "original_value": original_value,
+        "correct_value": correct_value,
+        "pdf_name": pdf_name or None,
+        "timestamp": now.isoformat(),
+    })
     tmp = corrections_path.with_suffix(".tmp")
     with open(tmp, "w") as f:
         json.dump(corrections, f, indent=2)
     os.replace(tmp, corrections_path)
 
-    found = False
-    result_path = job_dir / "results" / "result.json"
-    if result_path.exists():
-        with open(result_path) as f:
-            result_data = json.load(f)
+    if DB_AVAILABLE:
+        await log_correction(
+            job_id=job_id,
+            field_label=label,
+            original_value=original_value,
+            corrected_value=correct_value,
+            pdf_name=pdf_name or None,
+        )
+
+    # Apply correction to result.json
+    if result_data:
 
         def _apply_correction(fields: list[dict]) -> bool:
             for field in fields:
@@ -1187,53 +1286,148 @@ async def update_raw_text(job_id: str, body: dict):
     return {"status": "saved"}
 
 
-def _compute_metrics() -> dict:
+_SECTION_RE = re.compile(r"^(?:Section\s+)?(\d+)")
+
+def _extract_section_from_label(label: str) -> str | None:
+    """Extract section number from a field label, e.g. 'Section 2 — Name' → '2'."""
+    m = _SECTION_RE.search(label)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _compute_metrics(top: int | None = None, since: str | None = None) -> dict:
+    since_ts: float | None = None
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since)
+            since_ts = since_dt.timestamp()
+        except Exception:
+            pass
+
     all_corrections: list[dict] = []
     for d in BASE_DIR.iterdir():
         if not d.is_dir():
             continue
         corr_path = d / "corrections.json"
-        if corr_path.exists():
-            with open(corr_path) as f:
-                corr = json.load(f)
-            result_path = d / "results" / "result.json"
-            if result_path.exists():
-                with open(result_path) as f:
-                    res = json.load(f)
-                for c in corr:
-                    original = next(
-                        (f["value"] for f in res.get("fields", []) if f["label"] == c["label"]),
-                        None
-                    )
-                    c["original_value"] = original
-            all_corrections.extend(corr)
+        if not corr_path.exists():
+            continue
+        with open(corr_path) as f:
+            corr_list = json.load(f)
+        for c in corr_list:
+            # Filter by timestamp
+            if since_ts:
+                ts = c.get("timestamp")
+                if ts:
+                    try:
+                        c_ts = datetime.fromisoformat(ts).timestamp()
+                        if c_ts < since_ts:
+                            continue
+                    except Exception:
+                        pass  # old entry without parseable timestamp: include
+            # Backfill original_value for old entries that don't have it
+            if "original_value" not in c or not c.get("original_value"):
+                result_path = d / "results" / "result.json"
+                if result_path.exists():
+                    try:
+                        with open(result_path) as f:
+                            res = json.load(f)
+                        original = next(
+                            (f["value"] for f in res.get("fields", []) if f["label"] == c["label"]),
+                            None
+                        )
+                        c["original_value"] = original or ""
+                    except Exception:
+                        c["original_value"] = ""
+                else:
+                    c["original_value"] = ""
+            all_corrections.append(c)
 
     if not all_corrections:
         return {"total_corrections": 0, "message": "No human corrections recorded yet"}
 
     field_corrections: dict[str, list[dict]] = {}
+    page_corrections: dict[str, list[dict]] = {}
     for c in all_corrections:
-        field_corrections.setdefault(c["label"], []).append(c)
+        label = c.get("label", "")
+        field_corrections.setdefault(label, []).append(c)
+        sec = _extract_section_from_label(label)
+        page_corrections.setdefault(sec or "0", []).append(c)
 
     per_field = {}
     for label, corrs in sorted(field_corrections.items()):
         total = len(corrs)
-        changed = sum(1 for c in corrs if c.get("original_value", c["correct_value"]) != c["correct_value"])
+        changed = sum(1 for c in corrs if c.get("original_value", "") != c.get("correct_value", ""))
         per_field[label] = {
             "total_corrections": total,
             "times_changed": changed,
-            "stability_pct": round((1 - changed / total) * 100),
+            "stability_pct": round((1 - changed / total) * 100) if total else 0,
         }
 
-    return {
+    per_page = {}
+    for sec, corrs in sorted(page_corrections.items()):
+        per_page[sec] = {
+            "total_corrections": len(corrs),
+            "fields": sorted(set(c.get("label", "") for c in corrs)),
+        }
+
+    result = {
         "total_corrections": len(all_corrections),
         "per_field": per_field,
+        "per_page": per_page,
     }
+
+    if top and top > 0:
+        sorted_fields = sorted(per_field.items(), key=lambda x: x[1]["total_corrections"], reverse=True)
+        result["per_field"] = dict(sorted_fields[:top])
+
+    return result
 
 
 @app.get("/metrics")
-async def get_metrics():
-    return await asyncio.to_thread(_compute_metrics)
+async def get_metrics(top: int | None = None, since: str | None = None):
+    return await asyncio.to_thread(_compute_metrics, top=top, since=since)
+
+
+@app.get("/analytics/frequently-edited")
+async def get_frequently_edited(limit: int = 20, days: int | None = None):
+    if not DB_AVAILABLE:
+        raise HTTPException(503, "Database not available")
+    pool = get_pool()
+    try:
+        async with pool.acquire() as conn:
+            if days:
+                rows = await conn.fetch(
+                    """
+                    SELECT field_label,
+                           COUNT(*) AS edit_count,
+                           MAX(edited_at) AS last_edited
+                    FROM corrections_log
+                    WHERE edited_at > NOW() - $2::interval
+                    GROUP BY field_label
+                    ORDER BY edit_count DESC
+                    LIMIT $1
+                    """,
+                    limit, f"{days} days",
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT field_label,
+                           COUNT(*) AS edit_count,
+                           MAX(edited_at) AS last_edited
+                    FROM corrections_log
+                    GROUP BY field_label
+                    ORDER BY edit_count DESC
+                    LIMIT $1
+                    """,
+                    limit,
+                )
+        result = [dict(r) for r in rows]
+        return {"frequently_edited": result, "total_fields": len(result)}
+    except Exception as e:
+        logger.error("GET /analytics/frequently-edited: FAILED — %s", e, exc_info=True)
+        raise HTTPException(500, "Failed to query corrections_log")
 
 
 def _extract_epoch_from_job_id(job_id: str) -> float:
@@ -1318,6 +1512,9 @@ async def delete_job(job_id: str):
                     )
                     await conn.execute(
                         "DELETE FROM ocr_jobs WHERE job_id = $1", job_id
+                    )
+                    await conn.execute(
+                        "DELETE FROM corrections_log WHERE job_id = $1", job_id
                     )
         except Exception as e:
             logger.warning("Failed to clean up DB records for job %s: %s", job_id, e)

@@ -197,7 +197,7 @@ class GeminiClient(ModelClient):
             prompt_tokens = getattr(metadata, "prompt_token_count", 0) or 0
             completion_tokens = getattr(metadata, "response_token_count", 0) or 0
             total_tokens = getattr(metadata, "total_token_count", 0) or 0
-            if completion_tokens == 0 and total_tokens == 0 and prompt_tokens > 0:
+            if completion_tokens == 0 and prompt_tokens > 0:
                 text = getattr(response, "text", "") or ""
                 completion_tokens = max(len(text.split()) * 4 // 3, 1)
                 total_tokens = prompt_tokens + completion_tokens

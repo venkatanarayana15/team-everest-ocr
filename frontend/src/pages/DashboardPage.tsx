@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { deleteJob, subscribeNewJobs } from '../api/client';
 
 interface JobEntry {
@@ -38,6 +38,22 @@ export default function DashboardPage({ onSelectBatch }: Props) {
   const [loading, setLoading] = useState(true);
   const [sortOrder, setSortOrder] = useState<'latest' | 'oldest'>('latest');
   const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
+
+  const [showMetrics, setShowMetrics] = useState(false);
+  const [metricsData, setMetricsData] = useState<any>(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+
+  const loadMetrics = useCallback(async () => {
+    setMetricsLoading(true);
+    try {
+      const res = await fetch('/analytics/frequently-edited?limit=20');
+      const data = await res.json();
+      setMetricsData(data);
+    } catch {
+      setMetricsData(null);
+    }
+    setMetricsLoading(false);
+  }, []);
 
   // Subscribe to SSE — snapshot populates dashboard, new jobs auto-navigate
   useEffect(() => {
@@ -153,6 +169,22 @@ export default function DashboardPage({ onSelectBatch }: Props) {
               🗑️ Delete ({selectedJobIds.length})
             </button>
           )}
+          <button
+            onClick={() => { loadMetrics(); setShowMetrics(true); }}
+            style={{
+              padding: '6px 12px', fontSize: 12, fontWeight: 600,
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg)',
+              background: 'var(--color-surface)',
+              color: 'var(--color-text)',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+              transition: 'all var(--transition-fast)',
+              boxShadow: 'var(--shadow-xs)',
+            }}
+            title="View frequently corrected fields"
+          >
+            📊 Metrics
+          </button>
           <div style={{ display: 'flex', gap: 2, background: 'var(--color-bg)', borderRadius: 'var(--radius-md)', padding: 2 }}>
             {(['latest', 'oldest'] as const).map((opt) => (
               <button
@@ -296,6 +328,124 @@ export default function DashboardPage({ onSelectBatch }: Props) {
           </div>
         )}
       </div>
+
+      {showMetrics && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }} onClick={() => setShowMetrics(false)}>
+          <div style={{
+            background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)',
+            padding: 24, maxWidth: 650, width: '90%', maxHeight: '80vh',
+            overflow: 'auto', boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              marginBottom: 16,
+            }}>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
+                📊 Field Correction Analysis
+              </h2>
+              <button onClick={() => setShowMetrics(false)} style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                fontSize: 20, color: 'var(--color-text-muted)',
+              }}>✕</button>
+            </div>
+
+            {metricsLoading && <p style={{ color: 'var(--color-text-secondary)', fontSize: 14 }}>Loading...</p>}
+
+            {!metricsLoading && !metricsData && (
+              <p style={{ color: 'var(--color-text-secondary)', fontSize: 14 }}>Failed to load metrics.</p>
+            )}
+
+            {!metricsLoading && metricsData && metricsData.total_fields === 0 && (
+              <p style={{ color: 'var(--color-text-secondary)', fontSize: 14 }}>
+                No corrections recorded yet. Corrections will appear here after you start editing fields.
+              </p>
+            )}
+
+            {!metricsLoading && metricsData && metricsData.total_fields > 0 && (
+              <>
+                <p style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
+                  Top fields by correction frequency across all jobs.
+                </p>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
+                      <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700 }}>#</th>
+                      <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700 }}>Field Label</th>
+                      <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700 }}>Edit Count</th>
+                      <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700 }}>Last Edited</th>
+                      <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 700 }}>Flag</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {metricsData.frequently_edited.map((item: any, i: number) => {
+                      const now = Date.now();
+                      const lastEdit = item.last_edited ? new Date(item.last_edited).getTime() : 0;
+                      const daysSinceEdit = lastEdit ? (now - lastEdit) / 86400000 : 999;
+                      const isFrequent = item.edit_count > 10;
+                      const isRecent = daysSinceEdit < 7;
+                      let flag = '';
+                      let flagColor = 'transparent';
+                      if (isFrequent && isRecent) {
+                        flag = '🔴';
+                        flagColor = '#fef2f2';
+                      } else if (isFrequent) {
+                        flag = '🔴';
+                        flagColor = 'transparent';
+                      } else if (item.edit_count > 3 && isRecent) {
+                        flag = '🟡';
+                        flagColor = '#fffbeb';
+                      } else if (item.edit_count < 3) {
+                        flag = '🟢';
+                        flagColor = '#f0fdf4';
+                      }
+                      return (
+                        <tr key={item.field_label} style={{
+                          borderBottom: '1px solid var(--color-border-light)',
+                          background: i % 2 === 0 ? 'transparent' : 'var(--color-bg)',
+                        }}>
+                          <td style={{ padding: '6px 8px', color: 'var(--color-text-muted)' }}>{i + 1}</td>
+                          <td style={{ padding: '6px 8px', fontWeight: 500 }}>{item.field_label}</td>
+                          <td style={{
+                            padding: '6px 8px', textAlign: 'right',
+                            color: item.edit_count > 10 ? '#dc2626' : item.edit_count < 3 ? '#16a34a' : 'var(--color-text)',
+                            fontWeight: item.edit_count > 10 ? 700 : 400,
+                          }}>{item.edit_count}</td>
+                          <td style={{
+                            padding: '6px 8px', textAlign: 'right',
+                            color: 'var(--color-text-muted)', fontSize: 12,
+                          }}>
+                            {lastEdit ? new Date(lastEdit).toLocaleDateString(undefined, {
+                              month: 'short', day: 'numeric', year: 'numeric',
+                            }) : '-'}
+                          </td>
+                          <td style={{
+                            padding: '6px 8px', textAlign: 'center', fontSize: 16,
+                          }}>{flag}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div style={{
+                  marginTop: 16, padding: '12px 16px', borderRadius: 'var(--radius-md)',
+                  background: 'var(--color-bg)', fontSize: 12, color: 'var(--color-text-secondary)',
+                  lineHeight: 1.6,
+                }}>
+                  <strong>Legend:</strong><br />
+                  🟢 <strong>Stable</strong> — edited fewer than 3 times<br />
+                  🟡 <strong>Active</strong> — edited &gt;3 times in the last 7 days<br />
+                  🔴 <strong>High frequency</strong> — edited 10+ times across all jobs<br />
+                  Fields with 🔴 flags indicate a persistent extraction issue.
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

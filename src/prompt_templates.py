@@ -516,7 +516,7 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
 --- Header (Page 1, section=null) — 3 fields ---
   Volunteer Name        [text — full name, exactly as written]
   Co-Volunteer Name     [text — full name, exactly as written]
-  Date of Visit         [text — date exactly as written, preserve dd/mm/yyyy format]
+  Date of Visit         [text — exactly as written on the form, do NOT convert or reformat. E.g. if written "6th June 2026" return "6th June 2026"]
 
 --- Section 1 — Student Profile (Page 1) — 3 fields ---
   1.1 Application ID                      [text — alphanumeric CODE like 'TE2024001' or 'temp-2026-9934'. Last 4 chars are DIGITS only, not letters. '8'↔'B', '0'↔'O', '1'↔'l', '5'↔'S'. E.g. B974→8974, O→0.]

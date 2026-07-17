@@ -677,3 +677,64 @@ async def get_incomplete_jobs() -> list[dict]:
     except Exception as e:
         logger.error("get_incomplete_jobs: FAILED — %s", e, exc_info=True)
         return []
+
+
+# ── Corrections log (per-field edit audit trail) ─────────────────────────
+
+
+async def init_corrections_log_table() -> None:
+    """Create corrections_log table if not exists. Call once at startup."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS corrections_log (
+                id BIGSERIAL PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                field_label TEXT NOT NULL,
+                original_value TEXT NOT NULL DEFAULT '',
+                corrected_value TEXT NOT NULL DEFAULT '',
+                pdf_name TEXT,
+                edited_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_corr_log_label
+            ON corrections_log (field_label)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_corr_log_time
+            ON corrections_log (edited_at)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_corr_log_job
+            ON corrections_log (job_id)
+        """)
+
+
+async def log_correction(
+    *,
+    job_id: str,
+    field_label: str,
+    original_value: str,
+    corrected_value: str,
+    pdf_name: str | None = None,
+) -> bool:
+    """Insert a row into corrections_log. Returns True on success."""
+    pool = get_pool()
+    if pool is None:
+        logger.warning("log_correction: pool is None — skipping DB insert")
+        return False
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO corrections_log
+                    (job_id, field_label, original_value, corrected_value, pdf_name)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                job_id, field_label, original_value, corrected_value, pdf_name,
+            )
+        return True
+    except Exception as e:
+        logger.error("log_correction: FAILED — %s", e, exc_info=True)
+        return False

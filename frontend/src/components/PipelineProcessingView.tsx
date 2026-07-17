@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import LogViewer from './LogViewer';
 
 interface FieldSummary {
   label: string;
@@ -71,12 +72,6 @@ export default function PipelineProcessingView({
   overallProgress, perPdfProgress, logs, elapsed, fields, onBack,
   onResumeJob, onResumeBatch, onStartOver, onViewResults
 }: Props) {
-  const logEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'auto' });
-  }, [logs]);
-
   const stageOrder = STAGES.map(s => s.key);
   const mappedKey = STAGE_MAPPING[status] || 'queued';
   const stageIndex = stageOrder.indexOf(mappedKey);
@@ -414,24 +409,15 @@ export default function PipelineProcessingView({
               <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)', marginLeft: 6 }}>
                 tesseract_pipeline.log
               </span>
+              <span style={{
+                marginLeft: 'auto', fontSize: 10, fontFamily: 'var(--font-mono)',
+                color: 'var(--color-text-muted)', background: 'rgba(148,163,184,0.15)',
+                padding: '1px 8px', borderRadius: 10,
+              }}>
+                {logs.length} entries
+              </span>
             </div>
-            <div style={{
-              flex: 1, overflowY: 'auto', padding: '14px',
-              fontFamily: 'var(--font-mono)', fontSize: 12, lineHeight: 1.6,
-              color: '#e2e8f0', display: 'flex', flexDirection: 'column', gap: 4,
-            }}>
-              {logs.length === 0 ? (
-                <span style={{ color: '#64748b' }}>Waiting for pipeline logs to stream...</span>
-              ) : (
-                logs.map((e, idx) => (
-                  <div key={idx} style={{ display: 'flex', gap: 10 }}>
-                    <span style={{ color: '#64748b', userSelect: 'none' }}>[{e.t}]</span>
-                    <span style={{ whiteSpace: 'pre-wrap' }}>{e.msg}</span>
-                  </div>
-                ))
-              )}
-              <div ref={logEndRef} />
-            </div>
+            <LogViewer logs={logs} autoScroll height="100%" emptyText="Waiting for pipeline logs to stream…" />
           </div>
           {/* Action Buttons */}
           {(status === 'error' || status === 'done' || status === 'incomplete') && (
