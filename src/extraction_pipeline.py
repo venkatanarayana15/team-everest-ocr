@@ -882,8 +882,8 @@ FIELD LIST BY PAGE:
             section_number = self._infer_section_from_label(label)
         needs_clarification = gf.get("needs_clarification", False)
 
-        bbox = self._parse_bbox(gf.get("bbox"))
-        value_bbox = self._parse_bbox(gf.get("value_bbox"))
+        bbox = self._parse_bbox(gf.get("bbox"), page_dims)
+        value_bbox = self._parse_bbox(gf.get("value_bbox"), page_dims)
 
         return StructuredField(
             label=label,
