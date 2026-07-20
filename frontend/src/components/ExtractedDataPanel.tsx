@@ -1,12 +1,89 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import type { Field, Section } from '../types';
+import { resolveHierarchy, schemaFieldType, mutexGroupFor, mutexOptionName, mutexMembersOfStem, radioGroupChildrenOf, optionsForLabel } from '../utils/schemaHierarchy';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 const TABLE_ROW_RE = /^(.+?)\s*[—–-]\s*Row\s+(\d+)\s*[—–-]\s*(.+)$/;
 const CHECKBOX_VALS = new Set(['yes', 'no', 'true', 'false', '✓', '✗', '?']);
 
+type Bbox = [number, number, number, number];
+
+// Union of a group's option boxes → one region covering the whole question block.
+function unionBbox(fields: Field[]): Bbox | null {
+  const boxes: Bbox[] = [];
+  for (const f of fields) {
+    if (f.bbox) boxes.push(f.bbox as Bbox);
+    if (f.value_bbox) boxes.push(f.value_bbox as Bbox);
+  }
+  if (boxes.length === 0) return null;
+  return [
+    Math.min(...boxes.map(b => b[0])),
+    Math.min(...boxes.map(b => b[1])),
+    Math.max(...boxes.map(b => b[2])),
+    Math.max(...boxes.map(b => b[3])),
+  ];
+}
+
+// The question LABEL is printed above the first option row, but the form data only
+// carries coordinates for the option boxes. To map the question itself in blue,
+// extend the union's top upward by a margin so the label line is enclosed.
+const QUESTION_LABEL_PAD = 50;
+function questionRegion(fields: Field[]): Bbox | null {
+  const u = unionBbox(fields);
+  if (!u) return null;
+  return [u[0], Math.max(0, u[1] - QUESTION_LABEL_PAD), u[2], u[3]];
+}
+
+const isYesVal = (v: string | null | undefined): boolean =>
+  ['yes', 'true', '✓'].includes((v ?? '').trim().toLowerCase());
+
+// Collapse a single-select radio group's member fields into one synthetic Field
+// rendered exactly like 8.2 (one row, inline radios, click highlights the whole
+// question region). `stem` is the question label; `nameOf` strips the stem to an
+// option display name.
+function buildRadioSyntheticField(
+  stem: string,
+  memberFields: Field[],
+  nameOf: (memberLabel: string) => string,
+  specifyChildren: Field[] = [],
+): Field {
+  const selected = memberFields.find(c => isYesVal(c.value));
+  const union = unionBbox(memberFields);
+  // Blue = the WHOLE question region (label + options); Green = only the
+  // selected answer(s), so the question label area is mapped in blue and the
+  // chosen answer(s) in green (mirrors a single-field radio like 8.2).
+  const answerUnion = unionBbox(memberFields.filter(c => isYesVal(c.value)));
+  const base = memberFields[0];
+  return {
+    label: stem,
+    value: selected ? nameOf(selected.label) : '',
+    confidence: selected ? selected.confidence
+      : (memberFields.reduce((s, c) => s + (c.confidence || 0), 0) / Math.max(memberFields.length, 1)),
+    page: base.page,
+    section_number: base.section_number,
+    // Union of all member boxes (extended upward to enclose the question label)
+    // → clicking maps the WHOLE question region in blue (label) + green (value).
+    bbox: questionRegion(memberFields),
+    value_bbox: answerUnion,
+    needs_clarification: memberFields.some(c => c.needs_clarification),
+    reason: selected?.reason ?? null,
+    is_verified: memberFields.every(c => c.is_verified),
+    verifier_confidence: selected?.verifier_confidence ?? null,
+    verification_note: selected?.verification_note ?? null,
+    extracted_by: selected?.extracted_by ?? null,
+    verified_by: selected?.verified_by ?? null,
+    original_value: selected?.original_value ?? '',
+    is_edited: memberFields.some(c => c.is_edited),
+    parent_label: stem,
+    field_type: 'radio',
+    mutexMembers: memberFields,
+    specifyChildren: specifyChildren.length ? specifyChildren : undefined,
+  };
+}
+
 function isCheckbox(field: Field): boolean {
+  if (field.field_type === 'checkbox') return true;
   return CHECKBOX_VALS.has((field.value ?? '').trim().toLowerCase());
 }
 
@@ -37,7 +114,7 @@ function checkboxDisplay(val: string | null): { icon: string; color: string } {
   return { icon: '?', color: '#94a3b8' };
 }
 
-function parseDateToYmd(val: string): string {
+function parseDateToYmd(val: string | null): string {
   if (!val) return '';
   const v = val.trim();
   
@@ -82,6 +159,16 @@ function formatYmdToDdMmmYyyy(ymd: string): string {
 
 function getRadioOptions(label: string): string[] | null {
   const lbl = label.toLowerCase();
+  // Single-select radio groups collapsed into a single question (mutex OR parent_label-based,
+  // e.g. 3.1, 3.5, 4.3, 3.2, 3.3). Derive options from the schema so they always render.
+  const members = radioGroupChildrenOf(label) ?? mutexMembersOfStem(label);
+  if (members) {
+    const stem = label;
+    return members.map(m => mutexOptionName(m, stem));
+  }
+  // Single radio field defined directly with an options array (e.g. 8.2, 4.4, 4.6).
+  const opts = optionsForLabel(label);
+  if (opts) return opts;
   if (lbl.includes('1.3 gender')) {
     return ['Male', 'Female', 'Others'];
   }
@@ -204,7 +291,7 @@ function InlineEditor({
   );
 }
 
-function CheckboxIcon({ value }: { value: string }) {
+function CheckboxIcon({ value }: { value: string | null }) {
   const { icon, color } = checkboxDisplay(value);
   return (
     <span style={{
@@ -220,12 +307,13 @@ function CheckboxIcon({ value }: { value: string }) {
 }
 
 function FieldValue({
-  field, isSelected, onSelect, onValueChange,
+  field, isSelected, onSelect, onValueChange, onFieldUpdate,
 }: {
   field: Field;
   isSelected: boolean;
   onSelect: () => void;
   onValueChange: (newVal: string) => void;
+  onFieldUpdate: (f: Field, newVal: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -247,7 +335,11 @@ function FieldValue({
   const isCheckboxField = isCheckbox(field);
   const wasCorrected = field.is_edited === true;
 
-  const isMultiSelect = field.label.includes('2.1 ') || /^(4\.4 |4\.6 |8\.2 )/.test(field.label);
+  // Multi-select radios (e.g. 2.1, 4.4, 4.6, 8.2) render as checkboxes, not radios.
+  const isMultiSelect =
+    field.field_type === 'checkbox' ||
+    field.label.includes('2.1 ') ||
+    /^(4\.4 |4\.6 |8\.2 )/.test(field.label);
 
   const containerStyle: React.CSSProperties = {
     padding: '12px 16px',
@@ -304,24 +396,27 @@ function FieldValue({
 
       {(() => {
         const lbl = field.label.toLowerCase();
-        
+        // Only treat as a radio group when the backend marks it radio (single source of truth).
+        const radioOpts = field.field_type === 'radio' ? getRadioOptions(field.label) : null;
+
+        let valueContent: React.ReactNode = null;
+        let isSpecial = false;
+
         if (lbl.includes('date of visit')) {
-          // Convert current value (which might be DD-MMM-YYYY or raw text) to DD-MM-YYYY for editing
+          isSpecial = true;
           const ymd = parseDateToYmd(field.value);
-          let displayVal = field.value;
+          let displayVal = field.value ?? '';
           if (ymd) {
             const parts = ymd.split('-');
             if (parts.length === 3) displayVal = `${parts[2]}-${parts[1]}-${parts[0]}`;
           }
-
-          return (
-            <div onMouseDown={(e) => e.stopPropagation()} style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+          valueContent = (
+            <div onMouseDown={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>📅</span>
               <input
                 type="text"
                 placeholder="DD-MM-YYYY"
                 defaultValue={displayVal}
-                key={field.value}
                 onBlur={(e) => {
                   const val = e.target.value.replace(/\D/g, '').slice(0, 8);
                   if (!val) { onValueChange(''); return; }
@@ -349,12 +444,9 @@ function FieldValue({
               />
             </div>
           );
-        }
-
-
-        const radioOpts = getRadioOptions(field.label);
-        if (radioOpts) {
-          return (
+        } else if (radioOpts) {
+          isSpecial = true;
+          valueContent = (
             <div 
               style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 4 }}
               onClick={(e) => e.stopPropagation()}
@@ -387,13 +479,19 @@ function FieldValue({
                   </label>
                 );
               })}
+              {/* "Others (specify)" style follow-ups: shown only when the matching option is selected */}
+              {(field.specifyChildren ?? [])
+                .filter(sf => (sf.parent_option_label ?? '').trim().toLowerCase() === (field.value ?? '').trim().toLowerCase())
+                .map(sf => (
+                  <SpecifyInput key={sf.label} field={sf} onFieldClick={onSelect} onFieldUpdate={onFieldUpdate} />
+                ))}
             </div>
           );
-        }
-        if (isCheckboxField && !field.label.startsWith('7.1 ') && !field.label.startsWith('6.1 ')) {
+        } else if (isCheckboxField && !field.label.startsWith('7.1 ') && !field.label.startsWith('6.1 ')) {
+          isSpecial = true;
           const fv = (field.value ?? '').trim().toLowerCase();
           const isChecked = fv === 'yes' || fv === 'true' || fv === '✓';
-          return (
+          valueContent = (
             <div 
               onClick={(e) => { e.stopPropagation(); onValueChange(isChecked ? 'no' : 'yes'); }}
               style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, cursor: 'pointer' }}
@@ -402,47 +500,55 @@ function FieldValue({
               <span style={{ fontSize: 13, color: 'var(--color-text)' }}>{field.value ?? 'empty'}</span>
             </div>
           );
-        }
-        if (editing) {
-          return (
+        } else if (editing) {
+          valueContent = (
             <div style={{ flex: 1 }}>
               <InlineEditor value={field.value} onSave={handleSave} onCancel={handleCancel} multiline={field.label.includes('8.1') || field.label.includes('8.3')} />
             </div>
           );
-        }
-        return null;
-      })() || (
-        <div
-          onDoubleClick={handleStartEdit}
-          style={{
-            flex: 1,
-            fontSize: 14,
-            color: 'var(--color-text)',
-            lineHeight: 1.5,
-            padding: '2px 0',
-            minHeight: 20,
-            wordBreak: 'break-word',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <span style={{ flex: 1, fontSize: 14, fontWeight: 500, color: field.value ? 'var(--color-primary-dark)' : 'var(--color-text-placeholder)', borderBottom: '1px solid var(--color-border-light)', paddingBottom: 2, minHeight: 20 }}>
-            {field.value || <span style={{ fontStyle: 'italic' }}>empty</span>}
-          </span>
-          {hovered && (
-            <button
-              onClick={handleStartEdit}
-              style={editBtnStyle}
-              title="Edit value"
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-border)'; e.currentTarget.style.color = 'var(--color-text-tertiary)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-muted)'; }}
+        } else {
+          valueContent = (
+            <div
+              onDoubleClick={handleStartEdit}
+              style={{
+                flex: 1,
+                fontSize: 14,
+                color: 'var(--color-text)',
+                lineHeight: 1.5,
+                padding: '2px 0',
+                minHeight: 20,
+                wordBreak: 'break-word',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
             >
-              ✎
-            </button>
-          )}
-        </div>
-      )}
+              <span style={{ flex: 1, fontSize: 14, fontWeight: 500, color: field.value ? 'var(--color-primary-dark)' : 'var(--color-text-placeholder)', borderBottom: '1px solid var(--color-border-light)', paddingBottom: 2, minHeight: 20 }}>
+                {field.value || <span style={{ fontStyle: 'italic' }}>empty</span>}
+              </span>
+            </div>
+          );
+        }
+
+        return (
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, width: '100%', marginTop: 4 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {valueContent}
+            </div>
+            {!editing && isSpecial && (
+              <button
+                onClick={handleStartEdit}
+                style={editBtnStyle}
+                title="Edit value"
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-border)'; e.currentTarget.style.color = 'var(--color-text-tertiary)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-muted)'; }}
+              >
+                ✎
+              </button>
+            )}
+          </div>
+        );
+      })()}
 
       {field.reason && (
         <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>
@@ -454,12 +560,13 @@ function FieldValue({
 }
 
 function FieldRow({
-  field, isSelected, onSelect, onValueChange,
+  field, isSelected, onSelect, onValueChange, onFieldUpdate,
 }: {
   field: Field;
   isSelected: boolean;
   onSelect: () => void;
   onValueChange: (newVal: string) => void;
+  onFieldUpdate: (f: Field, newVal: string) => void;
 }) {
   const match = field.label.match(TABLE_ROW_RE);
   if (match) {
@@ -471,6 +578,7 @@ function FieldRow({
         isSelected={isSelected}
         onSelect={onSelect}
         onValueChange={onValueChange}
+        onFieldUpdate={onFieldUpdate}
       />
     );
   }
@@ -480,6 +588,7 @@ function FieldRow({
       isSelected={isSelected}
       onSelect={onSelect}
       onValueChange={onValueChange}
+      onFieldUpdate={onFieldUpdate}
     />
   );
 }
@@ -553,9 +662,10 @@ function TableCell({ field, isSelected, onFieldClick, onFieldUpdate }: {
 }
 
 function TableView({
-  fields, selectedField, onFieldClick, onFieldUpdate,
+  fields, allFields, selectedField, onFieldClick, onFieldUpdate,
 }: {
   fields: Field[];
+  allFields: Field[];
   selectedField: Field | null;
   onFieldClick: (f: Field) => void;
   onFieldUpdate: (f: Field, newVal: string) => void;
@@ -590,7 +700,7 @@ function TableView({
     return (
       <div style={{ padding: '4px 0' }}>
         {fields.map(f => (
-          <FieldRow key={f.label} field={f} isSelected={selectedField?.label === f.label} onSelect={() => onFieldClick(f)} onValueChange={(v) => onFieldUpdate(f, v)} />
+          <FieldRow key={f.label} field={f} isSelected={selectedField?.label === f.label} onSelect={() => onFieldClick(f)} onValueChange={(v) => onFieldUpdate(f, v)} onFieldUpdate={onFieldUpdate} />
         ))}
       </div>
     );
@@ -609,10 +719,68 @@ function TableView({
     }
   }
 
+  // Find the actual table_header field across all available fields
+  const tableHeaderLabel = fields[0]?.parent_label || tableTitle;
+  // Search for the actual table_header field in the full fields array (passed as prop)
+  // We look for a field whose label matches the table header label
+  let tableHeaderField: Field | undefined;
+  if (tableHeaderLabel) {
+    tableHeaderField = allFields.find(f => f.label === tableHeaderLabel && (f.field_type === 'table_header' || f.field_type === undefined));
+    if (!tableHeaderField) {
+      tableHeaderField = allFields.find(f => f.label === tableHeaderLabel);
+    }
+  }
+
   return (
     <div style={{ padding: '8px 12px 16px 12px' }}>
       {tableTitle && (
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#000000', marginBottom: 8 }}>
+        <div 
+          style={{ 
+            fontSize: 13, fontWeight: 700, color: '#000000', marginBottom: 8, 
+            cursor: 'pointer',
+            padding: '4px 8px',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--color-bg)',
+            border: '1px solid transparent',
+            transition: 'background var(--transition-fast), border-color var(--transition-fast)',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.background = 'var(--color-surface)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.background = 'var(--color-bg)'; }}
+          onClick={() => {
+            const src = tableHeaderField || fields[0];
+            // Prefer the header's own spatial grounding; otherwise fall back to the
+            // union of the table's cell boxes so clicking the title still maps to a
+            // real region on the PDF (mirrors CheckboxGroupView parent behaviour).
+            const srcBbox = src?.bbox ?? null;
+            const srcVBbox = src?.value_bbox ?? null;
+            const union = srcBbox || srcVBbox ? null : questionRegion(fields);
+            // Green = only the cells that actually contain an answer.
+            const answeredUnion = unionBbox(
+              fields.filter(f => (f.value ?? '').trim() !== '' && (f.value ?? '').trim().toLowerCase() !== 'n/a')
+            );
+            const targetField: Field = {
+              label: tableHeaderLabel,
+              parent_label: tableHeaderLabel,
+              page: src?.page ?? 1,
+              bbox: srcBbox ?? union,
+              value_bbox: srcVBbox ?? answeredUnion,
+              value: '',
+              confidence: 0,
+              section_number: src?.section_number ?? null,
+              needs_clarification: false,
+              reason: null,
+              is_verified: false,
+              verifier_confidence: null,
+              verification_note: null,
+              extracted_by: null,
+              verified_by: null,
+              original_value: '',
+              is_edited: false,
+            };
+            onFieldClick(targetField);
+          }}
+          title="Click to locate on PDF"
+        >
           {tableTitle}
         </div>
       )}
@@ -625,7 +793,7 @@ function TableView({
       }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ background: '#f8fafc' }}>
+            <tr style={{ background: 'var(--color-surface-alt)' }}>
               <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '2px solid var(--color-border)', color: '#000000', fontWeight: 700, whiteSpace: 'nowrap' }}>#</th>
               {colArr.map(col => (
                 <th key={col} style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '2px solid var(--color-border)', color: '#000000', fontWeight: 700, whiteSpace: 'nowrap' }}>{col}</th>
@@ -637,7 +805,7 @@ function TableView({
               const [, rowNum] = rowKey.split('|');
               const isEven = rowIdx % 2 === 0;
               return (
-                <tr key={rowKey} style={{ background: isEven ? 'transparent' : '#f8fafc', borderBottom: '1px solid var(--color-border-light)' }}>
+                <tr key={rowKey} style={{ background: isEven ? 'transparent' : 'var(--color-surface-alt)', borderBottom: '1px solid var(--color-border-light)' }}>
                   <td style={{ padding: '8px 12px', color: 'var(--color-text-muted)', fontSize: 12, whiteSpace: 'nowrap', verticalAlign: 'top', fontWeight: 500 }}>{rowNum}</td>
                   {colArr.map(col => {
                     const f = cols.get(col);
@@ -719,47 +887,45 @@ function CheckboxItem({ field, isSelected, onFieldClick, onFieldUpdate }: {
   );
 }
 
-function SpecifyItem({ field, onFieldClick, onFieldUpdate }: {
+// Inline editable text input shown for "Others (specify)" / option specify fields,
+// only when the associated option is selected.
+function SpecifyInput({ field, onFieldClick, onFieldUpdate }: {
   field: Field;
   onFieldClick: (f: Field) => void;
   onFieldUpdate: (f: Field, newVal: string) => void;
 }) {
-  const [editing, setEditing] = useState(false);
   const [hovered, setHovered] = useState(false);
-
-  if (editing) {
-    return (
-      <div style={{ padding: '2px 0' }}>
-        <InlineEditor value={field.value} onSave={(v) => { onFieldUpdate(field, v); setEditing(false); }} onCancel={() => setEditing(false)} />
-      </div>
-    );
-  }
-
   return (
     <div
       onClick={() => onFieldClick(field)}
-      onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', position: 'relative' }}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
+        padding: '4px 0', background: hovered ? 'var(--color-surface-hover)' : 'transparent',
+        borderRadius: 4, width: '100%',
+      }}
     >
-      <span style={{ color: 'var(--color-text-secondary)' }}>(specify)</span>
-      <span style={{ color: 'var(--color-text)', borderBottom: '1px solid var(--color-border)', minWidth: 80, padding: '0 4px' }}>
-        {field.value || <span style={{ fontStyle: 'italic', color: 'var(--color-text-placeholder)' }}>empty</span>}
-      </span>
-      {hovered && (
-        <button
-          onClick={(e) => { e.stopPropagation(); setEditing(true); }}
-          style={{
-            border: 'none', background: 'transparent', cursor: 'pointer',
-            fontSize: 12, color: 'var(--color-text-muted)', padding: '1px 3px', borderRadius: 2,
-            position: 'absolute', right: -24
-          }}
-          title="Edit value"
-        >
-          ✎
-        </button>
-      )}
+      <span style={{ color: 'var(--color-text-secondary)', flexShrink: 0 }}>(specify)</span>
+      <input
+        type="text"
+        value={field.value ?? ''}
+        placeholder="Please specify"
+        onClick={(e) => { e.stopPropagation(); onFieldClick(field); }}
+        onChange={(e) => onFieldUpdate(field, e.target.value)}
+        style={{
+          flex: 1,
+          minWidth: 120,
+          padding: '6px 10px',
+          borderRadius: 6,
+          border: '1px solid var(--color-border)',
+          background: 'var(--color-surface)',
+          color: 'var(--color-text)',
+          fontSize: 13,
+          fontFamily: 'var(--font-sans)',
+          outline: 'none',
+        }}
+      />
     </div>
   );
 }
@@ -774,109 +940,160 @@ function CheckboxGroupView({
   onFieldUpdate: (f: Field, newVal: string) => void;
   onBulkFieldUpdate?: (updates: {field: Field, newVal: string}[]) => void;
 }) {
-  const groups = useMemo(() => {
-    const map = new Map<string, Field[]>();
-    fields.forEach(f => {
-      const parts = f.label.split(/ — | - | – /);
-      const prefix = parts[0];
-      if (!map.has(prefix)) {
-        map.set(prefix, []);
+  if (fields.length === 0) return null;
+
+  // The block is built upstream from backend hierarchy metadata:
+  // fields[0] is the parent/header question, the rest are its child options.
+  const parentField = fields[0];
+  const optionFields = fields.slice(1);
+  const groupLabel = parentField.label;
+
+  // Single-select when the parent (or any child) is a radio group; otherwise multi-select.
+  const isSingleSelect = optionFields.some(f => f.field_type === 'radio') ||
+    parentField.field_type === 'radio';
+
+  // Derive the option display name from the child label relative to the parent label.
+  const parentPrefix = groupLabel;
+  const optionName = (label: string): string => {
+    let name = label;
+    for (const sep of [' — ', ' - ', ' – ']) {
+      if (label.startsWith(parentPrefix + sep)) {
+        name = label.slice((parentPrefix + sep).length);
+        break;
       }
-      map.get(prefix)!.push(f);
-    });
-    return Array.from(map.entries());
-  }, [fields]);
+    }
+    if (name === label) {
+      const parts = label.split(/ — | - | – /);
+      name = parts.slice(1).join(' — ') || label;
+    }
+    return name;
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-      {groups.map(([groupLabel, grpFields]) => {
-        const isSingleSelectCol = /^(1\.3|3\.1|3\.2|3\.3|3\.4\.1|3\.5|3\.6|4\.3|4\.4|4\.6)/.test(groupLabel);
-        return (
-          <div
-            key={groupLabel}
-            style={{
-              padding: '12px 16px',
-              borderBottom: '1px solid var(--color-border)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'stretch',
-              gap: 8,
-            }}
-          >
-            <label style={{ fontSize: 13, fontWeight: 700, color: '#000000', userSelect: 'none', flex: 'none', lineHeight: 1.4 }}>
-              {groupLabel}
-            </label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, flex: 1, alignItems: 'center' }}>
-              {grpFields.map(f => {
-                const parts = f.label.split(/ — | - | – /);
-                const optName = parts.slice(1).join(' — ') || f.label;
-                
-                const hasSpecifySibling = grpFields.some(sibling => {
-                  const sn = sibling.label.split(/ — | - | – /).slice(1).join(' — ').toLowerCase();
-                  return sn.includes('specify');
-                });
-                const isOthersText = /^(other|others)\s*:?\s*$/i.test(optName.trim()) && !hasSpecifySibling;
-                const isSpecify = optName.toLowerCase().includes('specify') || isOthersText;
-                if (isSpecify) {
-                  return (
-                    <SpecifyItem
-                      key={f.label}
-                      field={f}
-                      onFieldClick={onFieldClick}
-                      onFieldUpdate={onFieldUpdate}
-                    />
-                  );
+      <div
+        style={{
+          padding: '12px 16px',
+          borderBottom: '1px solid var(--color-border)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'stretch',
+          gap: 8,
+        }}
+      >
+        <label
+          style={{
+            fontSize: 13, fontWeight: 700, color: '#000000', userSelect: 'none', flex: 'none', lineHeight: 1.4,
+            cursor: 'pointer',
+            padding: '4px 8px',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--color-bg)',
+            border: '1px solid transparent',
+            transition: 'background var(--transition-fast), border-color var(--transition-fast)',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.background = 'var(--color-surface)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.background = 'var(--color-bg)'; }}
+          onClick={() => {
+            // Blue = the WHOLE question region (union of all option boxes);
+            // Green = only the CHECKED answer(s). The parent has no spatial
+            // grounding (common for checkbox groups), so union the option boxes.
+            const union = unionBbox(optionFields);
+            const checkedUnion = unionBbox(
+              optionFields.filter(f => ['yes', 'true', '✓'].includes((f.value ?? '').trim().toLowerCase()))
+            );
+            const navTarget: Field = {
+              ...parentField,
+              bbox: parentField.bbox ?? questionRegion(optionFields),
+              value_bbox: parentField.value_bbox ?? checkedUnion,
+            };
+            onFieldClick(navTarget);
+          }}
+          title="Click to locate on PDF"
+        >
+          {groupLabel}
+        </label>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, flex: 1, alignItems: 'center' }}>
+          {optionFields.map(f => {
+            const optName = optionName(f.label);
+
+            // "Others (specify)" style follow-up: render an inline text input, but
+            // ONLY when the associated option (parent_option_label) is selected.
+            const isSpecify = optName.toLowerCase().includes('specify');
+            if (isSpecify) {
+              const ownerLabel = (f.parent_option_label ?? '')
+                .trim().replace(/[:\s]+$/, '').toLowerCase();
+              const ownerField = ownerLabel
+                ? optionFields.find(sib =>
+                    optionName(sib.label).trim().replace(/[:\s]+$/, '').toLowerCase() === ownerLabel &&
+                    sib.label !== f.label)
+                : undefined;
+              // If no owner mapping, fall back to showing when any "Others/Other" option is checked.
+              const ownerChecked = ownerField
+                ? ['yes', 'true', '✓'].includes((ownerField.value ?? '').trim().toLowerCase())
+                : optionFields.some(sib => {
+                    const n = optionName(sib.label).trim().replace(/[:\s]+$/, '').toLowerCase();
+                    return (n === 'others' || n === 'other') &&
+                      ['yes', 'true', '✓'].includes((sib.value ?? '').trim().toLowerCase());
+                  });
+              if (!ownerChecked) return null;
+              return (
+                <SpecifyInput
+                  key={f.label}
+                  field={f}
+                  onFieldClick={onFieldClick}
+                  onFieldUpdate={onFieldUpdate}
+                />
+              );
+            }
+
+            const fv = (f.value ?? '').trim().toLowerCase();
+            const isChecked = fv === 'yes' || fv === 'true' || fv === '✓';
+            const isItemSel = selectedField?.label === f.label;
+
+            const toggleChecked = () => {
+              onFieldClick(f);
+
+              if (isSingleSelect && onBulkFieldUpdate) {
+                const willCheck = !isChecked;
+                if (willCheck) {
+                  onBulkFieldUpdate(optionFields.map(sibling => ({
+                    field: sibling,
+                    newVal: sibling === f ? 'yes' : 'no',
+                  })));
+                } else {
+                  onFieldUpdate(f, 'no');
                 }
+              } else {
+                onFieldUpdate(f, isChecked ? 'no' : 'yes');
+              }
+            };
 
-                const fv = (f.value ?? '').trim().toLowerCase();
-                const isChecked = fv === 'yes' || fv === 'true' || fv === '✓';
-                const isItemSel = selectedField?.label === f.label;
-
-                const toggleChecked = () => {
-                  onFieldClick(f);
-
-                  if (isSingleSelectCol && onBulkFieldUpdate) {
-                    const willCheck = !isChecked;
-                    if (willCheck) {
-                      onBulkFieldUpdate(grpFields.map(sibling => ({
-                        field: sibling,
-                        newVal: sibling === f ? 'yes' : 'no',
-                      })));
-                    } else {
-                      onFieldUpdate(f, 'no');
-                    }
-                  } else {
-                    onFieldUpdate(f, isChecked ? 'no' : 'yes');
-                  }
-                };
-
-                return (
-                  <label
-                    key={f.label}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      fontSize: 14,
-                      cursor: 'pointer',
-                      color: isItemSel ? 'var(--color-primary)' : 'var(--color-text)',
-                      userSelect: 'none',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => toggleChecked()}
-                      style={{ width: 14, height: 14, margin: 0 }}
-                    />
-                    {optName}
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
+            return (
+              <label
+                key={f.label}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  color: isItemSel ? 'var(--color-primary)' : 'var(--color-text)',
+                  userSelect: 'none',
+                }}
+              >
+                <input
+                  type={isSingleSelect ? 'radio' : 'checkbox'}
+                  name={groupLabel}
+                  checked={isChecked}
+                  onChange={() => toggleChecked()}
+                  style={{ width: 14, height: 14, margin: 0 }}
+                />
+                {optName}
+              </label>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -932,9 +1149,32 @@ export default function ExtractedDataPanel({
 }: Props) {
   const [collapsedSections, setCollapsedSections] = useState<Set<number | null>>(new Set());
 
+  // Keep latest fields in a ref so the value-change callbacks stay referentially
+  // stable across renders (field array identity changes on every store update).
+  const fieldsRef = useRef(fields);
+  fieldsRef.current = fields;
+
+  // Resolve hierarchy (parent_label / field_type) from the form schema so grouping is
+  // correct even when the API payload omits that metadata. Memoized on the raw fields.
+  const resolvedFields = useMemo(() => {
+    const resolved = resolveHierarchy(fields);
+    // Drop duplicate labels: keep the entry carrying real content (value/bbox) and
+    // discard empty placeholder stubs (e.g. a header row with no bbox duplicated by
+    // the data extractor on a different page).
+    const byLabel = new Map<string, Field>();
+    for (const f of resolved) {
+      const cur = byLabel.get(f.label);
+      if (!cur) { byLabel.set(f.label, f); continue; }
+      const fHasData = !!((f.value ?? '').trim()) || f.bbox || f.value_bbox;
+      const curHasData = !!((cur.value ?? '').trim()) || cur.bbox || cur.value_bbox;
+      if (fHasData && !curHasData) byLabel.set(f.label, f);
+    }
+    return resolved.filter(f => byLabel.get(f.label) === f);
+  }, [fields]);
+
   const pageFields = useMemo(() =>
-    fields.filter(f => f.page === currentPage && !(f.page === 3 && f.label.startsWith('4.3.1'))),
-    [fields, currentPage]
+    resolvedFields.filter(f => f.page === currentPage),
+    [resolvedFields, currentPage]
   );
 
   const toggleSection = useCallback((sectionNumber: number | null) => {
@@ -947,7 +1187,29 @@ export default function ExtractedDataPanel({
   }, []);
 
   const handleValueChange = useCallback((field: Field, newVal: string) => {
-    onFieldsUpdated(fields.map(f => {
+    // Collapsed mutually-exclusive radio group: fan the single selection out to
+    // its member child fields (selected member -> "yes", siblings -> "no").
+    if (field.mutexMembers && field.mutexMembers.length > 0) {
+      const targetLabel = newVal.trim().toLowerCase();
+      onFieldsUpdated(fieldsRef.current.map(f => {
+        const member = field.mutexMembers!.find(m => mutexOptionName(m.label, field.label).trim().toLowerCase() === targetLabel);
+        if (member && f.label === member.label) {
+          const next = 'yes';
+          if (valuesEqual(next, f.value)) return f;
+          const isReverted = f.original_value != null && valuesEqual(next, f.original_value);
+          return { ...f, value: next, original_value: isReverted ? null : (f.original_value ?? f.value), is_edited: !isReverted };
+        }
+        if (field.mutexMembers!.some(m => m.label === f.label)) {
+          const next = 'no';
+          if (valuesEqual(next, f.value)) return f;
+          const isReverted = f.original_value != null && valuesEqual(next, f.original_value);
+          return { ...f, value: next, original_value: isReverted ? null : (f.original_value ?? f.value), is_edited: !isReverted };
+        }
+        return f;
+      }));
+      return;
+    }
+    onFieldsUpdated(fieldsRef.current.map(f => {
       if (f.label === field.label) {
         if (valuesEqual(newVal, f.value)) return f;
         const isReverted = f.original_value != null && valuesEqual(newVal, f.original_value);
@@ -960,10 +1222,10 @@ export default function ExtractedDataPanel({
       }
       return f;
     }));
-  }, [fields, onFieldsUpdated]);
+  }, [onFieldsUpdated]);
 
   const handleBulkValueChange = useCallback((updates: {field: Field, newVal: string}[]) => {
-    onFieldsUpdated(fields.map(f => {
+    onFieldsUpdated(fieldsRef.current.map(f => {
       const update = updates.find(u => u.field.label === f.label);
       if (update) {
         if (valuesEqual(update.newVal, f.value)) return f;
@@ -977,7 +1239,7 @@ export default function ExtractedDataPanel({
       }
       return f;
     }));
-  }, [fields, onFieldsUpdated]);
+  }, [onFieldsUpdated]);
 
   const handlePrevPage = useCallback(() => {
     if (currentPage > 1) onPageClick(currentPage - 1);
@@ -1004,12 +1266,11 @@ export default function ExtractedDataPanel({
       if (lbl.includes('blank_text_below')) return false;
       if (lbl.endsWith('notes') && (lbl.includes(' - ') || lbl.includes(' — ') || lbl.includes(' – '))) return false;
       
-      // Filter out old aggregated parent fields that cause duplicates because they are now extracted individually
-      if (lbl === '2.4 government id verified') return false;
-      if (lbl === '4.5 income type') return false;
-
-      // Deduplicate 4.4.1 fields — keep verbose labels, drop short duplicates
-      if (lbl.startsWith('4.4.1') && !lbl.includes('if yes,')) return false;
+      // Deduplicate 4.4.1 fields — only drop exact duplicates
+      // The real 4.4.1 fields follow the pattern "4.4.1 If Yes, ..." with table rows having " — Row N — "
+      // LLM sometimes emits "4.4.1 If Yes, list other sources of income: - Source of Income" without "Row 1"
+      // Keep those; only drop if there's an exact duplicate label
+      // (Deduplication is handled elsewhere; don't filter here)
       
       return true;
     });
@@ -1031,6 +1292,17 @@ export default function ExtractedDataPanel({
 
       const sortedSecFields = [...secFields].sort(fieldCompare);
 
+      // Pre-compute hierarchy from backend metadata (parent_label / field_type),
+      // NOT from fragile label-prefix string matching.
+      const parentLabels = new Set<string>();
+      for (const f of sortedSecFields) {
+        if (f.parent_label) parentLabels.add(f.parent_label);
+      }
+      // A field is a "parent" if another field points at it via parent_label.
+      const isParent = (label: string) => parentLabels.has(label);
+      // Fields already consumed as a child of a parent group (skip in main loop).
+      const consumed = new Set<string>();
+
       const flushTable = () => {
         if (currentTable) {
           blocks.push({ type: 'table', prefix: currentTable.prefix, fields: currentTable.fields });
@@ -1039,17 +1311,91 @@ export default function ExtractedDataPanel({
       };
       const flushCheckboxGroup = () => {
         if (currentCheckboxGroup) {
-          blocks.push({ type: 'checkbox_group', prefix: currentCheckboxGroup.prefix, fields: currentCheckboxGroup.fields });
+          const grp = currentCheckboxGroup;
+          // Single-select radio group (e.g. 3.2, 3.3) → collapse into one 8.2-style row.
+          const isRadioGroup =
+            grp.fields.some(f => f.field_type === 'radio') || schemaFieldType(grp.prefix) === 'radio';
+          if (isRadioGroup) {
+            const radioChildren = grp.fields.filter(f => f.field_type === 'radio');
+            const otherChildren = grp.fields.filter(f => f.field_type !== 'radio');
+            if (radioChildren.length > 0) {
+              blocks.push({
+                type: 'field',
+                field: buildRadioSyntheticField(
+                  grp.prefix,
+                  radioChildren,
+                  m => mutexOptionName(m, grp.prefix),
+                  otherChildren,
+                ),
+              });
+            } else {
+              // No radio members (only specify follow-ups) — emit as standalone.
+              for (const oc of otherChildren) {
+                consumed.add(oc.label);
+                blocks.push({ type: 'field', field: oc });
+              }
+            }
+            currentCheckboxGroup = null;
+            return;
+          }
+          // Synthesize a header field when the group parent is absent from the data
+          // (pure group questions like "4.1 Assets at Home" are often not emitted as fields).
+          const headerExists = grp.fields.some(f => f.label === grp.prefix);
+          let outFields = grp.fields;
+          if (!headerExists && grp.fields.length > 0) {
+            const first = grp.fields[0];
+            const synHeader: Field = {
+              label: grp.prefix,
+              value: '',
+              confidence: 0,
+              page: first.page,
+              section_number: first.section_number,
+              bbox: null,
+              value_bbox: null,
+              needs_clarification: false,
+              reason: null,
+              is_verified: false,
+              verifier_confidence: null,
+              verification_note: null,
+              extracted_by: null,
+              verified_by: null,
+              original_value: '',
+              is_edited: false,
+              parent_label: grp.prefix,
+              field_type: schemaFieldType(grp.prefix),
+              group_id: null,
+              row_index: null,
+              column_name: null,
+            };
+            outFields = [synHeader, ...grp.fields];
+          }
+          blocks.push({ type: 'checkbox_group', prefix: grp.prefix, fields: outFields });
           currentCheckboxGroup = null;
         }
       };
 
       for (const f of sortedSecFields) {
+        if (consumed.has(f.label)) continue;
+
         const match = f.label.match(TABLE_ROW_RE);
         const is441 = f.label.includes('4.4.1');
         const is431 = f.label.includes('4.3.1');
         const is461 = f.label.includes('4.6.1');
-        
+
+        // Table HEADER fields (bare title ending in ":" with nothing after it) are
+        // not rows — they are looked up separately by TableView. Skipping them here
+        // prevents a duplicate empty-prefix table block alongside the real one.
+        // Actual rows (e.g. "4.4.1 ...: - Amount") keep their content after the colon
+        // and must NOT be skipped.
+        const afterColon = f.label.includes(':') ? f.label.split(':').slice(1).join(':').trim() : f.label;
+        const isTableHeaderField = (is441 || is431 || is461) && !match && afterColon === '';
+        if (isTableHeaderField) {
+          flushCheckboxGroup();
+          flushTable();
+          continue;
+        }
+
+        // ── Table rows ──
         if (match || is441 || is431 || is461) {
           flushCheckboxGroup();
           let sectionPrefix = match ? match[1] : '';
@@ -1066,26 +1412,106 @@ export default function ExtractedDataPanel({
             currentTable = { prefix: sectionPrefix, fields: [] };
           }
           currentTable.fields.push(f);
-        } else if (
-          (f.label.includes(' — ') || f.label.includes(' - ') || f.label.includes(' – ')) &&
-          !f.label.toLowerCase().includes('notes') &&
-          !f.label.includes('2.2 Relationship Details')
-        ) {
-          flushTable();
-          const parts = f.label.split(/ — | - | – /);
-          const prefix = parts[0];
-          if (currentCheckboxGroup && currentCheckboxGroup.prefix !== prefix) {
-            flushCheckboxGroup();
-          }
-          if (!currentCheckboxGroup) {
-            currentCheckboxGroup = { prefix, fields: [] };
-          }
-          currentCheckboxGroup.fields.push(f);
-        } else {
+          continue;
+        }
+
+        // ── Mutually-exclusive single-select radio group (e.g. 3.1, 3.5, 4.3) ──
+        // Collapse into a single radio field rendered exactly like 8.2: one row
+        // with inline radio choices, clicking highlights the whole question region.
+        const mg = mutexGroupFor(f.label);
+        if (mg) {
           flushTable();
           flushCheckboxGroup();
-          blocks.push({ type: 'field', field: f });
+          const memberFields = sortedSecFields.filter(
+            c => mg.members.includes(c.label) && !consumed.has(c.label)
+          );
+          for (const c of memberFields) consumed.add(c.label);
+          blocks.push({
+            type: 'field',
+            field: buildRadioSyntheticField(mg.stem, memberFields, m => mutexOptionName(m, mg.stem)),
+          });
+          continue;
         }
+
+        // ── Parent of a radio/checkbox/specify group ──
+        // Group parents (e.g. "4.1 Assets at Home", "4.5 Income Type", "2.4 Government ID Verified")
+        // have no separator in their own label, so they would otherwise fall through to a
+        // standalone field row. Detect them via parent_label and emit a single group block.
+        // NOTE: a parent may sort AFTER its children (stable sort, equal numeric prefix), so
+        // some children could already be buffered in currentCheckboxGroup — absorb them here.
+        if (isParent(f.label)) {
+          flushTable();
+          let children = sortedSecFields.filter(
+            c => c.label !== f.label && c.parent_label === f.label
+          );
+          // Absorb any children already accumulated in the in-progress checkbox group.
+          if (currentCheckboxGroup && currentCheckboxGroup.prefix === f.label) {
+            const buffered = currentCheckboxGroup.fields.filter(c => !children.includes(c));
+            children = [...children, ...buffered];
+            currentCheckboxGroup = null;
+          }
+          // Single-select radio parent (e.g. 3.2, 3.3) → collapse into one 8.2-style row.
+          const isRadioGroup =
+            f.field_type === 'radio' || children.some(c => c.field_type === 'radio');
+          if (isRadioGroup) {
+            const radioChildren = children.filter(c => c.field_type === 'radio');
+            const otherChildren = children.filter(c => c.field_type !== 'radio');
+            if (radioChildren.length > 0) {
+              blocks.push({
+                type: 'field',
+                field: buildRadioSyntheticField(
+                  f.label,
+                  radioChildren,
+                  m => mutexOptionName(m, f.label),
+                  otherChildren,
+                ),
+              });
+            } else {
+              for (const oc of otherChildren) {
+                consumed.add(oc.label);
+                blocks.push({ type: 'field', field: oc });
+              }
+            }
+            continue;
+          }
+          for (const c of children) consumed.add(c.label);
+          blocks.push({
+            type: 'checkbox_group',
+            prefix: f.label,
+            fields: [f, ...children],
+          });
+          continue;
+        }
+
+        // ── Child of a group whose own label carries a separator ──
+        // Prefer the backend parent_label. Fall back to legacy prefix grouping only when the
+        // prefix is a real known group parent, OR when this is a checkbox/radio option child
+        // (e.g. Yes/No pairs like 4.3/4.4/4.6 that use mutually_exclusive_with instead of
+        // parent_label). Plain text children (e.g. "2.2 Relationship Details — ...") are NOT
+        // grouped — they render as standalone fields.
+        if (
+          (f.label.includes(' — ') || f.label.includes(' - ') || f.label.includes(' – ')) &&
+          !f.label.toLowerCase().includes('notes')
+        ) {
+          const prefix = f.parent_label || f.label.split(/ — | - | – /)[0];
+          const isOptionChild = f.field_type === 'checkbox' || f.field_type === 'radio';
+          if (parentLabels.has(prefix) || (isOptionChild && !f.parent_label)) {
+            flushTable();
+            if (currentCheckboxGroup && currentCheckboxGroup.prefix !== prefix) {
+              flushCheckboxGroup();
+            }
+            if (!currentCheckboxGroup) {
+              currentCheckboxGroup = { prefix, fields: [] };
+            }
+            currentCheckboxGroup.fields.push(f);
+            continue;
+          }
+        }
+
+        // ── Standalone field ──
+        flushTable();
+        flushCheckboxGroup();
+        blocks.push({ type: 'field', field: f });
       }
       flushTable();
       flushCheckboxGroup();
@@ -1112,14 +1538,17 @@ export default function ExtractedDataPanel({
     fontSize: 13,
     fontWeight: 700,
     color: '#ffffff',
-    padding: '6px 10px',
-    background: '#4b5563',
+    padding: '8px 12px',
+    background: 'var(--color-section-header)',
     borderBottom: '1px solid var(--color-border)',
     display: 'flex',
     alignItems: 'center',
     gap: 6,
     cursor: 'pointer',
     userSelect: 'none',
+    position: 'sticky',
+    top: 0,
+    zIndex: 2,
     transition: 'background var(--transition-fast)',
   };
 
@@ -1195,18 +1624,18 @@ export default function ExtractedDataPanel({
 
           return (
             <div key={group.sectionNumber ?? '__header__'} style={{ 
-              border: '1px solid #e5e7eb', 
+              border: '1px solid var(--color-card-border)', 
               borderRadius: 'var(--radius-md)', 
               margin: '8px 12px', 
-              background: '#f9fafb',
+              background: 'var(--color-surface)',
               overflow: 'hidden'
             }}>
               {/* Section header */}
               <div
                 style={sectionTitleStyle}
                 onClick={() => toggleSection(group.sectionNumber)}
-                onMouseEnter={(e) => { e.currentTarget.style.background = '#6b7280'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = '#4b5563'; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-section-header-hover)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-section-header)'; }}
               >
                 <Chevron expanded={!isCollapsed} />
                 <span>{group.sectionName}</span>
@@ -1219,7 +1648,7 @@ export default function ExtractedDataPanel({
 
               {/* Section content */}
               {!isCollapsed && hasContent && (
-                <div style={{ padding: '4px 12px 8px' }}>
+                <div style={{ padding: '0' }}>
                   {group.blocks.map((block, idx) => {
                     if (block.type === 'field') {
                       return (
@@ -1229,13 +1658,15 @@ export default function ExtractedDataPanel({
                           isSelected={selectedField?.label === block.field.label}
                           onSelect={() => onFieldClick(block.field)}
                           onValueChange={(v) => handleValueChange(block.field, v)}
+                          onFieldUpdate={handleValueChange}
                         />
                       );
                     } else if (block.type === 'table') {
                       return (
-                        <div key={`table-${idx}`} style={{ marginTop: 6, marginBottom: 6 }}>
+                        <div key={`table-${idx}`} style={{ margin: '8px 12px' }}>
                           <TableView
                             fields={block.fields}
+                            allFields={resolvedFields}
                             selectedField={selectedField}
                             onFieldClick={onFieldClick}
                             onFieldUpdate={handleValueChange}
@@ -1244,7 +1675,7 @@ export default function ExtractedDataPanel({
                       );
                     } else if (block.type === 'checkbox_group') {
                       return (
-                        <div key={`cb-${idx}`} style={{ marginTop: 4, marginBottom: 4 }}>
+                        <div key={`cb-${idx}`} style={{ margin: '4px 0' }}>
                           <CheckboxGroupView
                             fields={block.fields}
                             selectedField={selectedField}

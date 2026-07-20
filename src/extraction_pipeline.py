@@ -4,13 +4,17 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional, List, Literal, Any
 
 import cv2
 import numpy as np
 from rapidfuzz import fuzz
+from pydantic import BaseModel, ValidationError
 
 import os
 from src.model_client import ModelClient, get_model_client
+from src.schemas import StructuredField as PydanticStructuredField, ExtractionResponse
+from src.form_schema import FORM_SCHEMA as SCHEMA
 
 @dataclass
 class Config:
@@ -101,8 +105,8 @@ TEXT_FIELD_TIPS: dict[str, str] = {
     "7.1 Has the student received or applied for any other scholarships for their UG degree?": "Free-text. Strip prefixes like 'Applied:', 'Answer:'. Output content only.",
     "8.1 What is your opinion about the student, their family members, and their living condition?": "Long free-text. Preserve complete answer with newlines.",
     "8.3 Any other comments you want to share?": "Free-text comments. Capture verbatim.",
-    "4.3.1 If Yes, list their properties: — Row 3 — Property Description": "CRITICAL — PAGE 3 BLANK AREA: Look at the EMPTY SPACE below the '4.3' checkbox section at the BOTTOM of page 3. Handwriting here looks like e.g. 'brothers land', 'no share in the property', 'brothers property'. Transcribe EXACTLY as written. If truly blank, output empty string.",
-    "4.3.1 If Yes, list their properties: — Row 4 — Property Description": "CRITICAL — PAGE 4 BLANK AREA: Look at the EMPTY GAP between the last 4.3.1 table row and the '4.4 Apart from your job' question on page 4. Handwriting here looks like e.g. 'no chance of getting share', 'brothers land'. Transcribe EXACTLY as written. If truly blank, output empty string.",
+    "4.3.1 If Yes, list their properties: - Row 3 - Property Description": "Find 'Row 3' of the 4.3.1 table on page 4. Transcribe the property description handwriting EXACTLY as written. If blank, output empty string.",
+    "4.3.1 If Yes, list their properties: - Row 4 - Property Description": "CRITICAL — PAGE 4 BLANK AREA: Look at the EMPTY GAP between the last 4.3.1 table row and the '4.4 Apart from your job' question on page 4. Handwriting here looks like e.g. 'no chance of getting share', 'brothers land'. Transcribe EXACTLY as written. If truly blank, output empty string.",
 }
 
 HANDWRITTEN_TEXT_LABELS: set[str] = set(TEXT_FIELD_TIPS.keys())
@@ -133,6 +137,7 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "2.4 Government ID Verified — Voter ID", "section_number": 2, "page": 2},
     {"label": "2.4 Government ID Verified — Other", "section_number": 2, "page": 2},
     {"label": "2.4 Government ID Verified — Other (specify)", "section_number": 2, "page": 2},
+    {"label": "2.5 Family Members", "section_number": 2, "page": 2, "field_type": "table_header"},
     {"label": "2.5 Family Members — Row 1 — Name", "section_number": 2, "page": 2},
     {"label": "2.5 Family Members — Row 1 — Age", "section_number": 2, "page": 2},
     {"label": "2.5 Family Members — Row 1 — Education", "section_number": 2, "page": 2},
@@ -149,47 +154,52 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "3.2 Type of Home — Others", "section_number": 3, "page": 2},
     # ── Page 3 ──
     # Section 3 — Housing Condition (Page 3: 3.3-3.6)
+{"label": "3.3 Type of Ceiling", "section_number": 3, "page": 3, "field_type": "checkbox"},
     {"label": "3.3 Type of Ceiling — Roof (Kurai)", "section_number": 3, "page": 3},
     {"label": "3.3 Type of Ceiling — Tiled", "section_number": 3, "page": 3},
     {"label": "3.3 Type of Ceiling — Asbestos / Sheet", "section_number": 3, "page": 3},
     {"label": "3.3 Type of Ceiling — Concrete", "section_number": 3, "page": 3},
-    {"label": "3.4 Number of Bedrooms", "section_number": 3, "page": 3},
-    {"label": "3.4.1 Type of Bedroom — Separate Bedroom", "section_number": 3, "page": 3},
-    {"label": "3.4.1 Type of Bedroom — No Separate Bedroom", "section_number": 3, "page": 3},
-    {"label": "3.5 Bathroom - Separate", "section_number": 3, "page": 3},
-    {"label": "3.5 Bathroom - Common for Apartment", "section_number": 3, "page": 3},
-    {"label": "3.6 Kitchen Type — Separate Kitchen", "section_number": 3, "page": 3},
-    {"label": "3.6 Kitchen Type — Hall with Kitchen", "section_number": 3, "page": 3},
-    # Section 4 — Financial Background (Page 3: 4.1-4.3)
-    {"label": "4.1 Assets at Home(tick all that apply) - Washing Machine", "section_number": 4, "page": 3},
-    {"label": "4.1 Assets at Home(tick all that apply) - Fridge", "section_number": 4, "page": 3},
-    {"label": "4.1 Assets at Home(tick all that apply) - AC", "section_number": 4, "page": 3},
-    {"label": "4.1 Assets at Home(tick all that apply) - LED TV", "section_number": 4, "page": 3},
-    {"label": "4.1 Assets at Home(tick all that apply) - Two-Wheeler", "section_number": 4, "page": 3},
-    {"label": "4.1 Assets at Home(tick all that apply) - Car", "section_number": 4, "page": 3},
-    {"label": "4.1 Assets at Home(tick all that apply) - Smartphone", "section_number": 4, "page": 3},
-    {"label": "4.1 Assets at Home(tick all that apply) - Separate Wi-Fi", "section_number": 4, "page": 3},
-    {"label": "4.1 Assets at Home(tick all that apply) - Others:", "section_number": 4, "page": 3},
-    {"label": "4.2 Amount of Last Electricity Bill", "section_number": 4, "page": 3},
-    {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes", "section_number": 4, "page": 3},
-    {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No", "section_number": 4, "page": 3},
-    {"label": "4.3.1 If Yes, list their properties: — Row 3 — Property Description", "section_number": 4, "page": 3},
-    {"label": "4.3.1 If Yes, list their properties: — Row 3 — Owner Name", "section_number": 4, "page": 3},
-    {"label": "4.3.1 If Yes, list their properties: — Row 3 — Approximate Value", "section_number": 4, "page": 3},
+    {"label": "3.4 Number of Bedrooms", "section_number": 3, "page": 3, "field_type": "text"},
+    {"label": "3.4.1 Type of Bedroom — Separate Bedroom", "section_number": 3, "page": 3, "field_type": "radio"},
+    {"label": "3.4.1 Type of Bedroom — No Separate Bedroom", "section_number": 3, "page": 3, "field_type": "radio"},
+    {"label": "3.5 Bathroom - Separate", "section_number": 3, "page": 3, "field_type": "radio"},
+    {"label": "3.5 Bathroom - Common for Apartment", "section_number": 3, "page": 3, "field_type": "radio"},
+    {"label": "3.6 Kitchen Type — Separate Kitchen", "section_number": 3, "page": 3, "field_type": "radio"},
+    {"label": "3.6 Kitchen Type — Hall with Kitchen", "section_number": 3, "page": 3, "field_type": "radio"},
+    {"label": "4.1 Assets at Home", "section_number": 4, "page": 3, "field_type": "checkbox"},
+    {"label": "4.1 Assets at Home(tick all that apply) - Washing Machine", "section_number": 4, "page": 3, "field_type": "checkbox"},
+    {"label": "4.1 Assets at Home(tick all that apply) - Fridge", "section_number": 4, "page": 3, "field_type": "checkbox"},
+    {"label": "4.1 Assets at Home(tick all that apply) - AC", "section_number": 4, "page": 3, "field_type": "checkbox"},
+    {"label": "4.1 Assets at Home(tick all that apply) - LED TV", "section_number": 4, "page": 3, "field_type": "checkbox"},
+    {"label": "4.1 Assets at Home(tick all that apply) - Two-Wheeler", "section_number": 4, "page": 3, "field_type": "checkbox"},
+    {"label": "4.1 Assets at Home(tick all that apply) - Car", "section_number": 4, "page": 3, "field_type": "checkbox"},
+    {"label": "4.1 Assets at Home(tick all that apply) - Smartphone", "section_number": 4, "page": 3, "field_type": "checkbox"},
+    {"label": "4.1 Assets at Home(tick all that apply) - Separate Wi-Fi", "section_number": 4, "page": 3, "field_type": "checkbox"},
+    {"label": "4.1 Assets at Home(tick all that apply) - Others:", "section_number": 4, "page": 3, "field_type": "checkbox"},
+    {"label": "4.1 Assets at Home(tick all that apply) - Others (specify):", "section_number": 4, "page": 3, "field_type": "specify"},
+    {"label": "4.2 Amount of Last Electricity Bill", "section_number": 4, "page": 3, "field_type": "text"},
+    {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes", "section_number": 4, "page": 3, "field_type": "radio"},
+    {"label": "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No", "section_number": 4, "page": 3, "field_type": "radio"},
+    # Page 3 ends at 4.3 — the 4.3.1 table actually starts on page 4.
     # ── Page 4 ──
-    # Section 4 — Financial Background (Page 4: 4.4-4.7)
-    {"label": "4.3.1 If Yes, list their properties: — Row 1 — Property Description", "section_number": 4, "page": 4},
-    {"label": "4.3.1 If Yes, list their properties: — Row 1 — Owner Name", "section_number": 4, "page": 4},
-    {"label": "4.3.1 If Yes, list their properties: — Row 1 — Approximate Value", "section_number": 4, "page": 4},
-    {"label": "4.3.1 If Yes, list their properties: — Row 2 — Property Description", "section_number": 4, "page": 4},
-    {"label": "4.3.1 If Yes, list their properties: — Row 2 — Owner Name", "section_number": 4, "page": 4},
-    {"label": "4.3.1 If Yes, list their properties: — Row 2 — Approximate Value", "section_number": 4, "page": 4},
-    {"label": "4.3.1 If Yes, list their properties: — Row 4 — Property Description", "section_number": 4, "page": 4},
-    {"label": "4.3.1 If Yes, list their properties: — Row 4 — Owner Name", "section_number": 4, "page": 4},
-    {"label": "4.3.1 If Yes, list their properties: — Row 4 — Approximate Value", "section_number": 4, "page": 4},
-    {"label": "4.4 Apart from your job, is there any other source of income?", "section_number": 4, "page": 4},
-     {"label": "4.4.1 If Yes, list other sources of income: - Source of Income", "section_number": 4, "page": 4},
-          {"label": "4.4.1 If Yes, list other sources of income: - Amount", "section_number": 4, "page": 4},
+    # Section 4 — Financial Background (Page 4: 4.3.1, 4.4-4.7)
+{"label": "4.3.1 If Yes, list their properties:", "section_number": 4, "page": 4, "field_type": "table_header"},
+    {"label": "4.3.1 If Yes, list their properties: - Row 1 - Property Description", "section_number": 4, "page": 4, "field_type": "table_row"},
+    {"label": "4.3.1 If Yes, list their properties: - Row 1 - Owner Name", "section_number": 4, "page": 4, "field_type": "table_row"},
+    {"label": "4.3.1 If Yes, list their properties: - Row 1 - Approximate Value", "section_number": 4, "page": 4, "field_type": "table_row"},
+    {"label": "4.3.1 If Yes, list their properties: - Row 2 - Property Description", "section_number": 4, "page": 4, "field_type": "table_row"},
+    {"label": "4.3.1 If Yes, list their properties: - Row 2 - Owner Name", "section_number": 4, "page": 4, "field_type": "table_row"},
+    {"label": "4.3.1 If Yes, list their properties: - Row 2 - Approximate Value", "section_number": 4, "page": 4, "field_type": "table_row"},
+    {"label": "4.3.1 If Yes, list their properties: - Row 3 - Property Description", "section_number": 4, "page": 4, "field_type": "table_row"},
+    {"label": "4.3.1 If Yes, list their properties: - Row 3 - Owner Name", "section_number": 4, "page": 4, "field_type": "table_row"},
+    {"label": "4.3.1 If Yes, list their properties: - Row 3 - Approximate Value", "section_number": 4, "page": 4, "field_type": "table_row"},
+    {"label": "4.3.1 If Yes, list their properties: - Row 4 - Property Description", "section_number": 4, "page": 4, "field_type": "table_row"},
+    {"label": "4.3.1 If Yes, list their properties: - Row 4 - Owner Name", "section_number": 4, "page": 4, "field_type": "table_row"},
+    {"label": "4.3.1 If Yes, list their properties: - Row 4 - Approximate Value", "section_number": 4, "page": 4, "field_type": "table_row"},
+    {"label": "4.4 Apart from your job, is there any other source of income?", "section_number": 4, "page": 4, "field_type": "radio"},
+{"label": "4.4.1 If Yes, list other sources of income:", "section_number": 4, "page": 4, "field_type": "table_header"},
+     {"label": "4.4.1 If Yes, list other sources of income: - Source of Income", "section_number": 4, "page": 4, "field_type": "table_row"},
+     {"label": "4.4.1 If Yes, list other sources of income: - Amount", "section_number": 4, "page": 4, "field_type": "table_row"},
     {"label": "4.5 Income Type — Monthly", "section_number": 4, "page": 4},
     {"label": "4.5 Income Type — Monthly (specify)", "section_number": 4, "page": 4},
     {"label": "4.5 Income Type — Daily", "section_number": 4, "page": 4},
@@ -198,11 +208,20 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "4.5 Income Type — Weekly (specify)", "section_number": 4, "page": 4},
     {"label": "4.5 Income Type — Ad-Hoc", "section_number": 4, "page": 4},
     {"label": "4.5 Income Type — Ad-Hoc (specify)", "section_number": 4, "page": 4},
-    {"label": "4.6 Do you have any loans?", "section_number": 4, "page": 4},
-         {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Sr.No.", "section_number": 4, "page": 4},
-         {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Loan Purpose", "section_number": 4, "page": 4},
-         {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Loan Amount Taken", "section_number": 4, "page": 4},
-         {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Pending Loan Amount", "section_number": 4, "page": 4},
+    {"label": "4.6 Do you have any loans?", "section_number": 4, "page": 4, "field_type": "radio"},
+         {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount:", "section_number": 4, "page": 4, "field_type": "table_header"},
+          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row 1 - Sr.No.", "section_number": 4, "page": 4, "field_type": "table_row"},
+          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row 1 - Loan Purpose", "section_number": 4, "page": 4, "field_type": "table_row"},
+          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row 1 - Loan Amount Taken", "section_number": 4, "page": 4, "field_type": "table_row"},
+          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row 1 - Pending Loan Amount", "section_number": 4, "page": 4, "field_type": "table_row"},
+          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row 2 - Sr.No.", "section_number": 4, "page": 4, "field_type": "table_row"},
+          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row 2 - Loan Purpose", "section_number": 4, "page": 4, "field_type": "table_row"},
+          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row 2 - Loan Amount Taken", "section_number": 4, "page": 4, "field_type": "table_row"},
+          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row 2 - Pending Loan Amount", "section_number": 4, "page": 4, "field_type": "table_row"},
+          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row 3 - Sr.No.", "section_number": 4, "page": 4, "field_type": "table_row"},
+          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row 3 - Loan Purpose", "section_number": 4, "page": 4, "field_type": "table_row"},
+          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row 3 - Loan Amount Taken", "section_number": 4, "page": 4, "field_type": "table_row"},
+          {"label": "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row 3 - Pending Loan Amount", "section_number": 4, "page": 4, "field_type": "table_row"},
     
     # ── Page 5 ──
     # Section 4 — Financial Background (Page 5: 4.7-4.9)
@@ -210,7 +229,7 @@ KNOWN_TEMPLATE_FIELDS: list[dict] = [
     {"label": "4.8 If the college fee is higher, how will you manage it?", "section_number": 4, "page": 5},
     {"label": "4.9 If you do not receive this scholarship, how will you pay the fees?", "section_number": 4, "page": 5},
     # Section 5 — Health Information
-    {"label": "5.1 Does the student have any health issues?", "section_number": 5, "page": 5},
+    {"label": "5.1 Does the student have any health issues?", "section_number": 5, "page": 5, "field_type": "radio"},
     {"label": "5.2 If yes, list the health issues", "section_number": 5, "page": 5},
     # Section 6 — Student Commitment
     {"label": "6.1 Will you study college for three years without any obstacle?", "section_number": 6, "page": 5},
@@ -246,6 +265,12 @@ class StructuredField:
     extracted_by: str | None = None
     verified_by: str | None = None
     original_value: str | None = None
+    # Hierarchy fields (populated by enrich_fields post-processing)
+    parent_label: str | None = None
+    field_type: str | None = None  # "text" | "radio" | "checkbox" | "table_row" | "table_header" | "specify"
+    group_id: str | None = None
+    row_index: int | None = None
+    column_name: str | None = None
 
 
 @dataclass
@@ -833,7 +858,21 @@ FIELD LIST BY PAGE:
         for gf in raw_fields:
             gf_page = gf.get("page", 1)
             dims = (page_dims or {}).get(gf_page)
-            fields.append(self._create_structured_field(gf, prefix, page_dims=dims))
+            # Sanitize bbox: LLM may emit [null, null, null, null] instead of null;
+            # collapse any list containing null elements to a clean null so Pydantic
+            # validation passes and the field is fully validated (no fallback path).
+            for bbox_key in ("bbox", "value_bbox"):
+                bb = gf.get(bbox_key)
+                if isinstance(bb, list) and any(v is None for v in bb):
+                    gf[bbox_key] = None
+            try:
+                # Validate with Pydantic schema
+                validated = PydanticStructuredField.model_validate(gf)
+                fields.append(self._create_structured_field(validated.model_dump(), prefix, page_dims=dims))
+            except ValidationError as e:
+                logger.warning("Field validation failed for label=%s: %s", gf.get("label", "unknown"), e)
+                # Fallback: create without validation
+                fields.append(self._create_structured_field(gf, prefix, page_dims=dims))
 
         return fields
 
@@ -896,6 +935,12 @@ FIELD LIST BY PAGE:
             needs_clarification=needs_clarification,
             reason=gf.get("reason"),
             extracted_by=prefix or None,
+            # Hierarchy fields from LLM response
+            parent_label=gf.get("parent_label"),
+            field_type=gf.get("field_type"),
+            group_id=gf.get("group_id"),
+            row_index=gf.get("row_index"),
+            column_name=gf.get("column_name"),
         )
 
     # ── Stage 4: Secondary model verification ───────────────────────
@@ -1163,6 +1208,213 @@ FIELD LIST BY PAGE:
                 reason="Not extracted by LLM",
                 extracted_by="template_fill",
             ))
+
+        fields = ExtractionPipeline.enrich_fields(fields)
+        return fields
+
+    @staticmethod
+    def enrich_fields(fields: list[StructuredField]) -> list[StructuredField]:
+        """Post-process fields to add hierarchy metadata using form_schema.py as source of truth."""
+        import re
+        from src.form_schema import FORM_SCHEMA as SCHEMA, getAllFields
+
+        schema_fields = getAllFields(SCHEMA)
+        field_map = {f.label: f for f in fields}
+
+        schema_by_label: dict[str, dict] = {}
+        for sf in schema_fields:
+            schema_by_label[sf["label"]] = sf
+
+        # Identify which fields are "group parents" (have children)
+        parent_labels: set[str] = set()
+        for sf in schema_fields:
+            if sf.get("parent_label"):
+                parent_labels.add(sf["parent_label"])
+            if sf.get("table_header_label"):
+                parent_labels.add(sf["table_header_label"])
+
+        # Build set of parent labels for Yes/No radio pairs — the schema stores
+        # child labels (e.g. "4.4 ... — Yes"), but the LLM may output the parent
+        # label (e.g. "4.4 ...") without the " — Yes"/" — No" suffix.
+        _yesno_parent_labels: dict[str, str] = {}
+        for sf in schema_fields:
+            if sf.get("is_yes_no_pair") and sf.get("db_column"):
+                _parts = [s for s in re.split(r"\s*[—–-]\s*", sf["label"]) if s.strip()]
+                if len(_parts) >= 2:
+                    _yesno_parent_labels[_parts[0]] = sf["type"]
+
+        # Build table definitions lookup
+        table_defs: dict[str, dict] = {}
+        for section in SCHEMA.get("sections", []):
+            for table in section.get("tables", []):
+                table_defs[table["header_label"]] = table
+
+        # ── Assign hierarchy metadata based on schema ──
+        for f in fields:
+            sf = schema_by_label.get(f.label)
+            if not sf:
+                ptype = _yesno_parent_labels.get(f.label)
+                if ptype:
+                    f.field_type = ptype
+                continue
+
+            ftype = sf.get("type", "text")
+            parent_label = sf.get("parent_label")
+            table_header_label = sf.get("table_header_label")
+
+            if ftype == "table_row" or table_header_label:
+                # Table row field
+                f.field_type = "table_row"
+                f.parent_label = table_header_label
+                f.group_id = re.sub(r'[^a-zA-Z0-9]+', '_', table_header_label).strip('_')
+                f.row_index = sf.get("row_index")
+                f.column_name = sf.get("column_name")
+            elif parent_label:
+                # Child of a radio/checkbox/group
+                parent_sf = schema_by_label.get(parent_label, {})
+                parent_type = parent_sf.get("type", "text")
+                f.field_type = parent_type if parent_type in ("radio", "checkbox") else "text"
+                f.parent_label = parent_label
+                f.group_id = re.sub(r'[^a-zA-Z0-9]+', '_', parent_label).strip('_')
+            else:
+                # Standalone field
+                f.field_type = ftype
+                if f.label in parent_labels:
+                    f.group_id = re.sub(r'[^a-zA-Z0-9]+', '_', f.label).strip('_')
+
+        # Set field_type on parent fields themselves
+        for f in fields:
+            if not f.parent_label:
+                continue
+            parent_field = field_map.get(f.parent_label)
+            if parent_field and parent_field.field_type is None:
+                psf = schema_by_label.get(f.parent_label)
+                if psf:
+                    parent_field.field_type = psf.get("type", "text") if psf.get("type") != "table_header" else "table"
+
+        # ── Fallback for fields not in schema ──
+        for f in fields:
+            if f.field_type is not None:
+                continue
+            m = re.match(r"^(.+?)\s*[—–-]\s*Row\s+(\d+)\s*[—–-]\s*(.+)$", f.label, re.IGNORECASE)
+            if m:
+                f.field_type = "table_row"
+                f.parent_label = m.group(1).strip()
+                f.row_index = int(m.group(2))
+                f.column_name = m.group(3).strip()
+                f.group_id = re.sub(r'[^a-zA-Z0-9]+', '_', m.group(1).strip()).strip('_')
+                continue
+            # Single-row table format: "Parent Label - Column Name" (no "Row N")
+            m = re.match(r"^(.+?)\s*[—–-]\s*(.+)$", f.label)
+            if m:
+                potential_parent = m.group(1).strip()
+                potential_column = m.group(2).strip()
+                if potential_parent in parent_labels and potential_parent not in ("", f.label):
+                    f.field_type = "table_row"
+                    f.parent_label = potential_parent
+                    f.row_index = 1
+                    f.column_name = potential_column
+                    f.group_id = re.sub(r'[^a-zA-Z0-9]+', '_', potential_parent).strip('_')
+                    continue
+            if "specify" in f.label.lower():
+                f.field_type = "specify"
+                for pl in sorted(parent_labels, key=len, reverse=True):
+                    for sep in (" — ", " - ", " – "):
+                        if f.label.startswith(pl + sep):
+                            f.parent_label = pl
+                            f.group_id = re.sub(r'[^a-zA-Z0-9]+', '_', pl).strip('_')
+                            break
+                    if f.parent_label:
+                        break
+                continue
+            # Prefix-based parent detection for loose fields
+            for pl in sorted(parent_labels, key=len, reverse=True):
+                for sep in (" — ", " - ", " – "):
+                    if f.label.startswith(pl + sep):
+                        f.parent_label = pl
+                        f.group_id = re.sub(r'[^a-zA-Z0-9]+', '_', pl).strip('_')
+                        psf = schema_by_label.get(pl)
+                        if psf:
+                            ptype = psf.get("type", "text")
+                            f.field_type = ptype if ptype in ("radio", "checkbox", "text") else "text"
+                        break
+                if f.parent_label:
+                    break
+            if f.field_type is None:
+                f.field_type = "text"
+
+        # ── Create synthetic parent fields for parent_labels that don't exist ──
+        field_map = {f.label: f for f in fields}
+        synthetic_count = 0
+        for parent_label in sorted(parent_labels, key=len, reverse=True):
+            if parent_label in field_map:
+                continue
+            child = None
+            for sep in (" — ", " - ", " – "):
+                for f in fields:
+                    if f.label.startswith(parent_label + sep):
+                        child = f
+                        break
+                if child:
+                    break
+            if not child:
+                continue
+            syn = StructuredField(
+                label=parent_label,
+                value="",
+                confidence=0,
+                page=child.page,
+                section_number=child.section_number,
+                bbox=None,
+                value_bbox=None,
+                needs_clarification=False,
+                reason="Auto-generated parent field",
+                extracted_by="enrich_fields",
+            )
+            sf = schema_by_label.get(parent_label)
+            if sf:
+                syn.field_type = sf.get("type", "text")
+                if sf.get("type") in ("radio", "checkbox"):
+                    syn.parent_label = parent_label
+            else:
+                syn.field_type = "text"
+            syn.group_id = re.sub(r'[^a-zA-Z0-9]+', '_', parent_label).strip('_')
+            fields.append(syn)
+            field_map[parent_label] = syn
+            synthetic_count += 1
+
+        # ── Compute a single union bbox for group parents that lack spatial grounding ──
+        # A group parent (e.g. "2.4 Government ID Verified") is stored without its own
+        # bbox; each option is a separate child field with its own box. Union the
+        # children's label + value boxes so clicking the question highlights ONE region
+        # (matching the clean behaviour of single-field radios like 2.3 / 8.2).
+        children_by_parent: dict[str, list[StructuredField]] = {}
+        for f in fields:
+            pl = f.parent_label
+            if pl and pl in field_map and f.label != pl:
+                children_by_parent.setdefault(pl, []).append(f)
+
+        for parent_label, children in children_by_parent.items():
+            parent = field_map[parent_label]
+            if parent.bbox is not None:
+                continue
+            boxes: list[tuple[int, int, int, int]] = []
+            for c in children:
+                if c.page is not None and parent.page is not None and c.page != parent.page:
+                    continue
+                for b in (c.bbox, c.value_bbox):
+                    if b:
+                        boxes.append(tuple(b))
+            if not boxes:
+                continue
+            union = (
+                min(b[0] for b in boxes),
+                min(b[1] for b in boxes),
+                max(b[2] for b in boxes),
+                max(b[3] for b in boxes),
+            )
+            parent.bbox = union
+            parent.value_bbox = union
 
         return fields
 

@@ -9,6 +9,14 @@ from typing import Any, Optional
 
 import asyncpg
 
+from form_schema import (
+    FORM_SCHEMA,
+    getAllFields,
+    getTableDefinitions,
+    getTableHeaders,
+    validateSchema,
+)
+
 logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -18,88 +26,34 @@ POOL_CONNECT_TIMEOUT = float(os.getenv("DATABASE_CONNECT_TIMEOUT", "10"))
 
 _pool: Optional[asyncpg.Pool] = None
 
-# ── Field label → database column mapping ──────────────────────────────────
+# ── Generated field label → database column mapping ──────────────────────────
 
-FIELD_TO_COLUMN: dict[str, str] = {
-    "Volunteer Name": "volunteer_name",
-    "Co-Volunteer Name": "co_volunteer_name",
-    "Date of Visit": "date_of_visit",
-    "1.1 Application ID": "application_id",
-    "1.2 Student Full Name": "student_full_name",
-    "1.3 Gender": "gender",
-    "2.1 Family Status": "family_status",
-    "2.2 Relationship Details — Year of Death / Separation": "relationship_death_year",
-    "2.2 Relationship Details — Reason for Death / Separation": "relationship_death_reason",
-    "2.3 Is Father/Mother photograph kept at home?": "photograph_kept_at_home",
-    "2.4 Government ID Verified": "government_id_verified",
-    "3.1 House Ownership": "house_ownership",
-    "3.1.1 If rented, what is the rent amount?": "rent_amount",
-    "3.2 Type of Home": "type_of_home",
-    "3.3 Type of Ceiling": "type_of_ceiling",
-    "3.4 Number of Bedrooms": "number_of_bedrooms",
-    "3.4.1 Type of Bedroom": "type_of_bedroom",
-    "3.5 Bathroom": "bathroom",
-    "3.6 Kitchen Type": "kitchen_type",
-    "4.1 Assets at Home": "assets_at_home",
-    "4.2 Amount of Last Electricity Bill": "last_electricity_bill_amount",
-    "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student?": "owns_other_assets",
-    "4.3.1": "other_assets_details",
-    "4.4 Apart from your job, is there any other source of income?": "has_other_income",
-    "4.4.1": "other_income_sources",
-    "4.5 Income Type": "income_type",
-    "4.6 Do you have any loans?": "has_loans",
-    "4.6.1": "loan_details",
-    "4.7 If you choose any college, how much is the college fee?": "college_fee",
-    "4.8 If the college fee is higher, how will you manage it?": "manage_higher_fee",
-    "4.9 If you do not receive this scholarship, how will you pay the fees?": "manage_without_scholarship",
-    "5.1 Does the student have any health issues?": "has_health_issues",
-    "5.2 If yes, list the health issues": "health_issues_description",
-    "6.1 Will you study college for three years without any obstacle?": "study_commitment",
-    "6.2 If we have a training program within 15 km from your home, can you come?": "training_program_availability",
-    "6.3 Are you ready to send your son/daughter to weekly skill development classes on Sundays (16 classes a year)?": "ready_for_skill_classes",
-    "7.1 Has the student received or applied for any other scholarships for their UG degree?": "other_scholarships",
-    "8.1 What is your opinion about the student, their family members, and their living condition?": "volunteer_opinion",
-    "8.2 Will you recommend this student for this scholarship?": "recommend_student",
-    "8.3 Any other comments you want to share?": "volunteer_comments",
-}
+def _build_field_to_column(schema) -> dict[str, str]:
+    mapping = {}
+    for f in getAllFields(schema):
+        if f.get("db_column"):
+            mapping[f["label"]] = f["db_column"]
+    return mapping
+
+FIELD_TO_COLUMN = _build_field_to_column(FORM_SCHEMA)
 
 BOOLEAN_COLUMNS: set[str] = set()
 
-JSONB_ARRAY_COLUMNS: set[str] = {
-    "type_of_home",
-    "type_of_ceiling",
-    "assets_at_home",
-    "government_id_verified",
-    "income_type",
-}
-
 TABLE_PARENT_COLUMNS: dict[str, str] = {
-    "2.5 Family Members": "family_members",
-    "4.3.1": "other_assets_details",
-    "4.4.1": "other_income_sources",
-    "4.6.1": "loan_details",
-}
-
-# Columns whose value is a single choice rendered as a group of option checkboxes
-# (e.g. "3.5 Bathroom - Separate" / "- Common for Apartment"). The stored value is
-# the option label(s) whose checkbox is ticked.
-SINGLE_SELECT_COLUMNS: set[str] = {
-    "house_ownership",
-    "type_of_bedroom",
-    "kitchen_type",
-    "bathroom",
-}
-
-# Columns rendered as a Yes/No checkbox pair (e.g. "4.3 Do you own...? — Yes"/"— No").
-# The stored value is the ticked option ("Yes"/"No").
-YESNO_PAIR_COLUMNS: set[str] = {
-    "owns_other_assets",
+    h["label"]: h["db_column"]
+    for f in getAllFields(FORM_SCHEMA)
+    if f.get("type") == "table_header" and f.get("db_column")
+    for h in [{"label": f["label"], "db_column": f["db_column"]}]
 }
 
 # Columns to skip in DB save when value is empty string (not None, not "No" — only "").
 SKIP_IF_EMPTY_COLUMNS: set[str] = {
     "photograph_kept_at_home",
 }
+
+# =============================================================================
+# NORMALIZATION HELPERS
+# =============================================================================
 
 # Table parent columns keyed by section number — handles both the datalab
 # "parent — Row {n} — column" format and the LLM flat "{parent} - {column}" format.
@@ -140,23 +94,49 @@ def _num_prefix(text: str) -> str:
     return m.group(1) if m else ""
 
 
-# Normalized parent-label indexes, built once from FIELD_TO_COLUMN.
+# ── Parent-level routing dicts (built from form_schema at import time) ─────
+
+# Single-select radio groups: normalized parent label → parent column
+_SINGLE_SELECT_PARENT: dict[str, str] = {}
+for _f in getAllFields(FORM_SCHEMA):
+    if _f.get("db_column") and _f["db_column"] in {
+        "house_ownership", "type_of_bedroom", "bathroom", "kitchen_type",
+    }:
+        _parts = [s for s in _SEG_SEP_RE.split(_f["label"]) if s.strip()]
+        if len(_parts) >= 2:
+            _SINGLE_SELECT_PARENT.setdefault(_norm(_parts[0]), _f["db_column"])
+_SINGLE_SELECT_PARENT["type of home"] = "type_of_home"
+_SINGLE_SELECT_PARENT["type of ceiling"] = "type_of_ceiling"
+
+# JSONB multi-select checkbox groups: normalized parent label → parent column
+_JSONB_GROUP_PARENTS: dict[str, str] = {
+    "government id verified": "government_id_verified",
+    "assets at home": "assets_at_home",
+    "income type": "income_type",
+}
+
+# Yes/No radio pairs: normalized parent label → column
+_YESNO_PARENT: dict[str, str] = {}
+for _f in getAllFields(FORM_SCHEMA):
+    if _f.get("is_yes_no_pair") and _f.get("db_column"):
+        _col = _f["db_column"]
+        if _col not in _SINGLE_SELECT_PARENT.values():
+            _parts = [s for s in _SEG_SEP_RE.split(_f["label"]) if s.strip()]
+            if len(_parts) >= 2:
+                _YESNO_PARENT.setdefault(_norm(_parts[0]), _col)
+
+_ALL_PARENT_COLUMNS: set[str] = (
+    set(_JSONB_GROUP_PARENTS.values())
+    | set(_SINGLE_SELECT_PARENT.values())
+    | set(_YESNO_PARENT.values())
+)
+
+# Normalized scalar field labels → column (built from FIELD_TO_COLUMN,
+# excluding any column handled by a parent-level dict or table header).
 _NORM_SCALAR: dict[str, str] = {}
-_NORM_ARRAY_PARENT: dict[str, str] = {}
-_NORM_SINGLE_PARENT: dict[str, str] = {}
-_NORM_YESNO_PARENT: dict[str, str] = {}
 for _lab, _col in FIELD_TO_COLUMN.items():
-    _n = _norm(_lab)
-    if _col in JSONB_ARRAY_COLUMNS:
-        _NORM_ARRAY_PARENT[_n] = _col
-    elif _col in SINGLE_SELECT_COLUMNS:
-        _NORM_SINGLE_PARENT[_n] = _col
-    elif _col in YESNO_PAIR_COLUMNS:
-        _NORM_YESNO_PARENT[_n] = _col
-    elif _col in TABLE_PARENT_COLUMNS.values():
-        continue
-    else:
-        _NORM_SCALAR[_n] = _col
+    if _col not in _ALL_PARENT_COLUMNS and _col not in TABLE_PARENT_COLUMNS.values():
+        _NORM_SCALAR[_norm(_lab)] = _col
 
 
 def _is_checked(value: str | None) -> bool:
@@ -182,8 +162,8 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
     "(tick all that apply)" noise, flat single-row tables, Yes/No checkbox pairs).
     """
     out: dict[str, Any] = {}
-    array_checked: dict[str, list[str]] = {c: [] for c in JSONB_ARRAY_COLUMNS}
-    array_specify_texts: dict[str, dict[str, str]] = {}
+    jsonb_checked: dict[str, list[str]] = {c: [] for c in _JSONB_GROUP_PARENTS.values()}
+    jsonb_specify_texts: dict[str, dict[str, str]] = {}
     single_checked: dict[str, list[str]] = {}
     yesno_val: dict[str, str] = {}
     table_rows: dict[str, dict[int, dict[str, str]]] = {}
@@ -192,8 +172,6 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
         colname = (colname or "").strip()
         if not colname:
             return
-        # Defensive: if colname contains |, the LLM combined multiple columns.
-        # Split both colname and value by | and add each column separately.
         if "|" in colname:
             colnames = [c.strip() for c in colname.split("|") if c.strip()]
             str_val = str(value or "")
@@ -223,11 +201,11 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
         ):
             out[col] = value
 
-    def _append_array(col: str, option: str, value: Any) -> None:
+    def _append_jsonb(col: str, option: str, value: Any) -> None:
         if _is_checked(value):
-            array_checked[col].append(option)
+            jsonb_checked[col].append(option)
         elif isinstance(value, str) and value.strip().lower() not in _NEG_VALUES:
-            array_checked[col].append(value.strip())
+            jsonb_checked[col].append(value.strip())
 
     for f in fields:
         label = (f.get("label") or "").strip()
@@ -256,44 +234,50 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
                 continue
 
             nparent = _norm(parent)
-            acol = _NORM_ARRAY_PARENT.get(nparent)
-            if acol is not None:
+
+            # 3) JSONB multi-select checkbox group
+            jcol = _JSONB_GROUP_PARENTS.get(nparent)
+            if jcol is not None:
                 if leaf.lower().endswith("(specify)"):
                     if isinstance(value, str) and value.strip():
                         base_opt = leaf[: -len("(specify)")].strip()
-                        array_specify_texts.setdefault(acol, {})[base_opt] = value.strip()
+                        jsonb_specify_texts.setdefault(jcol, {})[base_opt] = value.strip()
                     continue
-                _append_array(acol, leaf, value)
+                _append_jsonb(jcol, leaf, value)
                 continue
-            scol = _NORM_SINGLE_PARENT.get(nparent)
+
+            # 4) Single-select radio group
+            scol = _SINGLE_SELECT_PARENT.get(nparent)
             if scol is not None:
                 if _is_checked(value):
                     single_checked.setdefault(scol, []).append(leaf)
                 continue
-            ycol = _NORM_YESNO_PARENT.get(nparent)
+
+            # 5) Yes/No radio pair
+            ycol = _YESNO_PARENT.get(nparent)
             if ycol is not None:
                 if _is_checked(value):
                     yesno_val[ycol] = leaf
                 continue
 
-        # 3) Direct value for a column (scalar, or datalab-style group value)
+        # 6) Direct scalar value (simple 1:1 field, no parent-child split)
         nlabel = _norm(label)
-        col = (
-            _NORM_SCALAR.get(nlabel)
-            or _NORM_SINGLE_PARENT.get(nlabel)
-            or _NORM_YESNO_PARENT.get(nlabel)
-        )
-        if col is not None:
-            if value is not None:
-                _set_scalar(col, value)
-            continue
-        acol = _NORM_ARRAY_PARENT.get(nlabel)
-        if acol is not None and isinstance(value, str):
-            for item in re.split(r"[,\n]", value):
-                item = item.strip()
-                if not item or item.lower() in _NEG_VALUES | _CHECKED_VALUES:
-                    continue
-                array_checked[acol].append(item)
+        col = _NORM_SCALAR.get(nlabel)
+        if col is not None and value is not None:
+            _set_scalar(col, value)
+
+        # 7) Yes/No scalar fallback — LLM may emit the parent label
+        #    directly (e.g. "4.4 Apart from your job...") instead of
+        #    the child label (e.g. "4.4 ... — Yes"). Only applies when
+        #    step 6 didn't match.
+        if col is None:
+            yno_col = _YESNO_PARENT.get(nlabel)
+            if yno_col is not None:
+                val_str = str(value or "").strip().lower()
+                if val_str in ("yes", "✓", "y", "1", "true"):
+                    yesno_val[yno_col] = "Yes"
+                elif val_str in _NEG_VALUES:
+                    yesno_val[yno_col] = "No"
 
     # Merge scalar notes: "{parent} — Notes" → append to parent's scalar value
     for f in fields:
@@ -310,33 +294,30 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
                     else:
                         out[parent_col] = note_val
 
-    for col, opt_texts in array_specify_texts.items():
+    for col, opt_texts in jsonb_specify_texts.items():
         for base_opt, text in opt_texts.items():
             if not text or text.strip().lower() in _NEG_VALUES:
                 continue
-            checked = array_checked.get(col, [])
-            # Remove the bare option and append "Option: text"
+            checked = jsonb_checked.get(col, [])
             for bare in (base_opt, base_opt.rstrip(":"), base_opt + ":"):
                 if bare in checked:
                     checked.remove(bare)
-            array_checked[col].append(f"{base_opt.rstrip(':')}: {text}")
+            jsonb_checked[col].append(f"{base_opt.rstrip(':')}: {text}")
 
-    # Dedup: if both bare "Others"/"Others:" and a qualified "Others: ..."
-    # (e.g. "Others: old TV") exist for the same column, keep only the latter.
-    for col in JSONB_ARRAY_COLUMNS:
-        items = array_checked.get(col, [])
+    for col in _JSONB_GROUP_PARENTS.values():
+        items = jsonb_checked.get(col, [])
         has_qualified = any(
             item.strip().lower().startswith("others:")
             for item in items
         )
         if has_qualified:
-            array_checked[col] = [
+            jsonb_checked[col] = [
                 item for item in items
                 if item.strip().lower() not in ("others", "others:")
             ]
 
-    for col in JSONB_ARRAY_COLUMNS:
-        out[col] = json.dumps(sorted(set(array_checked.get(col, []))))
+    for col in _JSONB_GROUP_PARENTS.values():
+        out[col] = json.dumps(sorted(set(jsonb_checked.get(col, []))))
     for col, opts in single_checked.items():
         out[col] = ", ".join(dict.fromkeys(opts))
     for col, v in yesno_val.items():
