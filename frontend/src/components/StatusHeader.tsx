@@ -1,3 +1,5 @@
+import { confidenceColor } from '../utils/confidence';
+
 interface TokenDisplay {
   total_tokens: number;
   prompt_tokens: number;
@@ -16,12 +18,6 @@ interface Props {
   onToggleSidebar?: () => void;
   sidebarOpen?: boolean;
   tokenUsage?: TokenDisplay | null;
-}
-
-function confidenceColor(conf: number): string {
-  if (conf >= 80) return '#22c55e';
-  if (conf >= 60) return '#eab308';
-  return '#ef4444';
 }
 
 export default function StatusHeader({

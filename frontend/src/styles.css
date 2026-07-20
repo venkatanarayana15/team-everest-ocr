@@ -43,6 +43,11 @@
   --color-label: #3b82f6;
   --color-value: #166534;
 
+  --color-section-header: #334155;
+  --color-section-header-hover: #475569;
+  --color-surface-alt: #f8fafc;
+  --color-card-border: #e2e8f0;
+
   --color-terminal-bg: #0f172a;
   --color-terminal-header: #1e293b;
   --color-terminal-border: #334155;

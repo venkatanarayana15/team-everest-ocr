@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -11,6 +10,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 import re
+
+# Add src to Python path so form_schema can be imported
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -174,7 +176,6 @@ try:
         get_pool,
         close_pool,
         upsert_ocr_document,
-        get_result_by_file_hash,
         log_correction,
 
     )
@@ -606,36 +607,6 @@ async def upload(file: UploadFile = File(...)):
         if len(content) > MAX_UPLOAD_SIZE:
             raise HTTPException(413, f"File too large ({len(content)} bytes). Maximum: {MAX_UPLOAD_SIZE} bytes")
 
-        file_hash = hashlib.sha256(content).hexdigest()
-        file_size = len(content)
-
-        if DB_AVAILABLE:
-            try:
-                existing = await get_result_by_file_hash(file_hash)
-                if existing:
-                    existing_job_id = existing.get("job_id")
-                    cached_result = None
-                    result_path = BASE_DIR / existing_job_id / "results" / "result.json"
-                    if result_path.exists():
-                        try:
-                            cached_result = json.loads(result_path.read_text())
-                        except Exception:
-                            pass
-                    logger.info(
-                        "Dedup hit for hash=%s — returning existing job_id=%s",
-                        file_hash[:12], existing_job_id,
-                    )
-                    return {
-                        "job_id": existing_job_id,
-                        "status": "cached" if cached_result else "duplicate",
-                        "input_type": "pdf",
-                        "dedup": True,
-                        "result": cached_result,
-                        "message": "Cached result returned" if cached_result else "This file has already been processed",
-                    }
-            except Exception as e:
-                logger.warning("Dedup check failed for hash=%s: %s — proceeding", file_hash[:12], e)
-
         job_id, job_dir = await _create_job_dir(file.filename, "PDF uploaded, starting pipeline...")
 
         pdf_path = job_dir / "input.pdf"
@@ -649,9 +620,6 @@ async def upload(file: UploadFile = File(...)):
             import shutil
             shutil.rmtree(job_dir, ignore_errors=True)
             raise HTTPException(400, f"Corrupted PDF upload: {err}")
-
-        with open(job_dir / "file_hash.txt", "w") as f:
-            f.write(file_hash)
 
         _create_task(_run_pipeline_task(job_dir, str(pdf_path)))
         return {"job_id": job_id, "status": "queued", "input_type": "pdf"}
@@ -845,15 +813,12 @@ async def process_folder(data: dict):
             if item["type"] == "pdf":
                 with open(item["path"], "rb") as f:
                     content = f.read()
-                file_hash = hashlib.sha256(content).hexdigest()
 
                 job_id, job_dir = await _create_job_dir(item["name"], f"Folder batch: {item['name']}")
 
                 pdf_path = job_dir / "input.pdf"
                 with open(pdf_path, "wb") as f:
                     f.write(content)
-                with open(job_dir / "file_hash.txt", "w") as f:
-                    f.write(file_hash)
 
                 _create_task(_run_pipeline_task(job_dir, str(pdf_path)))
                 results.append({"job_id": job_id, "name": item["name"], "type": "pdf", "status": "queued"})

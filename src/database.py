@@ -391,7 +391,6 @@ async def upsert_ocr_document(
     job_id: str,
     file_name: str,
     status: str = "done",
-    file_hash: Optional[str] = None,
     processing_time: Optional[float] = None,
     confidence_score: Optional[float] = None,
     num_pdfs: Optional[int] = None,
@@ -417,8 +416,6 @@ async def upsert_ocr_document(
 
     data["processed_at"] = datetime.now(timezone.utc)
 
-    if file_hash is not None:
-        data["file_hash"] = file_hash
     if processing_time is not None:
         data["processing_time"] = processing_time
     if confidence_score is not None:
@@ -510,16 +507,6 @@ async def get_result_by_job_id(job_id: str) -> Optional[dict]:
         row = await conn.fetchrow(
             "SELECT * FROM ocr_documents WHERE job_id = $1",
             job_id,
-        )
-        return dict(row) if row else None
-
-
-async def get_result_by_file_hash(file_hash: str) -> Optional[dict]:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM ocr_documents WHERE file_hash = $1",
-            file_hash,
         )
         return dict(row) if row else None
 

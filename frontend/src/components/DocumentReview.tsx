@@ -27,21 +27,28 @@ function getPageText(rawText: string, pageNum: number): string {
 }
 
 function BboxOverlay({
-  bbox, color, natW, natH, elW, elH,
+  bbox, color, pageNum,
 }: {
   bbox: [number, number, number, number];
   color: string;
-  natW: number;
-  natH: number;
-  elW: number;
-  elH: number;
+  pageNum: number;
 }) {
-  const scale = Math.min(elW / natW, elH / natH);
+  // Measure the live <img> element so the overlay aligns with the actual
+  // rendered image (works in both fit/free modes and survives resize).
+  const imgEl = document.getElementById(`doc-review-img-${pageNum}`) as HTMLImageElement | null;
+  if (!imgEl || imgEl.naturalWidth === 0 || imgEl.clientWidth === 0) {
+    return null;
+  }
+  const rect = imgEl.getBoundingClientRect();
+  const natW = imgEl.naturalWidth;
+  const natH = imgEl.naturalHeight;
+  const scale = Math.min(rect.width / natW, rect.height / natH);
   const renderedW = natW * scale;
   const renderedH = natH * scale;
-  const offsetX = (elW - renderedW) / 2;
-  const offsetY = (elH - renderedH) / 2;
+  const offsetX = (rect.width - renderedW) / 2;
+  const offsetY = (rect.height - renderedH) / 2;
 
+  // Position relative to the image's parent (the position:relative wrapper)
   return (
     <div style={{
       position: 'absolute',
@@ -135,7 +142,55 @@ export default function DocumentReview({
   const [fitModes, setFitModes] = useState<Record<number, boolean>>({});
   const [imgDims, setImgDims] = useState<Record<number, { natW: number; natH: number; elW: number; elH: number }>>({});
   const blockRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const allLoadedRef = useRef(false);
+
+  // Build spatial index for click-to-inspect: page → list of {bbox, field}
+  // Index on either bbox (label) or value_bbox (answer) so answer-only fields are clickable.
+  const fieldIndex = useMemo(() => {
+    const index: Record<number, Array<{ bbox: [number, number, number, number]; field: Field }>> = {};
+    for (const f of fields) {
+      const box = f.bbox || f.value_bbox;
+      if (!box) continue;
+      if (!index[f.page]) index[f.page] = [];
+      index[f.page].push({ bbox: box, field: f });
+    }
+    return index;
+  }, [fields]);
+
+  // Handle click on PDF image: find field at click position
+  const handleImageClick = useCallback((e: React.MouseEvent, pageNum: number) => {
+    const dims = imgDims[pageNum];
+    if (!dims) return;
+
+    const rect = (e.currentTarget as HTMLImageElement).getBoundingClientRect();
+    const scale = Math.min(dims.elW / dims.natW, dims.elH / dims.natH);
+    const offsetX = (dims.elW - dims.natW * scale) / 2;
+    const offsetY = (dims.elH - dims.natH * scale) / 2;
+
+    // Convert click to normalized coordinates
+    const clickX = (e.clientX - rect.left - offsetX) / scale;
+    const clickY = (e.clientY - rect.top - offsetY) / scale;
+
+    // Find field containing this point. Prefer a value_bbox (answer) hit when both exist.
+    const candidates = fieldIndex[pageNum] || [];
+    let valueHit: Field | null = null;
+    let labelHit: Field | null = null;
+    for (const { bbox, field } of candidates) {
+      if (clickX >= bbox[0] && clickX <= bbox[2] && clickY >= bbox[1] && clickY <= bbox[3]) {
+        if (field.value_bbox && bbox === field.value_bbox) valueHit = field;
+        else if (field.bbox && bbox === field.bbox) labelHit = field;
+        else labelHit = labelHit ?? field;
+      }
+    }
+    const hit = valueHit || labelHit;
+    if (hit) {
+      onFieldClick(hit);
+      return;
+    }
+    // Clicked empty space - deselect
+    onFieldClick(null as any);
+  }, [imgDims, fieldIndex, onFieldClick]);
 
   const handlePageTextChange = useCallback((pageNum: number, newPageText: string) => {
     const parts = rawText.split(/(--- Page \d+ ---)/);
@@ -154,6 +209,56 @@ export default function DocumentReview({
     const block = blockRefs.current.get(currentPage);
     if (block) block.scrollIntoView({ behavior: 'auto', block: 'start' });
   }, [currentPage]);
+
+  // Auto-scroll to selected field's bbox when field changes
+  useEffect(() => {
+    if (!selectedField) return;
+
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const pageRef = blockRefs.current.get(selectedField.page);
+    if (!pageRef) return;
+
+    const dims = imgDims[selectedField.page];
+    if (!dims) return;
+
+    // Prefer value_bbox (answer area) over bbox (label area)
+    const bbox = selectedField.value_bbox ?? selectedField.bbox;
+    if (!bbox) {
+      // No spatial grounding: at least scroll the page into view.
+      pageRef.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
+    // Measure the actual <img> element so the scale matches BboxOverlay / handleImageClick.
+    const imgEl = document.getElementById(`doc-review-img-${selectedField.page}`) as HTMLImageElement | null;
+    const viewW = imgEl ? imgEl.clientWidth : dims.elW;
+    const viewH = imgEl ? imgEl.clientHeight : dims.elH;
+
+    const scale = Math.min(viewW / dims.natW, viewH / dims.natH);
+    const renderedW = dims.natW * scale;
+    const renderedH = dims.natH * scale;
+    const offsetX = (viewW - renderedW) / 2;
+    const offsetY = (viewH - renderedH) / 2;
+
+    // Center of the bbox in element (img) coordinates.
+    const centerXrel = offsetX + (bbox[0] + bbox[2]) / 2 * scale;
+    const centerYrel = offsetY + (bbox[1] + bbox[3]) / 2 * scale;
+
+    // Convert to viewport coordinates via the img's actual rendered rect, then to
+    // scroll-container coordinates. This scrolls the REAL scroll container
+    // (the left pane), not the non-scrollable page block.
+    const imgRect = imgEl ? imgEl.getBoundingClientRect() : null;
+    const containerRect = container.getBoundingClientRect();
+    const targetViewportY = imgRect ? imgRect.top + centerYrel : 0;
+    const targetViewportX = imgRect ? imgRect.left + centerXrel : 0;
+
+    const scrollTop = container.scrollTop + (targetViewportY - containerRect.top) - container.clientHeight / 2;
+    const scrollLeft = container.scrollLeft + (targetViewportX - containerRect.left) - container.clientWidth / 2;
+
+    container.scrollTo({ left: scrollLeft, top: scrollTop, behavior: 'smooth' });
+  }, [selectedField, imgDims]);
 
   useEffect(() => {
     allLoadedRef.current = false;
@@ -231,7 +336,9 @@ export default function DocumentReview({
       background: 'var(--color-bg)', overflow: 'hidden',
     }}>
       {/* ── Left pane: PDF pages (independent scroll) ── */}
-      <div style={{
+      <div
+        ref={scrollRef}
+        style={{
         width: '55%',
         overflowY: 'auto',
         overflowX: 'hidden',
@@ -313,16 +420,27 @@ export default function DocumentReview({
                       id={`doc-review-img-${pageNum}`}
                       src={pageImageUrl(jobId, pdfName ? pageNum : pageOffset + pageNum, pdfName)}
                       onLoad={() => handleImgLoad(pageNum)}
-                      style={{ width: '100%', maxWidth: '100%', height: 'auto', display: 'block' }}
+                      onClick={(e) => handleImageClick(e, pageNum)}
+                      style={{ width: '100%', maxWidth: '100%', height: 'auto', display: 'block', cursor: 'crosshair' }}
                       alt={`Page ${pageNum}`}
                     />
                     {dims && (
                       <>
+                        {/* Selected field bbox */}
                         {selectedField?.bbox && isSelectedPage && (
-                          <BboxOverlay bbox={selectedField.bbox} color="#3b82f6" natW={dims.natW} natH={dims.natH} elW={dims.elW} elH={dims.elH} />
+                          <BboxOverlay
+                            bbox={selectedField.bbox}
+                            color="#3b82f6"
+                            pageNum={pageNum}
+                          />
                         )}
+                        {/* Selected field value bbox */}
                         {selectedField?.value_bbox && isSelectedPage && (
-                          <BboxOverlay bbox={selectedField.value_bbox} color="#22c55e" natW={dims.natW} natH={dims.natH} elW={dims.elW} elH={dims.elH} />
+                          <BboxOverlay
+                            bbox={selectedField.value_bbox}
+                            color="#22c55e"
+                            pageNum={pageNum}
+                          />
                         )}
                       </>
                     )}
@@ -333,16 +451,27 @@ export default function DocumentReview({
                       id={`doc-review-img-${pageNum}`}
                       src={pageImageUrl(jobId, pdfName ? pageNum : pageOffset + pageNum, pdfName)}
                       onLoad={() => handleImgLoad(pageNum)}
-                      style={{ display: 'block', boxShadow: '0 1px 4px rgba(0,0,0,0.1)' }}
+                      onClick={(e) => handleImageClick(e, pageNum)}
+                      style={{ display: 'block', boxShadow: '0 1px 4px rgba(0,0,0,0.1)', cursor: 'crosshair' }}
                       alt={`Page ${pageNum}`}
                     />
                     {dims && (
                       <>
+                        {/* Selected field bbox */}
                         {selectedField?.bbox && isSelectedPage && (
-                          <BboxOverlay bbox={selectedField.bbox} color="#3b82f6" natW={dims.natW} natH={dims.natH} elW={dims.elW} elH={dims.elH} />
+                          <BboxOverlay
+                            bbox={selectedField.bbox}
+                            color="#3b82f6"
+                            pageNum={pageNum}
+                          />
                         )}
+                        {/* Selected field value bbox */}
                         {selectedField?.value_bbox && isSelectedPage && (
-                          <BboxOverlay bbox={selectedField.value_bbox} color="#22c55e" natW={dims.natW} natH={dims.natH} elW={dims.elW} elH={dims.elH} />
+                          <BboxOverlay
+                            bbox={selectedField.value_bbox}
+                            color="#22c55e"
+                            pageNum={pageNum}
+                          />
                         )}
                       </>
                     )}
@@ -369,15 +498,15 @@ export default function DocumentReview({
               margin: '8px 12px 0 12px',
               borderRadius: 'var(--radius-md)',
               background: 'var(--color-surface)',
-              border: '1px solid #9ca3af',
-              outline: '1px solid #6b7280',
+              border: '1px solid var(--color-card-border)',
+              outline: '1px solid var(--color-section-header)',
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
             }}>
               <div style={{
                 padding: '12px 16px',
-                background: '#374151',
+                background: 'var(--color-section-header)',
                 borderBottom: '1px solid var(--color-border)',
                 fontWeight: 600,
                 fontSize: 14,

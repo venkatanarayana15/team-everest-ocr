@@ -206,8 +206,6 @@ export const FORM_SCHEMA: FormSchema = {
           type: 'text',
           page: 2,
           section: 2,
-          zohoColumn: 'photograph_notes',
-          dbColumn: 'photograph_notes',
         },
         // Government ID Verified - parent
         {
@@ -223,9 +221,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 2,
           section: 2,
           parent_label: '2.4 Government ID Verified',
-          zohoColumn: 'gov_id_aadhaar',
-          dbColumn: 'gov_id_aadhaar',
-          isJsonbArray: true,
         },
         {
           label: '2.4 Government ID Verified — Ration Card',
@@ -233,9 +228,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 2,
           section: 2,
           parent_label: '2.4 Government ID Verified',
-          zohoColumn: 'gov_id_ration',
-          dbColumn: 'gov_id_ration',
-          isJsonbArray: true,
         },
         {
           label: '2.4 Government ID Verified — Driving Licence',
@@ -243,9 +235,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 2,
           section: 2,
           parent_label: '2.4 Government ID Verified',
-          zohoColumn: 'gov_id_driving',
-          dbColumn: 'gov_id_driving',
-          isJsonbArray: true,
         },
         {
           label: '2.4 Government ID Verified — Voter ID',
@@ -253,9 +242,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 2,
           section: 2,
           parent_label: '2.4 Government ID Verified',
-          zohoColumn: 'gov_id_voter',
-          dbColumn: 'gov_id_voter',
-          isJsonbArray: true,
         },
         {
           label: '2.4 Government ID Verified — Other',
@@ -263,9 +249,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 2,
           section: 2,
           parent_label: '2.4 Government ID Verified',
-          zohoColumn: 'gov_id_other',
-          dbColumn: 'gov_id_other',
-          isJsonbArray: true,
         },
         {
           label: '2.4 Government ID Verified — Other (specify)',
@@ -274,8 +257,6 @@ export const FORM_SCHEMA: FormSchema = {
           section: 2,
           parentOptionLabel: 'Other',
           parent_label: '2.4 Government ID Verified',
-          zohoColumn: 'gov_id_other_specify',
-          dbColumn: 'gov_id_other_specify',
         },
         // Family Members Table
         {
@@ -353,8 +334,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 2,
           section: 3,
           parent_label: '3.2 Type of Home',
-          zohoColumn: 'home_type_individual',
-          dbColumn: 'home_type_individual',
         },
         {
           label: '3.2 Type of Home — Private Apartment',
@@ -362,8 +341,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 2,
           section: 3,
           parent_label: '3.2 Type of Home',
-          zohoColumn: 'home_type_apartment',
-          dbColumn: 'home_type_apartment',
         },
         {
           label: '3.2 Type of Home — Housing Board',
@@ -371,8 +348,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 2,
           section: 3,
           parent_label: '3.2 Type of Home',
-          zohoColumn: 'home_type_housing_board',
-          dbColumn: 'home_type_housing_board',
         },
         {
           label: '3.2 Type of Home — Line House',
@@ -380,8 +355,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 2,
           section: 3,
           parent_label: '3.2 Type of Home',
-          zohoColumn: 'home_type_line_house',
-          dbColumn: 'home_type_line_house',
         },
         {
           label: '3.2 Type of Home — Others',
@@ -389,8 +362,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 2,
           section: 3,
           parent_label: '3.2 Type of Home',
-          zohoColumn: 'home_type_others',
-          dbColumn: 'home_type_others',
         },
         {
           label: '3.2 Type of Home — Others (specify)',
@@ -399,8 +370,6 @@ export const FORM_SCHEMA: FormSchema = {
           section: 3,
           parentOptionLabel: 'Others',
           parent_label: '3.2 Type of Home',
-          zohoColumn: 'home_type_others_specify',
-          dbColumn: 'home_type_others_specify',
         },
         // Type of Ceiling (single-select)
         {
@@ -416,8 +385,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 3,
           section: 3,
           parent_label: '3.3 Type of Ceiling',
-          zohoColumn: 'ceiling_roof',
-          dbColumn: 'ceiling_roof',
         },
         {
           label: '3.3 Type of Ceiling — Tiled',
@@ -425,8 +392,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 3,
           section: 3,
           parent_label: '3.3 Type of Ceiling',
-          zohoColumn: 'ceiling_tiled',
-          dbColumn: 'ceiling_tiled',
         },
         {
           label: '3.3 Type of Ceiling — Asbestos / Sheet',
@@ -434,8 +399,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 3,
           section: 3,
           parent_label: '3.3 Type of Ceiling',
-          zohoColumn: 'ceiling_asbestos',
-          dbColumn: 'ceiling_asbestos',
         },
         {
           label: '3.3 Type of Ceiling — Concrete',
@@ -443,8 +406,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 3,
           section: 3,
           parent_label: '3.3 Type of Ceiling',
-          zohoColumn: 'ceiling_concrete',
-          dbColumn: 'ceiling_concrete',
         },
         // Number of Bedrooms
         {
@@ -535,9 +496,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 3,
           section: 4,
           parent_label: '4.1 Assets at Home',
-          zohoColumn: 'assets_washing_machine',
-          dbColumn: 'assets_washing_machine',
-          isJsonbArray: true,
         },
         {
           label: '4.1 Assets at Home(tick all that apply) - Fridge',
@@ -545,9 +503,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 3,
           section: 4,
           parent_label: '4.1 Assets at Home',
-          zohoColumn: 'assets_fridge',
-          dbColumn: 'assets_fridge',
-          isJsonbArray: true,
         },
         {
           label: '4.1 Assets at Home(tick all that apply) - AC',
@@ -555,9 +510,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 3,
           section: 4,
           parent_label: '4.1 Assets at Home',
-          zohoColumn: 'assets_ac',
-          dbColumn: 'assets_ac',
-          isJsonbArray: true,
         },
         {
           label: '4.1 Assets at Home(tick all that apply) - LED TV',
@@ -565,9 +517,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 3,
           section: 4,
           parent_label: '4.1 Assets at Home',
-          zohoColumn: 'assets_led_tv',
-          dbColumn: 'assets_led_tv',
-          isJsonbArray: true,
         },
         {
           label: '4.1 Assets at Home(tick all that apply) - Two-Wheeler',
@@ -575,9 +524,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 3,
           section: 4,
           parent_label: '4.1 Assets at Home',
-          zohoColumn: 'assets_two_wheeler',
-          dbColumn: 'assets_two_wheeler',
-          isJsonbArray: true,
         },
         {
           label: '4.1 Assets at Home(tick all that apply) - Car',
@@ -585,9 +531,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 3,
           section: 4,
           parent_label: '4.1 Assets at Home',
-          zohoColumn: 'assets_car',
-          dbColumn: 'assets_car',
-          isJsonbArray: true,
         },
         {
           label: '4.1 Assets at Home(tick all that apply) - Smartphone',
@@ -595,9 +538,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 3,
           section: 4,
           parent_label: '4.1 Assets at Home',
-          zohoColumn: 'assets_smartphone',
-          dbColumn: 'assets_smartphone',
-          isJsonbArray: true,
         },
         {
           label: '4.1 Assets at Home(tick all that apply) - Separate Wi-Fi',
@@ -605,9 +545,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 3,
           section: 4,
           parent_label: '4.1 Assets at Home',
-          zohoColumn: 'assets_wifi',
-          dbColumn: 'assets_wifi',
-          isJsonbArray: true,
         },
         {
           label: '4.1 Assets at Home(tick all that apply) - Others:',
@@ -615,9 +552,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 3,
           section: 4,
           parent_label: '4.1 Assets at Home',
-          zohoColumn: 'assets_others',
-          dbColumn: 'assets_others',
-          isJsonbArray: true,
         },
         {
           label: '4.1 Assets at Home(tick all that apply) - Others (specify):',
@@ -626,8 +560,6 @@ export const FORM_SCHEMA: FormSchema = {
           section: 4,
           parentOptionLabel: 'Others:',
           parent_label: '4.1 Assets at Home',
-          zohoColumn: 'assets_others_specify',
-          dbColumn: 'assets_others_specify',
         },
         // Electricity Bill
         {
@@ -704,9 +636,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 4,
           section: 4,
           parent_label: '4.5 Income Type',
-          zohoColumn: 'income_type_monthly',
-          dbColumn: 'income_type_monthly',
-          isJsonbArray: true,
         },
         {
           label: '4.5 Income Type — Monthly (specify)',
@@ -715,8 +644,6 @@ export const FORM_SCHEMA: FormSchema = {
           section: 4,
           parentOptionLabel: 'Monthly',
           parent_label: '4.5 Income Type',
-          zohoColumn: 'income_type_monthly_specify',
-          dbColumn: 'income_type_monthly_specify',
         },
         {
           label: '4.5 Income Type — Daily',
@@ -724,9 +651,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 4,
           section: 4,
           parent_label: '4.5 Income Type',
-          zohoColumn: 'income_type_daily',
-          dbColumn: 'income_type_daily',
-          isJsonbArray: true,
         },
         {
           label: '4.5 Income Type — Daily (specify)',
@@ -735,8 +659,6 @@ export const FORM_SCHEMA: FormSchema = {
           section: 4,
           parentOptionLabel: 'Daily',
           parent_label: '4.5 Income Type',
-          zohoColumn: 'income_type_daily_specify',
-          dbColumn: 'income_type_daily_specify',
         },
         {
           label: '4.5 Income Type — Weekly',
@@ -744,9 +666,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 4,
           section: 4,
           parent_label: '4.5 Income Type',
-          zohoColumn: 'income_type_weekly',
-          dbColumn: 'income_type_weekly',
-          isJsonbArray: true,
         },
         {
           label: '4.5 Income Type — Weekly (specify)',
@@ -755,8 +674,6 @@ export const FORM_SCHEMA: FormSchema = {
           section: 4,
           parentOptionLabel: 'Weekly',
           parent_label: '4.5 Income Type',
-          zohoColumn: 'income_type_weekly_specify',
-          dbColumn: 'income_type_weekly_specify',
         },
         {
           label: '4.5 Income Type — Ad-Hoc',
@@ -764,9 +681,6 @@ export const FORM_SCHEMA: FormSchema = {
           page: 4,
           section: 4,
           parent_label: '4.5 Income Type',
-          zohoColumn: 'income_type_adhoc',
-          dbColumn: 'income_type_adhoc',
-          isJsonbArray: true,
         },
         {
           label: '4.5 Income Type — Ad-Hoc (specify)',
@@ -775,8 +689,6 @@ export const FORM_SCHEMA: FormSchema = {
           section: 4,
           parentOptionLabel: 'Ad-Hoc',
           parent_label: '4.5 Income Type',
-          zohoColumn: 'income_type_adhoc_specify',
-          dbColumn: 'income_type_adhoc_specify',
         },
         // Loans (single radio, like 2.3)
         {

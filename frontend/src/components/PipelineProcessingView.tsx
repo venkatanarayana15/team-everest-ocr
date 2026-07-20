@@ -61,11 +61,7 @@ const STAGE_MAPPING: Record<string, string> = {
   done: 'done',
 };
 
-function confidenceColor(conf: number): string {
-  if (conf >= 80) return '#22c55e';
-  if (conf >= 50) return '#eab308';
-  return '#ef4444';
-}
+import { confidenceColor } from '../utils/confidence';
 
 export default function PipelineProcessingView({
   jobId, files, status, statusMessage, progress,
@@ -361,7 +357,7 @@ export default function PipelineProcessingView({
                           padding: '3px 8px', color: 'var(--color-text-secondary)',
                           maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                        }} title={f.value}>
+                        }} title={f.value ?? undefined}>
                           {f.value || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>empty</span>}
                         </td>
                         <td style={{

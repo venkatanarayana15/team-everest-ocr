@@ -20,7 +20,7 @@ function getPageText(rawText: string, pageNum: number): string {
 
 export default function TranscriptionPane({ rawText, fields, currentPage, onFieldClick, jobId, onFieldsUpdated }: Props) {
   const [editingLabel, setEditingLabel] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
+  const [editValue, setEditValue] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const [focusIdx, setFocusIdx] = useState<number | null>(null);
@@ -155,12 +155,13 @@ export default function TranscriptionPane({ rawText, fields, currentPage, onFiel
     if (!editingLabel) return;
     setSaving(true);
     try {
-      await correctField(jobId, editingLabel, editValue);
+      await correctField(jobId, editingLabel, editValue ?? '');
       const updated = fields.map((f) =>
-        f.label === editingLabel ? { ...f, value: editValue } : f,
+        f.label === editingLabel ? { ...f, value: editValue ?? '' } : f,
       );
       onFieldsUpdated(updated);
       setEditingLabel(null);
+      setEditValue(null);
     } catch (e) {
       console.error('Failed to save correction:', e);
     }
@@ -251,7 +252,7 @@ export default function TranscriptionPane({ rawText, fields, currentPage, onFiel
               >
                 <input
                   ref={inputRef}
-                  value={editValue}
+                  value={editValue ?? ''}
                   onChange={(e) => setEditValue(e.target.value)}
                   onKeyDown={(e) => handleKeyDown(e, f)}
                   style={{

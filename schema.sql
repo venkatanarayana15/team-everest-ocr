@@ -12,7 +12,6 @@ CREATE TABLE IF NOT EXISTS ocr_documents (
 
     -- Processing metadata
     job_id          TEXT,
-    file_hash       TEXT,
     processing_time DOUBLE PRECISION,
     confidence_score DOUBLE PRECISION,
     num_pdfs        INTEGER,
@@ -33,13 +32,6 @@ CREATE TABLE IF NOT EXISTS ocr_documents (
     relationship_death_year     TEXT,
     relationship_death_reason   TEXT,
     photograph_kept_at_home     BOOLEAN,
-    photograph_notes            TEXT,
-    gov_id_other_specify        TEXT,
-    gov_id_aadhaar              TEXT,
-    gov_id_ration               TEXT,
-    gov_id_voter                TEXT,
-    gov_id_driving              TEXT,
-    gov_id_other                TEXT,
     government_id_verified      JSONB,
     family_members              JSONB,
 
@@ -47,17 +39,7 @@ CREATE TABLE IF NOT EXISTS ocr_documents (
     house_ownership             TEXT,
     rent_amount                 TEXT,
     type_of_home                TEXT,
-    home_type_individual        TEXT,
-    home_type_apartment         TEXT,
-    home_type_housing_board     TEXT,
-    home_type_line_house        TEXT,
-    home_type_others            TEXT,
-    home_type_others_specify    TEXT,
     type_of_ceiling             TEXT,
-    ceiling_roof                TEXT,
-    ceiling_tiled               TEXT,
-    ceiling_asbestos            TEXT,
-    ceiling_concrete            TEXT,
     number_of_bedrooms          TEXT,
     type_of_bedroom             TEXT,
     bathroom                    TEXT,
@@ -66,29 +48,12 @@ CREATE TABLE IF NOT EXISTS ocr_documents (
     -- ── Section 4: Financial Background ──
     assets_at_home              JSONB,
     electricity_bill_amount     TEXT,
-    assets_ac                   TEXT,
-    assets_smartphone           TEXT,
-    assets_washing_machine      TEXT,
-    assets_car                  TEXT,
-    assets_led_tv               TEXT,
-    assets_fridge               TEXT,
-    assets_wifi                 TEXT,
-    assets_two_wheeler          TEXT,
-    assets_others               TEXT,
-    assets_others_specify       TEXT,
+
     owns_other_assets           BOOLEAN,
     other_assets_details        JSONB,
     has_other_income            TEXT,
     other_income_sources        JSONB,
     income_type                 TEXT,
-    income_type_monthly         TEXT,
-    income_type_weekly          TEXT,
-    income_type_daily           TEXT,
-    income_type_adhoc           TEXT,
-    income_type_monthly_specify TEXT,
-    income_type_weekly_specify  TEXT,
-    income_type_daily_specify   TEXT,
-    income_type_adhoc_specify   TEXT,
     has_loans                   TEXT,
     loan_details                JSONB,
     college_fee                 TEXT,
@@ -131,8 +96,6 @@ UPDATE ocr_documents SET job_id = result_json->>'job_id'
 ALTER TABLE ocr_documents
     ADD CONSTRAINT uq_ocr_documents_job_id UNIQUE (job_id);
 
-ALTER TABLE ocr_documents
-    ADD CONSTRAINT uq_ocr_documents_file_hash UNIQUE (file_hash);
 
 -- Trigger to auto-update updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()

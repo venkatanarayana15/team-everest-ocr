@@ -237,7 +237,12 @@ FIELD OBJECT
   "page":  int,  "section":  int|null,  "needs_clarification": bool,
   "reason":  string|null,  "position_hint": "same_line_colon"|"right_of_label"|...,
   "bbox":          [x1, y1, x2, y2] | null,
-  "value_bbox":    [x1, y1, x2, y2] | null
+  "value_bbox":    [x1, y1, x2, y2] | null,
+  "parent_label":  string|null,        // parent question label (e.g. "2.4 Government ID Verified")
+  "field_type":    "text"|"radio"|"checkbox"|"table_row"|"table_header"|"specify",
+  "group_id":      string|null,        // group identifier for radio/checkbox groups
+  "row_index":     int|null,           // row number for table rows (1-based)
+  "column_name":   string|null         // column name for table cells
 }
 
 -------------------------------------------------------------------------------
@@ -558,8 +563,29 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   2.4 Government ID Verified — Driving Licence   [checkbox — ✓ if checked, ✗ if empty]
   2.4 Government ID Verified — Voter ID          [checkbox — ✓ if checked, ✗ if empty]
   2.4 Government ID Verified — Other              [checkbox — ✓ if checked, ✗ if empty]
-  2.4 Government ID Verified — Other (specify)   [text — free-text written next to "Other", EXACTLY as written. If the "Other" box is unchecked OR nothing is written, output empty string ""]
-   2.5 Family Members                                    [table — count ALL pre-printed rows (usually 4), then for each row output 5 SEPARATE fields: "2.5 Family Members — Row {n} — Name", " — Age", " — Education", " — Occupation", " — Annual Income". Do NOT combine columns with |. ALSO scan for any handwritten text AFTER the last pre-printed row and include it as an extra row ("2.5 Family Members — Row {n+1} — Name") with the text in the Name column.]
+2.4 Government ID Verified — Other (specify)   [text — free-text written next to "Other", EXACTLY as written. If the "Other" box is unchecked OR nothing is written, output empty string ""]
+    2.5 Family Members [table_header]
+      2.5 Family Members — Row 1 — Name [text]
+      2.5 Family Members — Row 1 — Age [text]
+      2.5 Family Members — Row 1 — Education [text]
+      2.5 Family Members — Row 1 — Occupation [text]
+      2.5 Family Members — Row 1 — Annual Income [text]
+      2.5 Family Members — Row 2 — Name [text]
+      2.5 Family Members — Row 2 — Age [text]
+      2.5 Family Members — Row 2 — Education [text]
+      2.5 Family Members — Row 2 — Occupation [text]
+      2.5 Family Members — Row 2 — Annual Income [text]
+      2.5 Family Members — Row 3 — Name [text]
+      2.5 Family Members — Row 3 — Age [text]
+      2.5 Family Members — Row 3 — Education [text]
+      2.5 Family Members — Row 3 — Occupation [text]
+      2.5 Family Members — Row 3 — Annual Income [text]
+      2.5 Family Members — Row 4 — Name [text]
+      2.5 Family Members — Row 4 — Age [text]
+      2.5 Family Members — Row 4 — Education [text]
+      2.5 Family Members — Row 4 — Occupation [text]
+      2.5 Family Members — Row 4 — Annual Income [text]
+      Also scan for any handwritten text AFTER the last pre-printed row and include it as an extra row ("2.5 Family Members — Row 5 — Name") with the text in the Name column.
 
 --- Section 3 — Housing Condition (Page 2) — 7 fields ---
   3.1 House Ownership — Own               [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
@@ -600,33 +626,49 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
    4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No   [checkbox — ✓ or ✗ — ONE of this pair must be ✓]
    NOTE: 4.3.1 Row 3 has an EXTRA BLANK AREA below the 4.3 checkboxes at the bottom of page 3. Check that empty space for handwriting and put it in the Row 3 fields if present.
+    4.3.1 If Yes, list their properties: [table_header]
+      4.3.1 If Yes, list their properties: - Row 3 - Property Description [text]
+      4.3.1 If Yes, list their properties: - Row 3 - Owner Name [text]
+      4.3.1 If Yes, list their properties: - Row 3 - Approximate Value [text]
 """,
      4: """
 --- Section 4 — Financial Background (Page 4) — 15 fields ---
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes  [checkbox — ✓ or ✗ — IF ✓ THEN fill 4.3.1 fields below; IF ✗ THEN all 4.3.1 = "N/A"]
   4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No   [checkbox — ✓ or ✗]
-   NOTE: 4.3.1 Row 4 has an EXTRA BLANK AREA below the 4.3.1 table and above the 4.4 question on page 4. Check that empty space for handwriting and put it in the Row 4 fields if present.
-   4.4 Apart from your job, is there any other source of income? [radio → Yes | No]
-     4.4.1 — Source of Income [text — ALWAYS check for strikethrough FIRST. If struck through with / or \, output "". Only if NOT struck through, extract handwritten text (even when 4.4=No).]
-     4.4.1 — Amount           [text — same rule: strikethrough/slash → ""; otherwise extract handwritten text even when 4.4=No.]
-    4.5 Income Type — Monthly    [checkbox — ✓ if checked, ✗ if empty]
-   4.5 Income Type — Monthly (specify) [text — handwritten text/name NEAR the Monthly checkbox, e.g. "mother"]
-   4.5 Income Type — Daily      [checkbox — ✓ if checked, ✗ if empty]
-   4.5 Income Type — Daily (specify)   [text — handwritten text/name NEAR the Daily checkbox, e.g. "father"]
-   4.5 Income Type — Weekly     [checkbox — ✓ if checked, ✗ if empty]
-   4.5 Income Type — Weekly (specify)  [text — handwritten text/name NEAR the Weekly checkbox]
-   4.5 Income Type — Ad-Hoc     [checkbox — ✓ if checked, ✗ if empty]
-   4.5 Income Type — Ad-Hoc (specify)  [text — handwritten text/name NEAR the Ad-Hoc checkbox]
-   4.6 Do you have any loans?              [radio → Yes | No — IF Yes THEN fill 4.6.1 fields below; IF No THEN all 4.6.1 = "N/A"]
-     TABLE 4.6.1: exactly 3 pre-printed rows (Sr.No. 1, 2, 3), each with 4 columns.
-     For EACH of the 3 rows, output 4 separate fields in this format:
-       "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount — Row {n} — Sr.No."          [text]
-       " — {n} — Loan Purpose"                [text]
-       " — {n} — Loan Amount Taken"           [text — numbers only]
-       " — {n} — Pending Loan Amount"         [text — numbers only]
-       Repeat for n=1, 2, 3 (12 fields total). CRITICAL: Do NOT combine rows into one.
-     Also scan for any handwritten text BEFORE Row 1 (above the table) or AFTER Row 3 (below the table)
-     and include it as an extra row (Row 0 or Row 4) with text in the relevant column.
+NOTE: 4.3.1 Row 4 has an EXTRA BLANK AREA below the 4.3.1 table and above the 4.4 question on page 4. Check that empty space for handwriting and put it in the Row 4 fields if present.
+    4.3.1 If Yes, list their properties: [table_header]
+      4.3.1 If Yes, list their properties: - Row 1 - Property Description [text]
+      4.3.1 If Yes, list their properties: - Row 1 - Owner Name [text]
+      4.3.1 If Yes, list their properties: - Row 1 - Approximate Value [text]
+      4.3.1 If Yes, list their properties: - Row 2 - Property Description [text]
+      4.3.1 If Yes, list their properties: - Row 2 - Owner Name [text]
+      4.3.1 If Yes, list their properties: - Row 2 - Approximate Value [text]
+      4.3.1 If Yes, list their properties: - Row 4 - Property Description [text]
+      4.3.1 If Yes, list their properties: - Row 4 - Owner Name [text]
+      4.3.1 If Yes, list their properties: - Row 4 - Approximate Value [text]
+4.4 Apart from your job, is there any other source of income? [radio → Yes | No]
+      4.4.1 If Yes, list other sources of income: [table_header]
+        4.4.1 If Yes, list other sources of income: - Source of Income [text — ALWAYS check for strikethrough FIRST. If struck through with / or \, output "". Only if NOT struck through, extract handwritten text (even when 4.4=No).]
+        4.4.1 If Yes, list other sources of income: - Amount [text — same rule: strikethrough/slash → ""; otherwise extract handwritten text even when 4.4=No.]
+      4.5 Income Type — Monthly    [checkbox — ✓ if checked, ✗ if empty]
+    4.5 Income Type — Monthly (specify) [text — handwritten text/name NEAR the Monthly checkbox, e.g. "mother"]
+    4.5 Income Type — Daily      [checkbox — ✓ if checked, ✗ if empty]
+    4.5 Income Type — Daily (specify)   [text — handwritten text/name NEAR the Daily checkbox, e.g. "father"]
+    4.5 Income Type — Weekly     [checkbox — ✓ if checked, ✗ if empty]
+    4.5 Income Type — Weekly (specify)  [text — handwritten text/name NEAR the Weekly checkbox]
+    4.5 Income Type — Ad-Hoc     [checkbox — ✓ if checked, ✗ if empty]
+    4.5 Income Type — Ad-Hoc (specify)  [text — handwritten text/name NEAR the Ad-Hoc checkbox]
+    4.6 Do you have any loans?              [radio → Yes | No — IF Yes THEN fill 4.6.1 fields below; IF No THEN all 4.6.1 = "N/A"]
+      4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount: [table_header]
+      TABLE 4.6.1: exactly 3 pre-printed rows (Sr.No. 1, 2, 3), each with 4 columns.
+      For EACH of the 3 rows, output 4 separate fields in this format:
+        "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row {n} - Sr.No."          [text]
+        "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row {n} - Loan Purpose"                [text]
+        "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row {n} - Loan Amount Taken"           [text — numbers only]
+        "4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount - Row {n} - Pending Loan Amount"         [text — numbers only]
+        Repeat for n=1, 2, 3 (12 fields total). CRITICAL: Do NOT combine rows into one.
+      Also scan for any handwritten text BEFORE Row 1 (above the table) or AFTER Row 3 (below the table)
+      and include it as an extra row (Row 0 or Row 4) with text in the relevant column.
 """,
      5: """
 --- Section 4 — Financial Background (Page 5) — 3 fields ---

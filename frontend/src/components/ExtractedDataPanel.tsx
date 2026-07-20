@@ -205,20 +205,7 @@ function getRadioOptions(label: string): string[] | null {
 
 // ── Sub-components ──────────────────────────────────────────────────────────
 
-function Chevron({ expanded }: { expanded: boolean }) {
-  return (
-    <span style={{
-      display: 'inline-block',
-      transition: 'transform 0.15s',
-      transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-      fontSize: 10,
-      color: '#94a3b8',
-      marginRight: 6,
-    }}>
-      ▶
-    </span>
-  );
-}
+
 
 function Badge({ children, color }: { children: string; color: string }) {
   return (
@@ -1147,8 +1134,6 @@ export default function ExtractedDataPanel({
   fields, sections, selectedField, onFieldClick, onPageClick,
   currentPage, numPages, jobId, onFieldsUpdated, hideToolbar,
 }: Props) {
-  const [collapsedSections, setCollapsedSections] = useState<Set<number | null>>(new Set());
-
   // Keep latest fields in a ref so the value-change callbacks stay referentially
   // stable across renders (field array identity changes on every store update).
   const fieldsRef = useRef(fields);
@@ -1176,15 +1161,6 @@ export default function ExtractedDataPanel({
     resolvedFields.filter(f => f.page === currentPage),
     [resolvedFields, currentPage]
   );
-
-  const toggleSection = useCallback((sectionNumber: number | null) => {
-    setCollapsedSections(prev => {
-      const next = new Set(prev);
-      if (next.has(sectionNumber)) next.delete(sectionNumber);
-      else next.add(sectionNumber);
-      return next;
-    });
-  }, []);
 
   const handleValueChange = useCallback((field: Field, newVal: string) => {
     // Collapsed mutually-exclusive radio group: fan the single selection out to
@@ -1412,6 +1388,7 @@ export default function ExtractedDataPanel({
             currentTable = { prefix: sectionPrefix, fields: [] };
           }
           currentTable.fields.push(f);
+          consumed.add(f.label);
           continue;
         }
 
@@ -1430,6 +1407,15 @@ export default function ExtractedDataPanel({
             type: 'field',
             field: buildRadioSyntheticField(mg.stem, memberFields, m => mutexOptionName(m, mg.stem)),
           });
+          continue;
+        }
+
+        // ── Table header fields ──
+        // Already rendered by the table-row matcher above via currentTable → flushTable().
+        // Skip parent-group codepath to prevent the same rows from being gathered again as
+        // checkbox children.
+        if (schemaFieldType(f.label) === 'table_header') {
+          flushTable();
           continue;
         }
 
@@ -1619,7 +1605,6 @@ export default function ExtractedDataPanel({
         )}
 
         {sectionGroups.map(group => {
-          const isCollapsed = collapsedSections.has(group.sectionNumber);
           const hasContent = group.blocks.length > 0;
 
           return (
@@ -1631,13 +1616,7 @@ export default function ExtractedDataPanel({
               overflow: 'hidden'
             }}>
               {/* Section header */}
-              <div
-                style={sectionTitleStyle}
-                onClick={() => toggleSection(group.sectionNumber)}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-section-header-hover)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-section-header)'; }}
-              >
-                <Chevron expanded={!isCollapsed} />
+              <div style={sectionTitleStyle}>
                 <span>{group.sectionName}</span>
                 {hasContent && (
                   <span style={{ color: 'var(--color-text-muted)', fontSize: 11, fontWeight: 400 }}>
@@ -1647,7 +1626,7 @@ export default function ExtractedDataPanel({
               </div>
 
               {/* Section content */}
-              {!isCollapsed && hasContent && (
+              {hasContent && (
                 <div style={{ padding: '0' }}>
                   {group.blocks.map((block, idx) => {
                     if (block.type === 'field') {
@@ -1692,7 +1671,7 @@ export default function ExtractedDataPanel({
               )}
 
               {/* Empty section */}
-              {!isCollapsed && !hasContent && (
+              {!hasContent && (
                 <div style={{ padding: '8px 12px', color: 'var(--color-text-placeholder)', fontSize: 12, fontStyle: 'italic' }}>
                   No fields in this section.
                 </div>

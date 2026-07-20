@@ -176,6 +176,13 @@ def _fields_to_dict(fields: list[StructuredField]) -> list[dict]:
             "verification_note": f.verification_note,
             "extracted_by": f.extracted_by, "verified_by": f.verified_by,
             "original_value": f.original_value,
+            # Hierarchy metadata (populated by enrich_fields) — required by the
+            # review UI to group checkbox/radio options under a single question.
+            "parent_label": f.parent_label,
+            "field_type": f.field_type,
+            "group_id": f.group_id,
+            "row_index": f.row_index,
+            "column_name": f.column_name,
         }
         for f in fields
     ]
@@ -382,8 +389,6 @@ async def _save_to_db(job_dir: Path) -> bool:
             result_data = json.load(f)
         name_path = job_dir / "original_name.txt"
         orig_name = name_path.read_text().strip() if name_path.exists() else job_dir.name
-        hash_path = job_dir / "file_hash.txt"
-        file_hash = hash_path.read_text().strip() if hash_path.exists() else None
         fields_data = result_data.get("fields", [])
         low_conf = sum(1 for f in fields_data if f.get("confidence", 0) < 70)
         needs_review = sum(1 for f in fields_data if f.get("needs_clarification", False))
@@ -401,7 +406,6 @@ async def _save_to_db(job_dir: Path) -> bool:
             job_id=job_dir.name,
             file_name=orig_name,
             status="done",
-            file_hash=file_hash,
             processing_time=result_data.get("processing_time"),
             confidence_score=result_data.get("overall_confidence"),
             num_pdfs=result_data.get("num_pdfs"),

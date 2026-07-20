@@ -1,11 +1,7 @@
+import { confidenceColor3Tier } from '../utils/confidence';
+
 interface Props {
   confidence: number;
-}
-
-function confidenceColor(conf: number): string {
-  if (conf >= 80) return '#22c55e';
-  if (conf >= 60) return '#eab308';
-  return '#ef4444';
 }
 
 export default function ConfidenceBar({ confidence }: Props) {
@@ -24,14 +20,14 @@ export default function ConfidenceBar({ confidence }: Props) {
           style={{
             width: `${confidence}%`,
             height: '100%',
-            background: confidenceColor(confidence),
+            background: confidenceColor3Tier(confidence),
             borderRadius: 3,
             transition: 'width 0.4s ease',
-            boxShadow: confidence >= 80 ? '0 1px 4px rgba(22,163,74,0.3)' : confidence >= 60 ? '0 1px 4px rgba(234,179,8,0.3)' : '0 1px 4px rgba(239,68,68,0.3)',
+            boxShadow: confidence >= 80 ? '0 1px 4px rgba(22,163,74,0.3)' : confidence >= 50 ? '0 1px 4px rgba(217,119,6,0.3)' : '0 1px 4px rgba(220,38,38,0.3)',
           }}
         />
       </div>
-      <span style={{ fontSize: 13, fontWeight: 600, color: confidenceColor(confidence), minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>
+      <span style={{ fontSize: 13, fontWeight: 600, color: confidenceColor3Tier(confidence), minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>
         {confidence}%
       </span>
     </div>

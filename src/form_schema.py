@@ -168,9 +168,7 @@ FORM_SCHEMA = {
           "label": "2.3 Is Father/Mother photograph kept at home? — Notes",
           "type": "text",
           "page": 2,
-          "section": 2,
-          "zoho_column": "photograph_notes",
-          "db_column": "photograph_notes"
+          "section": 2
         },
         {
           "label": "2.4 Government ID Verified",
@@ -184,50 +182,35 @@ FORM_SCHEMA = {
           "type": "checkbox",
           "page": 2,
           "section": 2,
-          "parent_label": "2.4 Government ID Verified",
-          "zoho_column": "gov_id_aadhaar",
-          "db_column": "gov_id_aadhaar",
-          "is_jsonb_array": True
+          "parent_label": "2.4 Government ID Verified"
         },
         {
           "label": "2.4 Government ID Verified — Ration Card",
           "type": "checkbox",
           "page": 2,
           "section": 2,
-          "parent_label": "2.4 Government ID Verified",
-          "zoho_column": "gov_id_ration",
-          "db_column": "gov_id_ration",
-          "is_jsonb_array": True
+          "parent_label": "2.4 Government ID Verified"
         },
         {
           "label": "2.4 Government ID Verified — Driving Licence",
           "type": "checkbox",
           "page": 2,
           "section": 2,
-          "parent_label": "2.4 Government ID Verified",
-          "zoho_column": "gov_id_driving",
-          "db_column": "gov_id_driving",
-          "is_jsonb_array": True
+          "parent_label": "2.4 Government ID Verified"
         },
         {
           "label": "2.4 Government ID Verified — Voter ID",
           "type": "checkbox",
           "page": 2,
           "section": 2,
-          "parent_label": "2.4 Government ID Verified",
-          "zoho_column": "gov_id_voter",
-          "db_column": "gov_id_voter",
-          "is_jsonb_array": True
+          "parent_label": "2.4 Government ID Verified"
         },
         {
           "label": "2.4 Government ID Verified — Other",
           "type": "checkbox",
           "page": 2,
           "section": 2,
-          "parent_label": "2.4 Government ID Verified",
-          "zoho_column": "gov_id_other",
-          "db_column": "gov_id_other",
-          "is_jsonb_array": True
+          "parent_label": "2.4 Government ID Verified"
         },
         {
           "label": "2.4 Government ID Verified — Other (specify)",
@@ -235,9 +218,7 @@ FORM_SCHEMA = {
           "page": 2,
           "section": 2,
           "parent_option_label": "Other",
-          "parent_label": "2.4 Government ID Verified",
-          "zoho_column": "gov_id_other_specify",
-          "db_column": "gov_id_other_specify"
+          "parent_label": "2.4 Government ID Verified"
         },
         {
           "label": "2.5 Family Members",
@@ -556,50 +537,35 @@ FORM_SCHEMA = {
           "type": "checkbox",
           "page": 2,
           "section": 3,
-          "parent_label": "3.2 Type of Home",
-          "zoho_column": "home_type_individual",
-          "db_column": "home_type_individual",
-          "is_jsonb_array": True
+          "parent_label": "3.2 Type of Home"
         },
         {
           "label": "3.2 Type of Home — Private Apartment",
           "type": "checkbox",
           "page": 2,
           "section": 3,
-          "parent_label": "3.2 Type of Home",
-          "zoho_column": "home_type_apartment",
-          "db_column": "home_type_apartment",
-          "is_jsonb_array": True
+          "parent_label": "3.2 Type of Home"
         },
         {
           "label": "3.2 Type of Home — Housing Board",
           "type": "checkbox",
           "page": 2,
           "section": 3,
-          "parent_label": "3.2 Type of Home",
-          "zoho_column": "home_type_housing_board",
-          "db_column": "home_type_housing_board",
-          "is_jsonb_array": True
+          "parent_label": "3.2 Type of Home"
         },
         {
           "label": "3.2 Type of Home — Line House",
           "type": "checkbox",
           "page": 2,
           "section": 3,
-          "parent_label": "3.2 Type of Home",
-          "zoho_column": "home_type_line_house",
-          "db_column": "home_type_line_house",
-          "is_jsonb_array": True
+          "parent_label": "3.2 Type of Home"
         },
         {
           "label": "3.2 Type of Home — Others",
           "type": "checkbox",
           "page": 2,
           "section": 3,
-          "parent_label": "3.2 Type of Home",
-          "zoho_column": "home_type_others",
-          "db_column": "home_type_others",
-          "is_jsonb_array": True
+          "parent_label": "3.2 Type of Home"
         },
         {
           "label": "3.2 Type of Home — Others (specify)",
@@ -607,9 +573,7 @@ FORM_SCHEMA = {
           "page": 2,
           "section": 3,
           "parent_option_label": "Others",
-          "parent_label": "3.2 Type of Home",
-          "zoho_column": "home_type_others_specify",
-          "db_column": "home_type_others_specify"
+          "parent_label": "3.2 Type of Home"
         },
         {
           "label": "3.3 Type of Ceiling",
@@ -623,40 +587,28 @@ FORM_SCHEMA = {
           "type": "checkbox",
           "page": 3,
           "section": 3,
-          "parent_label": "3.3 Type of Ceiling",
-          "zoho_column": "ceiling_roof",
-          "db_column": "ceiling_roof",
-          "is_jsonb_array": True
+          "parent_label": "3.3 Type of Ceiling"
         },
         {
           "label": "3.3 Type of Ceiling — Tiled",
           "type": "checkbox",
           "page": 3,
           "section": 3,
-          "parent_label": "3.3 Type of Ceiling",
-          "zoho_column": "ceiling_tiled",
-          "db_column": "ceiling_tiled",
-          "is_jsonb_array": True
+          "parent_label": "3.3 Type of Ceiling"
         },
         {
           "label": "3.3 Type of Ceiling — Asbestos / Sheet",
           "type": "checkbox",
           "page": 3,
           "section": 3,
-          "parent_label": "3.3 Type of Ceiling",
-          "zoho_column": "ceiling_asbestos",
-          "db_column": "ceiling_asbestos",
-          "is_jsonb_array": True
+          "parent_label": "3.3 Type of Ceiling"
         },
         {
           "label": "3.3 Type of Ceiling — Concrete",
           "type": "checkbox",
           "page": 3,
           "section": 3,
-          "parent_label": "3.3 Type of Ceiling",
-          "zoho_column": "ceiling_concrete",
-          "db_column": "ceiling_concrete",
-          "is_jsonb_array": True
+          "parent_label": "3.3 Type of Ceiling"
         },
         {
           "label": "3.4 Number of Bedrooms",
@@ -753,90 +705,63 @@ FORM_SCHEMA = {
           "type": "checkbox",
           "page": 3,
           "section": 4,
-          "parent_label": "4.1 Assets at Home",
-          "zoho_column": "assets_washing_machine",
-          "db_column": "assets_washing_machine",
-          "is_jsonb_array": True
+          "parent_label": "4.1 Assets at Home"
         },
         {
           "label": "4.1 Assets at Home(tick all that apply) - Fridge",
           "type": "checkbox",
           "page": 3,
           "section": 4,
-          "parent_label": "4.1 Assets at Home",
-          "zoho_column": "assets_fridge",
-          "db_column": "assets_fridge",
-          "is_jsonb_array": True
+          "parent_label": "4.1 Assets at Home"
         },
         {
           "label": "4.1 Assets at Home(tick all that apply) - AC",
           "type": "checkbox",
           "page": 3,
           "section": 4,
-          "parent_label": "4.1 Assets at Home",
-          "zoho_column": "assets_ac",
-          "db_column": "assets_ac",
-          "is_jsonb_array": True
+          "parent_label": "4.1 Assets at Home"
         },
         {
           "label": "4.1 Assets at Home(tick all that apply) - LED TV",
           "type": "checkbox",
           "page": 3,
           "section": 4,
-          "parent_label": "4.1 Assets at Home",
-          "zoho_column": "assets_led_tv",
-          "db_column": "assets_led_tv",
-          "is_jsonb_array": True
+          "parent_label": "4.1 Assets at Home"
         },
         {
           "label": "4.1 Assets at Home(tick all that apply) - Two-Wheeler",
           "type": "checkbox",
           "page": 3,
           "section": 4,
-          "parent_label": "4.1 Assets at Home",
-          "zoho_column": "assets_two_wheeler",
-          "db_column": "assets_two_wheeler",
-          "is_jsonb_array": True
+          "parent_label": "4.1 Assets at Home"
         },
         {
           "label": "4.1 Assets at Home(tick all that apply) - Car",
           "type": "checkbox",
           "page": 3,
           "section": 4,
-          "parent_label": "4.1 Assets at Home",
-          "zoho_column": "assets_car",
-          "db_column": "assets_car",
-          "is_jsonb_array": True
+          "parent_label": "4.1 Assets at Home"
         },
         {
           "label": "4.1 Assets at Home(tick all that apply) - Smartphone",
           "type": "checkbox",
           "page": 3,
           "section": 4,
-          "parent_label": "4.1 Assets at Home",
-          "zoho_column": "assets_smartphone",
-          "db_column": "assets_smartphone",
-          "is_jsonb_array": True
+          "parent_label": "4.1 Assets at Home"
         },
         {
           "label": "4.1 Assets at Home(tick all that apply) - Separate Wi-Fi",
           "type": "checkbox",
           "page": 3,
           "section": 4,
-          "parent_label": "4.1 Assets at Home",
-          "zoho_column": "assets_wifi",
-          "db_column": "assets_wifi",
-          "is_jsonb_array": True
+          "parent_label": "4.1 Assets at Home"
         },
         {
           "label": "4.1 Assets at Home(tick all that apply) - Others:",
           "type": "checkbox",
           "page": 3,
           "section": 4,
-          "parent_label": "4.1 Assets at Home",
-          "zoho_column": "assets_others",
-          "db_column": "assets_others",
-          "is_jsonb_array": True
+          "parent_label": "4.1 Assets at Home"
         },
         {
           "label": "4.1 Assets at Home(tick all that apply) - Others (specify):",
@@ -844,9 +769,7 @@ FORM_SCHEMA = {
           "page": 3,
           "section": 4,
           "parent_option_label": "Others:",
-          "parent_label": "4.1 Assets at Home",
-          "zoho_column": "assets_others_specify",
-          "db_column": "assets_others_specify"
+          "parent_label": "4.1 Assets at Home"
         },
         {
           "label": "4.2 Amount of Last Electricity Bill",
@@ -928,10 +851,7 @@ FORM_SCHEMA = {
           "type": "checkbox",
           "page": 4,
           "section": 4,
-          "parent_label": "4.5 Income Type",
-          "zoho_column": "income_type_monthly",
-          "db_column": "income_type_monthly",
-          "is_jsonb_array": True
+          "parent_label": "4.5 Income Type"
         },
         {
           "label": "4.5 Income Type — Monthly (specify)",
@@ -939,19 +859,14 @@ FORM_SCHEMA = {
           "page": 4,
           "section": 4,
           "parent_option_label": "Monthly",
-          "parent_label": "4.5 Income Type",
-          "zoho_column": "income_type_monthly_specify",
-          "db_column": "income_type_monthly_specify"
+          "parent_label": "4.5 Income Type"
         },
         {
           "label": "4.5 Income Type — Daily",
           "type": "checkbox",
           "page": 4,
           "section": 4,
-          "parent_label": "4.5 Income Type",
-          "zoho_column": "income_type_daily",
-          "db_column": "income_type_daily",
-          "is_jsonb_array": True
+          "parent_label": "4.5 Income Type"
         },
         {
           "label": "4.5 Income Type — Daily (specify)",
@@ -959,19 +874,14 @@ FORM_SCHEMA = {
           "page": 4,
           "section": 4,
           "parent_option_label": "Daily",
-          "parent_label": "4.5 Income Type",
-          "zoho_column": "income_type_daily_specify",
-          "db_column": "income_type_daily_specify"
+          "parent_label": "4.5 Income Type"
         },
         {
           "label": "4.5 Income Type — Weekly",
           "type": "checkbox",
           "page": 4,
           "section": 4,
-          "parent_label": "4.5 Income Type",
-          "zoho_column": "income_type_weekly",
-          "db_column": "income_type_weekly",
-          "is_jsonb_array": True
+          "parent_label": "4.5 Income Type"
         },
         {
           "label": "4.5 Income Type — Weekly (specify)",
@@ -979,19 +889,14 @@ FORM_SCHEMA = {
           "page": 4,
           "section": 4,
           "parent_option_label": "Weekly",
-          "parent_label": "4.5 Income Type",
-          "zoho_column": "income_type_weekly_specify",
-          "db_column": "income_type_weekly_specify"
+          "parent_label": "4.5 Income Type"
         },
         {
           "label": "4.5 Income Type — Ad-Hoc",
           "type": "checkbox",
           "page": 4,
           "section": 4,
-          "parent_label": "4.5 Income Type",
-          "zoho_column": "income_type_adhoc",
-          "db_column": "income_type_adhoc",
-          "is_jsonb_array": True
+          "parent_label": "4.5 Income Type"
         },
         {
           "label": "4.5 Income Type — Ad-Hoc (specify)",
@@ -999,9 +904,7 @@ FORM_SCHEMA = {
           "page": 4,
           "section": 4,
           "parent_option_label": "Ad-Hoc",
-          "parent_label": "4.5 Income Type",
-          "zoho_column": "income_type_adhoc_specify",
-          "db_column": "income_type_adhoc_specify"
+          "parent_label": "4.5 Income Type"
         },
         {
           "label": "4.6 Do you have any loans? — Yes",

@@ -16,6 +16,21 @@ export interface Field {
   original_value: string | null;
   is_edited?: boolean;
   position_hint?: string;
+  // Hierarchy fields (populated by backend enrich_fields)
+  parent_label?: string | null;
+  field_type?: string | null;
+  group_id?: string | null;
+  row_index?: number | null;
+  column_name?: string | null;
+  // Mutually-exclusive radio groups (e.g. 3.1, 4.3) collapsed into one Field:
+  // the original member child fields, used to fan a single selection out to siblings.
+  mutexMembers?: Field[];
+  // For "specify" follow-up fields: the option label this text input belongs to
+  // (e.g. "Others" for "3.2 Type of Home — Others (specify)").
+  parent_option_label?: string | null;
+  // For radio/checkbox groups: nested "specify" follow-up fields, shown inline
+  // only when their associated option is selected.
+  specifyChildren?: Field[];
 }
 
 export interface Section {
