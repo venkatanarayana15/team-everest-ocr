@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import type { Field, Section } from '../types';
 import { resolveHierarchy, schemaFieldType, mutexGroupFor, mutexOptionName, mutexMembersOfStem, radioGroupChildrenOf, optionsForLabel } from '../utils/schemaHierarchy';
 
@@ -48,7 +48,18 @@ function buildRadioSyntheticField(
   nameOf: (memberLabel: string) => string,
   specifyChildren: Field[] = [],
 ): Field {
-  const selected = memberFields.find(c => isYesVal(c.value));
+  let selected = memberFields.find(c => isYesVal(c.value));
+  // If no radio option is selected but a specify child has extracted data,
+  // auto-select the matching radio option.
+  if (!selected) {
+    for (const sf of specifyChildren) {
+      if (!sf.value || !sf.value.trim()) continue;
+      const targetOption = (sf.parent_option_label ?? '').trim().toLowerCase();
+      if (!targetOption) continue;
+      selected = memberFields.find(c => nameOf(c.label).trim().toLowerCase() === targetOption);
+      if (selected) break;
+    }
+  }
   const union = unionBbox(memberFields);
   // Blue = the WHOLE question region (label + options); Green = only the
   // selected answer(s), so the question label area is mapped in blue and the
@@ -939,6 +950,29 @@ function CheckboxGroupView({
   const isSingleSelect = optionFields.some(f => f.field_type === 'radio') ||
     parentField.field_type === 'radio';
 
+  // Auto-check the parent "Other/Others" option when a specify child has extracted data.
+  useEffect(() => {
+    if (!onBulkFieldUpdate) return;
+    const updates: {field: Field, newVal: string}[] = [];
+    for (const f of optionFields) {
+      const optName = optionName(f.label);
+      if (!optName.toLowerCase().includes('specify')) continue;
+      if (!f.value || !f.value.trim()) continue;
+      const ownerLabel = (f.parent_option_label ?? '').trim().replace(/[:\s]+$/, '').toLowerCase();
+      if (!ownerLabel) continue;
+      const ownerField = optionFields.find(sib =>
+        optionName(sib.label).trim().replace(/[:\s]+$/, '').toLowerCase() === ownerLabel &&
+        sib.label !== f.label
+      );
+      if (!ownerField) continue;
+      if (['yes', 'true', '✓'].includes((ownerField.value ?? '').trim().toLowerCase())) continue;
+      updates.push({ field: ownerField, newVal: 'yes' });
+    }
+    if (updates.length > 0) {
+      onBulkFieldUpdate(updates);
+    }
+  }, []);
+
   // Derive the option display name from the child label relative to the parent label.
   const parentPrefix = groupLabel;
   const optionName = (label: string): string => {
@@ -1003,26 +1037,10 @@ function CheckboxGroupView({
           {optionFields.map(f => {
             const optName = optionName(f.label);
 
-            // "Others (specify)" style follow-up: render an inline text input, but
-            // ONLY when the associated option (parent_option_label) is selected.
+            // "Others (specify)" style follow-up: always render the inline text input,
+            // even when the associated option isn't checked (data may exist from OCR).
             const isSpecify = optName.toLowerCase().includes('specify');
             if (isSpecify) {
-              const ownerLabel = (f.parent_option_label ?? '')
-                .trim().replace(/[:\s]+$/, '').toLowerCase();
-              const ownerField = ownerLabel
-                ? optionFields.find(sib =>
-                    optionName(sib.label).trim().replace(/[:\s]+$/, '').toLowerCase() === ownerLabel &&
-                    sib.label !== f.label)
-                : undefined;
-              // If no owner mapping, fall back to showing when any "Others/Other" option is checked.
-              const ownerChecked = ownerField
-                ? ['yes', 'true', '✓'].includes((ownerField.value ?? '').trim().toLowerCase())
-                : optionFields.some(sib => {
-                    const n = optionName(sib.label).trim().replace(/[:\s]+$/, '').toLowerCase();
-                    return (n === 'others' || n === 'other') &&
-                      ['yes', 'true', '✓'].includes((sib.value ?? '').trim().toLowerCase());
-                  });
-              if (!ownerChecked) return null;
               return (
                 <SpecifyInput
                   key={f.label}
