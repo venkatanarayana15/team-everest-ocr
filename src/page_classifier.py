@@ -153,10 +153,31 @@ class PageClassifier:
         )
 
     def classify_image(self, image_path: str, ocr_text: str | None = None) -> PageClassification:
-        """Classify a page from an image file. Requires ocr_text to be provided."""
+        """Classify a page from an image file.
+
+        Runs Tesseract OCR on the image when no ocr_text is provided, so
+        image-set uploads can still be ordered even though the caller never
+        pre-extracts text. Falls back to `unreadable` if OCR is unavailable.
+        """
+        if not ocr_text:
+            ocr_text = self._ocr_image(image_path)
         if not ocr_text:
             return PageClassification(0, 0.0, [], [], unreadable=True)
         return self.classify_from_text(ocr_text)
+
+    @staticmethod
+    def _ocr_image(image_path: str) -> str:
+        """Best-effort Tesseract OCR of an image file."""
+        try:
+            import pytesseract
+            from PIL import Image
+            with Image.open(image_path) as img:
+                rgb = img.convert("RGB")
+                text = pytesseract.image_to_string(rgb)
+            return (text or "").strip()
+        except Exception as e:
+            logger.warning("OCR failed for %s: %s", image_path, e)
+            return ""
 
     def classify_all(
         self, image_paths: list[str], ocr_texts: dict[int, str] | None = None

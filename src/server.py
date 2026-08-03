@@ -125,6 +125,31 @@ def extract_zip(zip_path: str | Path, extract_dir: str | Path) -> list[str]:
     return image_paths
 
 
+def _job_dir_for(job_id: str) -> Path:
+    """Resolve a job id to its directory, rejecting anything that could
+    escape BASE_DIR (path-traversal guard on client-supplied job ids)."""
+    if not job_id or job_id in (".", "..") or "/" in job_id or "\\" in job_id:
+        raise HTTPException(400, f"Invalid job id: {job_id!r}")
+    return BASE_DIR / job_id
+
+
+def _safe_filename(name: str) -> str:
+    """Strip any directory components from a client-supplied filename so it
+    can never escape the job directory (path-traversal guard)."""
+    clean = Path(name).name
+    if not clean or clean in (".", "..") or "/" in name.replace("\\", "/"):
+        raise HTTPException(400, f"Unsafe filename: {name!r}")
+    return clean
+
+
+def _check_size(content: bytes, what: str = "File") -> None:
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            413,
+            f"{what} too large ({len(content)} bytes). Maximum: {MAX_UPLOAD_SIZE} bytes",
+        )
+
+
 def scan_folder(folder_path: str | Path) -> list[dict]:
     folder = Path(folder_path)
     items: list[dict] = []
@@ -387,7 +412,7 @@ async def ping():
 
 @app.get("/stream/{job_id}")
 async def stream_status(job_id: str):
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
 
@@ -408,7 +433,13 @@ async def stream_status(job_id: str):
                     status = _get_status(job_dir)
                     progress = get_job_progress(job_id)
                     if not progress:
-                        continue
+                        # Reconcile: the in-memory progress store is empty (e.g.
+                        # server restarted after this job finished). Synthesize a
+                        # terminal progress so the stream can still close cleanly
+                        # instead of holding the connection open forever.
+                        stage = status.get("status", "unknown")
+                        overall = 100 if stage in ("done", "error", "incomplete") else 0
+                        progress = {"overall": overall, "pdfs": {}}
                     data = {**status, "progress": progress}
                 dumped = json.dumps(data)
                 if dumped != last_payload:
@@ -438,7 +469,7 @@ async def stream_batch(job_ids: str):
     if not ids:
         raise HTTPException(400, "No job_ids provided")
 
-    job_dirs = {jid: BASE_DIR / jid for jid in ids}
+    job_dirs = {jid: _job_dir_for(jid) for jid in ids}
     for jid, jdir in job_dirs.items():
         if not jdir.exists():
             raise HTTPException(404, f"Job not found: {jid}")
@@ -467,6 +498,10 @@ async def stream_batch(job_ids: str):
                         status = _get_status(job_dirs[jid])
                         progress = get_job_progress(jid)
                         data = {"job_id": jid, **status, "progress": progress}
+                    else:
+                        # SSE pushes from _push_sse don't carry the job id — add it
+                        # so the frontend can attribute every event to its job.
+                        data = {"job_id": jid, **data}
                     dumped = json.dumps(data)
                     if dumped != last.get(jid):
                         last[jid] = dumped
@@ -532,7 +567,7 @@ async def stream_new_jobs():
 async def _create_job_dir(original_name: str, status_msg: str, initial_stage: str = "queued", prefix: str = "") -> tuple[str, Path]:
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
     job_id = f"{prefix}_{ts}" if prefix else f"{str(uuid.uuid4())[:8]}_{ts}"
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     job_dir.mkdir(parents=True, exist_ok=True)
     with open(job_dir / "original_name.txt", "w") as f:
         f.write(original_name)
@@ -546,7 +581,7 @@ async def _run_pipeline_task(job_dir: Path, pdf_path: str) -> None:
         await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
     except asyncio.TimeoutError:
         logger.error("Job %s waited too long for semaphore", job_dir.name)
-        _set_status(job_dir, "error", "Job timed out waiting in queue")
+        await _set_status(job_dir, "error", "Job timed out waiting in queue")
         return
     try:
         await run_pipeline(job_dir, pdf_path)
@@ -559,7 +594,7 @@ async def _run_batch_task(job_dir: Path, pdfs_info: list[dict]) -> None:
         await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
     except asyncio.TimeoutError:
         logger.error("Job %s waited too long for semaphore", job_dir.name)
-        _set_status(job_dir, "error", "Job timed out waiting in queue")
+        await _set_status(job_dir, "error", "Job timed out waiting in queue")
         return
     try:
         await run_batch_pdfs_pipeline(job_dir, pdfs_info)
@@ -572,7 +607,7 @@ async def _run_image_task(job_dir: Path, image_paths) -> None:
         await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
     except asyncio.TimeoutError:
         logger.error("Job %s waited too long for semaphore", job_dir.name)
-        _set_status(job_dir, "error", "Job timed out waiting in queue")
+        await _set_status(job_dir, "error", "Job timed out waiting in queue")
         return
     try:
         await run_image_pipeline_from_zip(job_dir, image_paths)
@@ -585,7 +620,7 @@ async def _run_ocr_extract_task(job_dir: Path, req: OcrExtractRequest) -> None:
         await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
     except asyncio.TimeoutError:
         logger.error("Job %s waited too long for semaphore", job_dir.name)
-        _set_status(job_dir, "error", "Job timed out waiting in queue")
+        await _set_status(job_dir, "error", "Job timed out waiting in queue")
         return
     try:
         await _run_ocr_extract_pipeline(job_dir, req)
@@ -626,23 +661,29 @@ async def upload(file: UploadFile = File(...)):
 
     if ext in IMAGE_EXTENSIONS:
         content = await file.read()
-        job_id, job_dir = await _create_job_dir(file.filename, "Image uploaded (waiting for full set)...")
+        _check_size(content, "Image")
+        job_id, job_dir = await _create_job_dir(file.filename, "Image uploaded. Classifying page...")
 
         img_dir = job_dir / "input_images"
         img_dir.mkdir(exist_ok=True)
-        img_path = img_dir / file.filename
+        img_path = img_dir / _safe_filename(file.filename)
         with open(img_path, "wb") as f:
             f.write(content)
 
+        # A single image is just a 1-image set — queue it immediately so the
+        # job always reaches a terminal state (previously it got stuck forever
+        # in "awaiting_images" with no endpoint to complete the set).
+        _create_task(_run_image_task(job_dir, [str(img_path.resolve())]))
         return {
             "job_id": job_id,
-            "status": "awaiting_images",
+            "status": "queued",
             "input_type": "image_single",
-            "message": "Upload 5 more images to complete the set, or use /upload-images for the full set.",
+            "image_count": 1,
         }
 
     if ext == ".zip":
         content = await file.read()
+        _check_size(content, "ZIP file")
         job_id, job_dir = await _create_job_dir(file.filename, "Extracting ZIP file...")
 
         zip_path = job_dir / "input.zip"
@@ -689,7 +730,8 @@ async def upload_images(files: list[UploadFile] = File(...)):
     saved_paths: list[str] = []
     for f in image_files:
         content = await f.read()
-        path = img_dir / f.filename
+        _check_size(content, "Image")
+        path = img_dir / _safe_filename(f.filename)
         with open(path, "wb") as fout:
             fout.write(content)
         saved_paths.append(str(path.resolve()))
@@ -729,10 +771,11 @@ async def upload_batch(files: list[UploadFile] = File(...)):
         pdfs_info = []
         for f in pdf_files:
             content = await f.read()
-            pdf_path = pdf_dir / f.filename
+            _check_size(content, "PDF")
+            pdf_path = pdf_dir / _safe_filename(f.filename)
             with open(pdf_path, "wb") as fout:
                 fout.write(content)
-            pdfs_info.append({"filename": f.filename, "path": str(pdf_path.resolve())})
+            pdfs_info.append({"filename": _safe_filename(f.filename), "path": str(pdf_path.resolve())})
 
         _create_task(_run_batch_task(job_dir, pdfs_info))
         pdf_names = [f.filename for f in pdf_files]
@@ -750,7 +793,8 @@ async def upload_batch(files: list[UploadFile] = File(...)):
         saved_paths: list[str] = []
         for f in image_files:
             content = await f.read()
-            path = img_dir / f.filename
+            _check_size(content, "Image")
+            path = img_dir / _safe_filename(f.filename)
             with open(path, "wb") as fout:
                 fout.write(content)
             saved_paths.append(str(path.resolve()))
@@ -760,6 +804,7 @@ async def upload_batch(files: list[UploadFile] = File(...)):
 
     for f in zip_files:
         content = await f.read()
+        _check_size(content, "ZIP file")
         job_id, job_dir = await _create_job_dir(f.filename, f"ZIP batch: {f.filename}")
 
         zip_path = job_dir / "input.zip"
@@ -783,7 +828,7 @@ async def upload_batch(files: list[UploadFile] = File(...)):
 
 @app.get("/validate/{job_id}")
 async def get_validation(job_id: str):
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
     path = job_dir / "page_validation.json"
@@ -799,13 +844,23 @@ async def process_folder(data: dict):
     if not folder_path:
         raise HTTPException(400, "folder_path required")
 
-    folder = Path(folder_path)
-    if not folder.exists() or not folder.is_dir():
-        raise HTTPException(400, f"Folder not found: {folder_path}")
+    folder = Path(folder_path).expanduser().resolve()
+    if ".." in folder_path.split("/") or not folder.exists() or not folder.is_dir():
+        raise HTTPException(400, f"Folder not found or unsafe path: {folder_path}")
+
+    # Sanity guard: refuse to scan the server's own output dir or anything
+    # that contains it — the job store is never a valid input source.
+    base_resolved = BASE_DIR.resolve()
+    if folder == base_resolved or base_resolved.is_relative_to(folder):
+        raise HTTPException(400, f"Refusing to scan reserved directory: {folder}")
 
     items = scan_folder(str(folder))
     if not items:
         raise HTTPException(400, "No PDFs or image sets found in folder")
+
+    MAX_FOLDER_ITEMS = int(os.environ.get("MAX_FOLDER_ITEMS", "200"))
+    if len(items) > MAX_FOLDER_ITEMS:
+        raise HTTPException(400, f"Too many items ({len(items)}). Maximum: {MAX_FOLDER_ITEMS}")
 
     results: list[dict] = []
     for item in items:
@@ -849,9 +904,18 @@ async def process_folder(data: dict):
 
 @app.post("/retry/{job_id}")
 async def retry_job(job_id: str):
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
+
+    # Guard: never restart a job that is currently running or queued — that
+    # would spawn a duplicate pipeline on the same job directory.
+    cur = _get_status(job_dir)
+    if cur.get("status") in ("queued", "processing", "preprocessing", "primary_extraction",
+                             "field_mapping", "secondary_verification", "template_fill",
+                             "saving_results", "gemini_post_process", "recheck_checkboxes",
+                             "text_refinement"):
+        raise HTTPException(409, f"Job is already {cur.get('status')} — cannot retry while running")
 
     pdf_path = job_dir / "input.pdf"
     img_dir = job_dir / "input_images"
@@ -879,7 +943,7 @@ async def retry_job(job_id: str):
 
 @app.get("/status/{job_id}")
 async def get_status(job_id: str):
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
     return _get_status(job_dir)
@@ -899,7 +963,7 @@ def _parse_log_line(line: str) -> dict | None:
 
 @app.get("/logs/{job_id}")
 async def get_logs(job_id: str, lines: int = 200):
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
     log_path = job_dir / "result.logs"
@@ -921,7 +985,7 @@ async def get_logs(job_id: str, lines: int = 200):
 
 @app.get("/result/{job_id}")
 async def get_result(job_id: str):
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
 
@@ -943,7 +1007,7 @@ async def get_result(job_id: str):
 async def get_page_image(job_id: str, page_num: int, width: int = 0, original: int = 0, pdf_name: str | None = None):
     if page_num < 1 or page_num > 6:
         raise HTTPException(422, f"Page number {page_num} out of range (1-6)")
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
 
@@ -1094,7 +1158,7 @@ def _render_pdf_page(pdf_path: str, page_num: int, width: int, pages_dir: Path) 
 
 @app.post("/correct/{job_id}")
 async def correct_field(job_id: str, body: dict):
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
 
@@ -1158,15 +1222,6 @@ async def correct_field(job_id: str, body: dict):
         json.dump(corrections, f, indent=2)
     os.replace(tmp, corrections_path)
 
-    if DB_AVAILABLE:
-        await log_correction(
-            job_id=job_id,
-            field_label=label,
-            original_value=original_value,
-            corrected_value=correct_value,
-            pdf_name=pdf_name or None,
-        )
-
     # Apply correction to result.json
     if result_data:
 
@@ -1206,14 +1261,24 @@ async def correct_field(job_id: str, body: dict):
                             found = True
                             break
 
-        if found:
-            tmp = result_path.with_suffix(".tmp")
-            with open(tmp, "w") as f:
-                json.dump(result_data, f, indent=2)
-            os.replace(tmp, result_path)
-            logger.info("/correct: written result.json for job=%s", job_id)
-        else:
-            logger.warning("/correct: field %r not found — will raise 404", label)
+    if found:
+        tmp = result_path.with_suffix(".tmp")
+        with open(tmp, "w") as f:
+            json.dump(result_data, f, indent=2)
+        os.replace(tmp, result_path)
+        logger.info("/correct: written result.json for job=%s", job_id)
+    else:
+        logger.warning("/correct: field %r not found — will raise 404", label)
+
+    # Only persist the DB audit row once the correction was actually applied.
+    if found and DB_AVAILABLE:
+        await log_correction(
+            job_id=job_id,
+            field_label=label,
+            original_value=original_value,
+            corrected_value=correct_value,
+            pdf_name=pdf_name or None,
+        )
 
     if not found:
         raise HTTPException(404, f"Field with label {label!r} not found in job {job_id}")
@@ -1223,7 +1288,7 @@ async def correct_field(job_id: str, body: dict):
 
 @app.post("/update-raw-text/{job_id}")
 async def update_raw_text(job_id: str, body: dict):
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
 
@@ -1406,7 +1471,7 @@ def _extract_epoch_from_job_id(job_id: str) -> float:
         except Exception:
             pass
     try:
-        job_dir = BASE_DIR / job_id
+        job_dir = _job_dir_for(job_id)
         if job_dir.exists():
             return job_dir.stat().st_mtime
     except Exception:
@@ -1464,7 +1529,7 @@ async def list_jobs():
 @app.delete("/jobs/{job_id}")
 async def delete_job(job_id: str):
     import shutil
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     if job_dir.exists() and job_dir.is_dir():
         shutil.rmtree(job_dir, ignore_errors=True)
     if DB_AVAILABLE:
@@ -1553,7 +1618,7 @@ async def save_result_to_db(job_id: str, body: dict = {}):
     if not DB_AVAILABLE:
         raise HTTPException(503, "Database not available")
 
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
 
@@ -1690,6 +1755,7 @@ async def save_result_to_db(job_id: str, body: dict = {}):
         logger.info("/save-to-db: final result.json written back (markers cleared)")
     else:
         logger.warning("/save-to-db: upsert returned no id — job=%s", job_id)
+        raise HTTPException(500, "Database save failed — no document row was created")
 
     return {
         "status": "saved",
@@ -1720,7 +1786,7 @@ async def webhook_extraction_completed(payload: dict):
 async def download_result(job_id: str, format: str = "json"):
     if format not in DOWNLOAD_FORMATS:
         raise HTTPException(400, f"Unsupported format. Choose from: {', '.join(DOWNLOAD_FORMATS)}")
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
 
@@ -1769,7 +1835,7 @@ async def ocr_extract(req: OcrExtractRequest):
             "(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)")
 
     job_id = f"ext_{str(uuid.uuid4())[:8]}"
-    job_dir = BASE_DIR / job_id
+    job_dir = _job_dir_for(job_id)
     job_dir.mkdir(parents=True, exist_ok=True)
 
     with open(job_dir / "original_name.txt", "w") as f:

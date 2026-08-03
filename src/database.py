@@ -205,7 +205,15 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
         if _is_checked(value):
             jsonb_checked[col].append(option)
         elif isinstance(value, str) and value.strip().lower() not in _NEG_VALUES:
-            jsonb_checked[col].append(value.strip())
+            # Free text on an "Others"-style option (e.g. "Others: Pan Card") —
+            # keep the option label with the text so the selection is not lost.
+            label = option.rstrip(":")
+            if label.lower().endswith("(specify)"):
+                label = label[: -len("(specify)")].strip()
+            if label.strip().lower() in ("others", "other"):
+                jsonb_checked[col].append(f"{label}: {value.strip()}")
+            else:
+                jsonb_checked[col].append(value.strip())
 
     for f in fields:
         label = (f.get("label") or "").strip()
@@ -251,6 +259,13 @@ def _extract_structured_fields(fields: list[dict]) -> dict[str, Any]:
             if scol is not None:
                 if _is_checked(value):
                     single_checked.setdefault(scol, []).append(leaf)
+                elif isinstance(value, str) and value.strip() and value.strip().lower() not in _NEG_VALUES:
+                    # Free text for an option (e.g. "Others: Dormitory" from the
+                    # handwritten "Others" line or a "(specify)" child) — preserve it.
+                    base_opt = leaf
+                    if leaf.lower().endswith("(specify)"):
+                        base_opt = leaf[: -len("(specify)")].strip()
+                    single_checked.setdefault(scol, []).append(f"{base_opt}: {value.strip()}")
                 continue
 
             # 5) Yes/No radio pair

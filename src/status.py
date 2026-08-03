@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 _status_locks: dict[str, threading.Lock] = {}
 _status_locks_lock = threading.Lock()
 
+
+def _status_write_lock(path: Path) -> threading.Lock:
+    """Return the per-file lock serializing concurrent status.json writes."""
+    path_str = str(path.resolve())
+    with _status_locks_lock:
+        return _status_locks.setdefault(path_str, threading.Lock())
+
 # ─── Status & Progress Tracking ───────────────────────────────────
 
 STAGE_PROGRESS: dict[str, int] = {
@@ -78,10 +85,7 @@ async def _set_status(job_dir: Path, status: str, message: str = "", pages: int 
     loop = asyncio.get_running_loop()
 
     def _write_status() -> dict:
-        path_str = str(path.resolve())
-        with _status_locks_lock:
-            lock = _status_locks.setdefault(path_str, threading.Lock())
-
+        lock = _status_write_lock(path)
         with lock:
             existing = {"log": []}
             if path.exists():
@@ -212,14 +216,17 @@ def _save_checkpoint(job_dir: Path, step: str, fields: list[StructuredField], ov
         json.dump(data, fp, indent=2)
 
 
-def _load_checkpoint(job_dir: Path) -> tuple[str, list[StructuredField], float, str, list[dict] | None] | None:
+def _load_checkpoint(job_dir: Path) -> tuple[str, list[StructuredField], float, str, list[dict] | None, int | None, int | None] | None:
     path = job_dir / "checkpoint.json"
     if not path.exists():
         return None
     with open(path) as fp:
         cp = json.load(fp)
     fields = [StructuredField(**f) for f in cp["fields"]]
-    return cp["step"], fields, cp["overall_confidence"], cp.get("raw_text", ""), cp.get("sections")
+    return (
+        cp["step"], fields, cp["overall_confidence"], cp.get("raw_text", ""),
+        cp.get("sections"), cp.get("coverage"), cp.get("confidence"),
+    )
 
 
 def _cleanup_intermediate(job_dir: Path) -> None:

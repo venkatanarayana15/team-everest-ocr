@@ -320,45 +320,45 @@ export const FORM_SCHEMA: FormSchema = {
           zohoColumn: 'rent_amount',
           dbColumn: 'rent_amount',
         },
-        // Type of Home (single-select)
+        // Type of Home (checkbox group per backend form_schema.py)
         {
           label: '3.2 Type of Home',
-          type: 'radio',
+          type: 'checkbox',
           page: 2,
           section: 3,
           options: [], // options below
         },
         {
           label: '3.2 Type of Home — Individual',
-          type: 'radio',
+          type: 'checkbox',
           page: 2,
           section: 3,
           parent_label: '3.2 Type of Home',
         },
         {
           label: '3.2 Type of Home — Private Apartment',
-          type: 'radio',
+          type: 'checkbox',
           page: 2,
           section: 3,
           parent_label: '3.2 Type of Home',
         },
         {
           label: '3.2 Type of Home — Housing Board',
-          type: 'radio',
+          type: 'checkbox',
           page: 2,
           section: 3,
           parent_label: '3.2 Type of Home',
         },
         {
           label: '3.2 Type of Home — Line House',
-          type: 'radio',
+          type: 'checkbox',
           page: 2,
           section: 3,
           parent_label: '3.2 Type of Home',
         },
         {
           label: '3.2 Type of Home — Others',
-          type: 'radio',
+          type: 'checkbox',
           page: 2,
           section: 3,
           parent_label: '3.2 Type of Home',
@@ -371,38 +371,38 @@ export const FORM_SCHEMA: FormSchema = {
           parentOptionLabel: 'Others',
           parent_label: '3.2 Type of Home',
         },
-        // Type of Ceiling (single-select)
+        // Type of Ceiling (checkbox group per backend form_schema.py)
         {
           label: '3.3 Type of Ceiling',
-          type: 'radio',
+          type: 'checkbox',
           page: 3,
           section: 3,
           options: [],
         },
         {
           label: '3.3 Type of Ceiling — Roof (Kurai)',
-          type: 'radio',
+          type: 'checkbox',
           page: 3,
           section: 3,
           parent_label: '3.3 Type of Ceiling',
         },
         {
           label: '3.3 Type of Ceiling — Tiled',
-          type: 'radio',
+          type: 'checkbox',
           page: 3,
           section: 3,
           parent_label: '3.3 Type of Ceiling',
         },
         {
           label: '3.3 Type of Ceiling — Asbestos / Sheet',
-          type: 'radio',
+          type: 'checkbox',
           page: 3,
           section: 3,
           parent_label: '3.3 Type of Ceiling',
         },
         {
           label: '3.3 Type of Ceiling — Concrete',
-          type: 'radio',
+          type: 'checkbox',
           page: 3,
           section: 3,
           parent_label: '3.3 Type of Ceiling',
@@ -599,18 +599,23 @@ export const FORM_SCHEMA: FormSchema = {
           conditionalParent: '4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes',
           conditionalValue: 'Yes',
         },
-        // 4.4 Other Income Source (single radio, rendered like 8.2)
+        // 4.4 Other Income Source (Yes/No radio pair, split per backend)
         {
-          label: '4.4 Apart from your job, is there any other source of income?',
+          label: '4.4 Apart from your job, is there any other source of income? — Yes',
           type: 'radio',
           page: 4,
           section: 4,
-          options: [
-            { label: 'Yes', value: 'Yes' },
-            { label: 'No', value: 'No' },
-          ],
+          mutuallyExclusiveWith: ['4.4 Apart from your job, is there any other source of income? — No'],
+          isYesNoPair: true,
           zohoColumn: 'has_other_income',
           dbColumn: 'has_other_income',
+        },
+        {
+          label: '4.4 Apart from your job, is there any other source of income? — No',
+          type: 'radio',
+          page: 4,
+          section: 4,
+          mutuallyExclusiveWith: ['4.4 Apart from your job, is there any other source of income? — Yes'],
         },
         // 4.4.1 Table (conditional)
         {
@@ -619,7 +624,7 @@ export const FORM_SCHEMA: FormSchema = {
           page: 4,
           section: 4,
           tableHeaderLabel: '4.4.1 If Yes, list other sources of income:',
-          conditionalParent: '4.4 Apart from your job, is there any other source of income?',
+          conditionalParent: '4.4 Apart from your job, is there any other source of income? — Yes',
           conditionalValue: 'Yes',
         },
         // Income Type (multi-select with specify)
@@ -690,19 +695,23 @@ export const FORM_SCHEMA: FormSchema = {
           parentOptionLabel: 'Ad-Hoc',
           parent_label: '4.5 Income Type',
         },
-        // Loans (single radio, like 2.3)
+        // Loans (Yes/No radio pair, split per backend)
         {
-          label: '4.6 Do you have any loans?',
+          label: '4.6 Do you have any loans? — Yes',
           type: 'radio',
           page: 4,
           section: 4,
-          required: true,
-          options: [
-            { label: 'Yes', value: 'Yes' },
-            { label: 'No', value: 'No' },
-          ],
+          mutuallyExclusiveWith: ['4.6 Do you have any loans? — No'],
+          isYesNoPair: true,
           zohoColumn: 'has_loans',
           dbColumn: 'has_loans',
+        },
+        {
+          label: '4.6 Do you have any loans? — No',
+          type: 'radio',
+          page: 4,
+          section: 4,
+          mutuallyExclusiveWith: ['4.6 Do you have any loans? — Yes'],
         },
         // 4.6.1 Table (conditional)
         {
@@ -711,7 +720,7 @@ export const FORM_SCHEMA: FormSchema = {
           page: 4,
           section: 4,
           tableHeaderLabel: '4.6.1 If Yes, Share Loan Purpose, Amount Taken, and Pending Loan Amount:',
-          conditionalParent: '4.6 Do you have any loans?',
+          conditionalParent: '4.6 Do you have any loans? — Yes',
           conditionalValue: 'Yes',
         },
         // College Fee
@@ -781,24 +790,28 @@ export const FORM_SCHEMA: FormSchema = {
       pages: [5],
       fields: [
         {
-          label: '5.1 Does the student have any health issues?',
+          label: '5.1 Does the student have any health issues? — Yes',
           type: 'radio',
           page: 5,
           section: 5,
-          required: true,
-          options: [
-            { label: 'Yes', value: 'Yes' },
-            { label: 'No', value: 'No' },
-          ],
+          mutuallyExclusiveWith: ['5.1 Does the student have any health issues? — No'],
+          isYesNoPair: true,
           zohoColumn: 'has_health_issues',
           dbColumn: 'has_health_issues',
+        },
+        {
+          label: '5.1 Does the student have any health issues? — No',
+          type: 'radio',
+          page: 5,
+          section: 5,
+          mutuallyExclusiveWith: ['5.1 Does the student have any health issues? — Yes'],
         },
         {
           label: '5.2 If yes, list the health issues',
           type: 'text',
           page: 5,
           section: 5,
-          conditionalParent: '5.1 Does the student have any health issues?',
+          conditionalParent: '5.1 Does the student have any health issues? — Yes',
           conditionalValue: 'Yes',
           zohoColumn: 'health_issues_description',
           dbColumn: 'health_issues_description',

@@ -555,7 +555,7 @@ PAGE_FIELD_MAPPINGS: dict[int, str] = {
   2.2 Relationship Details — Reason for Death / Separation [text — ALSO scan blank_text_below_2_1 region above and include any text found there]
 """,
     2: """
---- Section 2 — Family Background (Page 2) — 2 fields + (5 × N) table ---
+--- Section 2 — Family Background (Page 2) — 2 fields + (4 pre-printed + 1 extra) table ---
   2.3 Is Father/Mother photograph kept at home?         [radio → Yes | No — also scan the area BEYOND the No checkbox for free text (e.g. "we shifted to new house 2 months back") and output it as "2.3 Is Father/Mother photograph kept at home? — Notes"]
   2.3 Is Father/Mother photograph kept at home? — Notes [text — free text written after the 2.3 checkbox area, e.g. "we shifted to new house 2 months back". If nothing written, output ""]
   2.4 Government ID Verified — Aadhaar Card      [checkbox — ✓ if checked, ✗ if empty]

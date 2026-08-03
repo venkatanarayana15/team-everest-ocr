@@ -71,31 +71,40 @@ def _validate_images(image_paths: list[str]) -> tuple[bool, str]:
 
 
 async def _set_batch_pdf_status(job_dir: Path, pdf_name: str, status: str, pct: int, message: str = "") -> None:
+    from src.status import _status_write_lock
     path = job_dir / "status.json"
-    existing = {}
-    if path.exists():
-        try:
-            raw = path.read_text()
-            if raw.strip():
-                existing = json.loads(raw)
-        except (json.JSONDecodeError, OSError):
-            pass
+    loop = asyncio.get_running_loop()
 
-    log = existing.get("log", [])
-    if message:
-        from datetime import datetime
-        log.append({"t": datetime.now().strftime("%H:%M:%S"), "msg": f"[{pdf_name}] {message}"})
+    def _write_status() -> dict:
+        lock = _status_write_lock(path)
+        with lock:
+            existing = {}
+            if path.exists():
+                try:
+                    raw = path.read_text()
+                    if raw.strip():
+                        existing = json.loads(raw)
+                except (json.JSONDecodeError, OSError):
+                    pass
 
-    data = {
-        "status": "processing",
-        "message": f"Processing {pdf_name}: {message}" if message else existing.get("message", ""),
-        "log": log,
-        "pages": existing.get("pages", 0),
-    }
-    tmp = path.with_name(f".{path.name}.tmp")
-    with open(tmp, "w") as f:
-        json.dump(data, f, indent=2)
-    tmp.replace(path)
+            log = existing.get("log", [])
+            if message:
+                from datetime import datetime
+                log.append({"t": datetime.now().strftime("%H:%M:%S"), "msg": f"[{pdf_name}] {message}"})
+
+            data = {
+                "status": "processing",
+                "message": f"Processing {pdf_name}: {message}" if message else existing.get("message", ""),
+                "log": log,
+                "pages": existing.get("pages", 0),
+            }
+            tmp = path.with_name(f".{path.name}.tmp")
+            with open(tmp, "w") as f:
+                json.dump(data, f, indent=2)
+            tmp.replace(path)
+            return data
+
+    await loop.run_in_executor(None, _write_status)
 
     async with _progress_lock:
         existing_progress = _progress_store.get(job_dir.name, {})
@@ -255,7 +264,7 @@ async def _run_core_extraction(
     primary_extraction_failed = False
 
     if checkpoint:
-        step, fields, overall_confidence, raw_text, sections_data = checkpoint
+        step, fields, overall_confidence, raw_text, sections_data, coverage, confidence = checkpoint
         primary_token_usage = {}
     else:
         await status_func("primary_extraction", f"Running primary extraction ({primary_name})...")
@@ -481,6 +490,14 @@ async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
         await asyncio.to_thread(_save_results, job_dir, res, job_dir.name)
         await asyncio.to_thread(_print_field_report, job_dir, res)
         await asyncio.to_thread(_log_field_data, job_dir, res)
+
+        # If the LLM produced no data at all, surface it as an error so the
+        # user can retry — never pretend a fully-empty extraction succeeded.
+        if res.get("primary_extraction_failed"):
+            await _set_status(job_dir, "error", "Primary extraction failed — no data was extracted. Please retry the job.")
+            logger.error("Primary extraction failed (empty result) | job=%s", job_dir.name)
+            return
+
         await _set_status(job_dir, "done", "Extraction complete. Results ready for download.")
         _db_ok = await _save_to_db(job_dir)
         if not _db_ok:
@@ -633,10 +650,17 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         await asyncio.gather(*workers)
 
         await _set_status(job_dir, "saving_results", "Saving batch results...")
+        # Reorder completion-order results into submission order so pdfs[i]
+        # always corresponds to pdf_names[i] (and DB job_id_{i}).
+        result_by_name = {}
+        for r in all_results:
+            key = r.get("pdf_name") or r.get("name") or r.get("filename", "")
+            result_by_name.setdefault(key, r)
+        ordered_results = [result_by_name.get(name, {"name": name, "error": "Missing result"}) for name in submission_names]
         combined = {
             "batch": True,
             "num_pdfs": len(pdfs_info),
-            "pdfs": all_results,
+            "pdfs": ordered_results,
             "pdf_names": submission_names,
             "processing_time": round(time.time() - t0, 2),
         }
@@ -648,13 +672,12 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         # Save each individual PDF's full result to DB using the batch job_id prefix
         # so the row is discoverable under the batch job rather than subdirectory "0"/"1".
         from src.database import upsert_ocr_document as _batch_upsert
-        for r in all_results:
+        for submission_idx, r in enumerate(ordered_results):
             if "error" in r or not r.get("fields"):
                 continue
             pdf_result = r.copy()
             pdf_result["processing_time"] = combined.get("processing_time", 0)
             pdf_name_val = r.get("pdf_name", r.get("name", "?"))
-            submission_idx = pdf_name_to_submission_idx.get(pdf_name_val, all_results.index(r))
             doc_id = await _batch_upsert(
                 job_id=f"{job_dir.name}_{submission_idx}",
                 file_name=pdf_name_val,
@@ -664,7 +687,7 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 result_json=pdf_result,
             )
             if doc_id:
-                logger.info("  ✅ Batch-level DB save: job=%s_%s row=%s fields=%d", job_dir.name, all_results.index(r), doc_id, len(pdf_result.get('fields',[])))
+                logger.info("  ✅ Batch-level DB save: job=%s_%s row=%s fields=%d", job_dir.name, submission_idx, doc_id, len(pdf_result.get('fields',[])))
             else:
                 logger.warning("  ❌ Batch-level DB save failed for %s", r.get('pdf_name','?'))
 
@@ -683,7 +706,12 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 conf = r.get("confidence", "?")
                 logger.info("  ✓ %s — %d fields, %d pages, coverage=%s%% confidence=%s%%", name, len(fields), pages, cov, conf)
         logger.info("FILES: %d total  |  SUCCESS: %d  |  FAILED: %d  |  Time: %ss", len(pdfs_info), success, failed, combined.get('processing_time', '?'))
-        await _set_status(job_dir, "done", f"Batch complete: {success}/{len(pdfs_info)} succeeded.")
+
+        if success == 0:
+            await _set_status(job_dir, "error", f"Batch failed: all {len(pdfs_info)} PDFs failed. No results saved.")
+            logger.error("Batch pipeline: ALL PDFs failed | job=%s", job_dir.name)
+        else:
+            await _set_status(job_dir, "done", f"Batch complete: {success}/{len(pdfs_info)} succeeded.")
     except Exception as e:
         logger.exception("Batch pipeline failed")
         await _set_status(job_dir, "error", f"Batch pipeline failed: {e}")

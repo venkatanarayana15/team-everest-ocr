@@ -8,15 +8,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Import the schema - we'll need to compile TypeScript first or use a JSON representation
-// For now, let's create a JSON version of the schema that both Python and Node can use
+import { FORM_SCHEMA } from '../form_schema';
 
-const SCHEMA_VERSION = '1.0.0';
-const FORM_NAME = 'I Am The Change — Home Visit Questionnaire';
-const TOTAL_PAGES = 6;
+const SCHEMA_VERSION = FORM_SCHEMA.version;
+const FORM_NAME = FORM_SCHEMA.formName;
+const TOTAL_PAGES = FORM_SCHEMA.totalPages;
 
 // ============================================================================
-// SCHEMA DEFINITION (mirrors form_schema.ts)
+// SCHEMA DEFINITION (single source of truth: form_schema.ts)
 // ============================================================================
 
 interface FieldOption {
@@ -84,61 +83,6 @@ interface FormSchema {
   totalPages: number;
   sections: SectionDefinition[];
 }
-
-// Include the full schema definition here
-// (In production, you'd import from a shared JSON file)
-
-const FORM_SCHEMA = {
-  version: '1.0.0',
-  formName: 'I Am The Change — Home Visit Questionnaire',
-  totalPages: 6,
-  sections: [
-    {
-      number: 1,
-      name: 'Student Profile',
-      pages: [1],
-      fields: [
-        { label: '1.1 Application ID', type: 'text', page: 1, section: 1, required: true, zohoColumn: 'application_id', dbColumn: 'application_id' },
-        { label: '1.2 Student Full Name', type: 'text', page: 1, section: 1, required: true, zohoColumn: 'student_full_name', dbColumn: 'student_full_name' },
-        { label: '1.3 Gender', type: 'radio', page: 1, section: 1, required: true, options: [{label:'Male',value:'Male'},{label:'Female',value:'Female'},{label:'Others',value:'Others'}], zohoColumn: 'gender', dbColumn: 'gender' },
-      ],
-      tables: [],
-    },
-    {
-      number: 2,
-      name: 'Family Background',
-      pages: [1, 2],
-      fields: [
-        { label: '2.1 Family Status', type: 'radio', page: 1, section: 2, required: true, options: [{label:'Having both parents',value:'Having both parents'},{label:'Single Parent',value:'Single Parent'},{label:'Parentless',value:'Parentless'}], zohoColumn: 'family_status', dbColumn: 'family_status' },
-        { label: '2.2 Relationship Details — Year of Death / Separation', type: 'text', page: 1, section: 2, numericOnly: true, zohoColumn: 'relationship_death_year', dbColumn: 'relationship_death_year' },
-        { label: '2.2 Relationship Details — Reason for Death / Separation', type: 'text', page: 1, section: 2, zohoColumn: 'relationship_death_reason', dbColumn: 'relationship_death_reason' },
-        { label: '2.3 Is Father/Mother photograph kept at home?', type: 'radio', page: 2, section: 2, required: true, options: [{label:'Yes',value:'Yes'},{label:'No',value:'No'}], zohoColumn: 'photograph_kept_at_home', dbColumn: 'photograph_kept_at_home' },
-        { label: '2.3 Is Father/Mother photograph kept at home? — Notes', type: 'text', page: 2, section: 2, zohoColumn: 'photograph_notes', dbColumn: 'photograph_notes' },
-        { label: '2.4 Government ID Verified', type: 'checkbox', page: 2, section: 2, options: [] },
-        { label: '2.4 Government ID Verified — Aadhaar Card', type: 'checkbox', page: 2, section: 2, parentLabel: '2.4 Government ID Verified', zohoColumn: 'gov_id_aadhaar', dbColumn: 'gov_id_aadhaar', isJsonbArray: true },
-        { label: '2.4 Government ID Verified — Ration Card', type: 'checkbox', page: 2, section: 2, parentLabel: '2.4 Government ID Verified', zohoColumn: 'gov_id_ration', dbColumn: 'gov_id_ration', isJsonbArray: true },
-        { label: '2.4 Government ID Verified — Driving Licence', type: 'checkbox', page: 2, section: 2, parentLabel: '2.4 Government ID Verified', zohoColumn: 'gov_id_driving', dbColumn: 'gov_id_driving', isJsonbArray: true },
-        { label: '2.4 Government ID Verified — Voter ID', type: 'checkbox', page: 2, section: 2, parentLabel: '2.4 Government ID Verified', zohoColumn: 'gov_id_voter', dbColumn: 'gov_id_voter', isJsonbArray: true },
-        { label: '2.4 Government ID Verified — Other', type: 'checkbox', page: 2, section: 2, parentLabel: '2.4 Government ID Verified', zohoColumn: 'gov_id_other', dbColumn: 'gov_id_other', isJsonbArray: true },
-        { label: '2.4 Government ID Verified — Other (specify)', type: 'specify', page: 2, section: 2, parentOptionLabel: 'Other', parentLabel: '2.4 Government ID Verified', zohoColumn: 'gov_id_other_specify', dbColumn: 'gov_id_other_specify' },
-        { label: '2.5 Family Members', type: 'table_header', page: 2, section: 2, tableHeaderLabel: '2.5 Family Members' },
-      ],
-      tables: [{
-        headerLabel: '2.5 Family Members',
-        columns: [
-          { name: 'Name', type: 'text' },
-          { name: 'Age', type: 'numeric' },
-          { name: 'Education', type: 'text' },
-          { name: 'Occupation', type: 'text' },
-          { name: 'Annual Income', type: 'numeric' },
-        ],
-        rowCount: 5,
-        blankAreaPages: [2],
-      }],
-    },
-    // ... (abbreviated for brevity - full schema would be here)
-  ],
-};
 
 // ============================================================================
 // UTILITY FUNCTIONS

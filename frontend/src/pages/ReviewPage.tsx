@@ -121,9 +121,9 @@ export default function ReviewPage({ jobIds, selectedJobId, onBack, onJobChange,
   const filteredFields = useMemo(() => {
     return fields.filter(f => {
       if (priorityFilter === 'all') return true;
-      const isHigh = f.confidence < 0.7 || f.needs_clarification;
-      const isMedium = f.confidence >= 0.7 && f.confidence < 0.9 && !f.needs_clarification;
-      const isLow = f.confidence >= 0.9 && !f.needs_clarification;
+      const isHigh = f.confidence < 70 || f.needs_clarification;
+      const isMedium = f.confidence >= 70 && f.confidence < 90 && !f.needs_clarification;
+      const isLow = f.confidence >= 90 && !f.needs_clarification;
       
       if (priorityFilter === 'high') return isHigh;
       if (priorityFilter === 'medium') return isMedium;

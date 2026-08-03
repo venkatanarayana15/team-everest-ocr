@@ -84,14 +84,3 @@ export interface JobInfo {
   status: string;
   fields: number | null;
 }
-
-export interface TesseractWord {
-  text: string;
-  page: number;
-  bbox: [number, number, number, number];
-  confidence: number;
-}
-
-export interface TesseractData {
-  pages: Record<string, TesseractWord[]>;
-}

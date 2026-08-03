@@ -667,14 +667,17 @@ FIELD LIST FOR PAGE {page}:
             raw_text_parts: list[str] = []
             markdown_parts: list[str] = []
             clarifications: set[str] = set()
+            failed_pages: list[int] = []
 
             for idx, res in enumerate(results):
                 page = pages[idx]
                 if isinstance(res, Exception):
                     logger.error("Parallel extraction failed for page %d: %s", page, res)
+                    failed_pages.append(page)
                     continue
                 if not res or not res[0]:
                     logger.warning("Parallel extraction returned no data for page %d", page)
+                    failed_pages.append(page)
                     continue
                 data, token_usage = res
                 total_prompt_tokens += token_usage.get("prompt_tokens", 0) or 0
@@ -685,6 +688,10 @@ FIELD LIST FOR PAGE {page}:
                     label = f.get("label")
                     if not label:
                         continue
+                    # Authoritative page attribution: the LLM ran on a single-page
+                    # image; trust the caller's page index over any page number the
+                    # model may emit (or omit) so fields never land on page 1 by default.
+                    f["page"] = page
                     existing = merged_fields.get(label)
                     if not existing:
                         merged_fields[label] = f
@@ -709,6 +716,9 @@ FIELD LIST FOR PAGE {page}:
             merged_data["clarification_needed"] = list(clarifications)
             merged_data["raw_text"] = "\n\n".join(raw_text_parts)
             merged_data["markdown_output"] = "\n\n".join(markdown_parts)
+            if failed_pages:
+                merged_data["failed_pages"] = sorted(failed_pages)
+                logger.warning("Parallel extraction: %d page(s) failed: %s", len(failed_pages), sorted(failed_pages))
 
             coverage, confidence = self._compute_coverage_confidence(merged_data["fields"])
             merged_data["coverage"] = coverage
@@ -1058,7 +1068,7 @@ FIELD LIST BY PAGE:
             ("3.5 Bathroom - Separate", "3.5 Bathroom - Common for Apartment", None),
             ("4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes",
              "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No",
-             "4.3.1 If Yes, list their properties: — Row 1 — Property Description"),
+             "4.3.1 If Yes, list their properties: - Row 1 - Property Description"),
         ]
         fmap = {f.label: f for f in fields}
         for opt_a, opt_b, clue_label in mutual_pairs:
@@ -1111,6 +1121,8 @@ FIELD LIST BY PAGE:
         "4.1 Assets at Home(tick all that apply) - Car",
         "4.1 Assets at Home(tick all that apply) - Smartphone",
         "4.1 Assets at Home(tick all that apply) - Separate Wi-Fi",
+        "4.5 Income Type — Monthly", "4.5 Income Type — Daily",
+        "4.5 Income Type — Weekly", "4.5 Income Type — Ad-Hoc",
         "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — Yes",
         "4.3 Do you own any other assets/properties in the name of grandparents, parents, or student? — No",
     }
@@ -1579,8 +1591,11 @@ FIELD LIST BY PAGE:
 
             pfx_match = re.match(r"^(\d+(?:\.\d+)*)", parent_part)
             pfx = pfx_match.group(1) if pfx_match else ""
-            row_match = re.match(r"^.*?\s*—\s*Row\s+(\d+)", parent_part, re.IGNORECASE)
+            row_match = re.match(r"^.*?\s*[—–-]\s*Row\s+(\d+)", parent_part, re.IGNORECASE)
             start_row = int(row_match.group(1)) if row_match else 1
+            # Strip the trailing " - Row N" so split rows re-number cleanly instead of
+            # producing doubled "… - Row 1 — Row 2" labels.
+            base_parent = re.sub(r"\s*[—–-]\s*Row\s+\d+\s*$", "", parent_part).strip() or parent_part
 
             columns: list[str] = []
             for f in group_fields:
@@ -1619,7 +1634,7 @@ FIELD LIST BY PAGE:
                 parts = parts + [""] * (max_rows - len(parts))
 
                 for row_idx in range(max_rows):
-                    new_label = f"{parent_part} — Row {row_idx + 1} — {column}"
+                    new_label = f"{base_parent} — Row {start_row + row_idx} — {column}"
                     row_val = parts[row_idx]
                     if row_idx == 0:
                         f.label = new_label

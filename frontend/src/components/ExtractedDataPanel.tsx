@@ -951,6 +951,8 @@ function CheckboxGroupView({
     parentField.field_type === 'radio';
 
   // Auto-check the parent "Other/Others" option when a specify child has extracted data.
+  // Re-runs whenever the fields change so late-arriving specify text is picked up;
+  // it is idempotent (already-checked owners are skipped).
   useEffect(() => {
     if (!onBulkFieldUpdate) return;
     const updates: {field: Field, newVal: string}[] = [];
@@ -971,7 +973,7 @@ function CheckboxGroupView({
     if (updates.length > 0) {
       onBulkFieldUpdate(updates);
     }
-  }, []);
+  }, [fields, onBulkFieldUpdate]);
 
   // Derive the option display name from the child label relative to the parent label.
   const parentPrefix = groupLabel;
@@ -1053,6 +1055,10 @@ function CheckboxGroupView({
 
             const fv = (f.value ?? '').trim().toLowerCase();
             const isChecked = fv === 'yes' || fv === 'true' || fv === '✓';
+            // An option holding handwritten free text (e.g. "4.1 … - Others:" = "Pan Card")
+            // is effectively selected — show it checked and render the text next to it.
+            const rawVal = (f.value ?? '').trim();
+            const hasFreeText = rawVal !== '' && !['yes', 'no', 'true', 'false', '✓', '✗', 'n/a', '?'].includes(fv);
             const isItemSel = selectedField?.label === f.label;
 
             const toggleChecked = () => {
@@ -1089,11 +1095,24 @@ function CheckboxGroupView({
                 <input
                   type={isSingleSelect ? 'radio' : 'checkbox'}
                   name={groupLabel}
-                  checked={isChecked}
+                  checked={isChecked || hasFreeText}
                   onChange={() => toggleChecked()}
                   style={{ width: 14, height: 14, margin: 0 }}
                 />
                 {optName}
+                {hasFreeText && (
+                  <span
+                    style={{
+                      fontSize: 13,
+                      color: 'var(--color-primary-dark)',
+                      background: 'var(--color-primary-light)',
+                      padding: '1px 8px',
+                      borderRadius: 10,
+                    }}
+                  >
+                    {rawVal}
+                  </span>
+                )}
               </label>
             );
           })}
@@ -1386,6 +1405,7 @@ export default function ExtractedDataPanel({
         if (isTableHeaderField) {
           flushCheckboxGroup();
           flushTable();
+          consumed.add(f.label);
           continue;
         }
 
@@ -1434,6 +1454,7 @@ export default function ExtractedDataPanel({
         // checkbox children.
         if (schemaFieldType(f.label) === 'table_header') {
           flushTable();
+          consumed.add(f.label);
           continue;
         }
 
@@ -1508,6 +1529,7 @@ export default function ExtractedDataPanel({
               currentCheckboxGroup = { prefix, fields: [] };
             }
             currentCheckboxGroup.fields.push(f);
+            consumed.add(f.label);
             continue;
           }
         }
