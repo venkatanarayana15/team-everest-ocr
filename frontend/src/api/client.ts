@@ -86,6 +86,12 @@ export async function retryJob(jobId: string): Promise<{ job_id: string; status:
   return res.json();
 }
 
+export async function retryBatch(jobId: string): Promise<any> {
+  const res = await fetch(`${API}/retry-batch/${jobId}`, { method: 'POST' });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export async function listPDFs(): Promise<any[]> {
   const res = await fetch(`${API}/pdfs`);
   if (!res.ok) throw new Error('Failed to list PDFs');
@@ -121,6 +127,47 @@ export async function deleteJob(jobId: string): Promise<any> {
   const res = await fetch(`${API}/jobs/${jobId}`, { method: 'DELETE' });
   if (!res.ok) throw new Error('Failed to delete job');
   return res.json();
+}
+
+export async function uploadBatch(files: File[], onProgress?: (progress: number) => void): Promise<any> {
+  const form = new FormData();
+  for (const f of files) {
+    form.append('files', f);
+  }
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable && onProgress) {
+        const progress = Math.round((event.loaded / event.total) * 100);
+        onProgress(progress);
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          resolve(xhr.responseText);
+        }
+      } else {
+        reject(new Error(xhr.responseText || `Upload failed with status ${xhr.status}`));
+      }
+    });
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('Network error during upload'));
+    });
+
+    xhr.addEventListener('abort', () => {
+      reject(new Error('Upload aborted'));
+    });
+
+    xhr.open('POST', `${API}/upload-batch`);
+    xhr.send(form);
+  });
 }
 
 export async function saveToDB(jobId: string, corrections?: {label: string; correct_value: string}[]): Promise<any> {

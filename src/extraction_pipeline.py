@@ -617,20 +617,175 @@ FIELD LIST FOR PAGE {page}:
             return cleaned
 
         # Three-way dispatch:
-        #   6 pages + vision provider → parallel per-page extraction (fast, accurate)
+        #   6 pages + vision provider → parallel grouped per-page extraction.
+        #     Pages are grouped in 2-page chunks → 3 LLM calls instead of 6,
+        #     while keeping per-page focus (better accuracy than a single
+        #     all-pages call). Call count is the primary cost driver on the
+        #     free-tier quota (15 RPM / 500 RPD).
         #   non-6 pages              → sequential all-pages prompt (handles any page count/order)
         #   1 page or text-only      → single prompt
         if num_pages == 6 and self.primary_client.needs_images:
-            logger.info("Starting page-by-page parallel LLM extraction for %d pages...", num_pages)
+            logger.info("Starting grouped page LLM extraction for %d pages...", num_pages)
             pages = sorted(page_images.keys())
-            _page_sem = asyncio.Semaphore(1)
-            async def _extract_page(p: int):
-                async with _page_sem:
-                    single_page_images = {p: page_images[p]}
-                    prompt = build_page_prompt(p)
-                    return await self.primary_client.extract_structured(None, single_page_images, prompt)
+            group_size = int(os.environ.get("PAGE_GROUP_SIZE", "2"))
+            groups = [pages[i:i + group_size] for i in range(0, len(pages), group_size)]
 
-            tasks = [_extract_page(p) for p in pages]
+            # label → page map for authoritative page attribution: a grouped call
+            # spans 2 page images, so the model-emitted page number is not trusted
+            # (it would otherwise default everything to page 1).
+            label_page_map: dict[str, int] = {}
+            for tpl in KNOWN_TEMPLATE_FIELDS:
+                lbl = tpl.get("label")
+                if lbl:
+                    label_page_map[lbl] = tpl.get("page")
+
+            def _label_page(label: str) -> int | None:
+                if label in label_page_map:
+                    return label_page_map[label]
+                # Table rows beyond Row 1 ("… — Row 2 — …") match their header prefix.
+                for lbl, pg in label_page_map.items():
+                    if label.startswith(lbl):
+                        return pg
+                return None
+
+            def sections_for_group(group: list[int]) -> list[dict]:
+                seen: dict[int, dict] = {}
+                for p in group:
+                    for s in sections_on_page.get(p, []):
+                        seen.setdefault(s["number"], s)
+                return sorted(seen.values(), key=lambda s: s["number"])
+
+            def build_group_prompt(group: list[int]) -> str:
+                pages_desc = ", ".join(f"Page {p}" for p in group)
+                combined_field_list = ""
+                handwriting_tips = ""
+                for p in group:
+                    combined_field_list += f"\n--- {sections_guide.get(p, f'Page {p}')} ---\n"
+                    combined_field_list += PAGE_FIELD_MAPPINGS.get(p, "")
+                    handwriting_tips += _page_handwriting_tips(p) + "\n"
+                return f'''You are a trusted form extraction engine for the "I Am The Change — Home Visit Questionnaire".
+You will receive {len(group)} page images ({pages_desc}). Extract ONLY the fields that physically appear on these pages.
+Output ONLY valid JSON. No markdown fences. No explanations. No commentary. ONLY the JSON object.
+
+GROUND RULES:
+1. Extract ONLY the fields listed in the FIELD LIST BY PAGE below. Do NOT output fields from other pages.
+2. The labels in the output JSON MUST EXACTLY match the labels listed below (including their numbers, e.g. "2.3 Is Father/Mother photograph kept at home?", "3.1 House Ownership", "2.5 Family Members — Row 1 — Name"). Do NOT strip the numbers or alter the labels under any circumstances!
+3. value="" for unreadable/blanks. value="N/A" for conditionals when parent="No". Never "null".
+4. Radio → exact allowed option (e.g. "Male", "Yes", "Separate"). Checkbox → "Yes" if a tick/slash is ANYWHERE in the combined option region (box + label text as one unit), "No" if the region has a cross or no mark. NEVER use "✓" or "✗".
+5. Table → count pre-printed rows first. Every cell: "{{Table}} — Row {{n}} — {{Column}}".
+6. Never invent values.
+
+--- MUTUALLY EXCLUSIVE CHECKBOX PAIRS (exactly ONE must be "Yes") ---
+  For 3.1 (Own/Rented), 3.4.1 (Separate/No Separate), 4.3 (Yes/No), 3.5 (Separate/Common):
+  STEP 1: Look at BOTH option regions (box + label text as one unit).
+  STEP 2: Output "Yes" for the option with the tick/slash, "No" for the other.
+  STEP 3: If BOTH marked → pick denser mark as "Yes".
+  STEP 4: If NEITHER clearly marked → context clues: rent filled → Rented=Yes; bedrooms>0 → Separate=Yes; 4.3.1 table filled → Yes=Yes.
+  STEP 5: NEVER output "No" for both. Exactly one "Yes".
+
+--- MULTI-SELECT CHECKBOXES (any subset can be "Yes", others "No") ---
+  For 2.4 (Govt ID), 3.2 (Home Type), 3.3 (Ceiling), 3.6 (Kitchen), 4.1 (Assets):
+  STEP 1: Examine EACH option in its combined region.
+  STEP 2: "Yes" = tick (✓) or slash (/) ANYWHERE. "No" = cross (X) or no mark.
+  STEP 3: Multiple "Yes" allowed.
+  STEP 4: IF ALL OPTIONS ARE "No" — RE-EXAMINE. The form is usually partially filled. Look again for any tick or slash.
+  STEP 5: For "Other(s)" fields, also capture handwritten text.
+
+--- RADIO BUTTONS (exactly ONE selected — output the option TEXT) ---
+  For 1.3, 2.1, 2.3, 4.4, 4.6, 5.1, 6.2, 6.3, 8.2:
+  STEP 1: Find the filled radio circle (●) vs empty circles (○).
+  STEP 2: Output the EXACT option text. NEVER "✓"/"✗".
+  STEP 3: For Yes/No radios (4.4, 4.6, 5.1, 6.3): if both empty → default "No". For 2.3: if both empty → "".
+  STEP 4: For 2.3, also capture free text after the No checkbox as "2.3 Is Father/Mother photograph kept at home? — Notes".
+
+--- CONDITIONAL DEPENDENCIES — hard rule ---
+  Parent field = "No"/"✗" → ALL child fields = "N/A", UNLESS child has visible handwritten text.
+  Dependencies: 3.1.1 rent→3.1 (but scan for text first), 4.3.1→4.3 Yes, 4.4.1→4.4 Yes (extract text even if No), 4.6.1→4.6 Yes, 5.2→5.1 Yes.
+
+--- TABLE FIELDS (count pre-printed rows, fill every cell) ---
+  For 2.5 (Family Members), 4.3.1 (Properties), 4.4.1 (Income Sources), 4.6.1 (Loans):
+  Label = "{{Table label}} — Row {{n}} — {{Column}}". Parent "No" → ALL cells = "N/A".
+
+CORE OUTPUT SCHEMA (keep output compact — do NOT add extra keys):
+{{
+  "sections": {json.dumps(sections_for_group(group))},
+  "fields": [
+    {{
+      "label": string — exact label from FIELD LIST BY PAGE,
+      "value": string — "" | "N/A" | extracted text,
+      "confidence": 0-100,
+      "page": int — the page number the field PHYSICALLY appears on (match the page marker in FIELD LIST BY PAGE),
+      "section": int|null,
+      "needs_clarification": bool,
+      "reason": string|null — ONLY when needs_clarification is true, else omit,
+      "bbox":          [x1, y1, x2, y2] | null,
+      "value_bbox":    [x1, y1, x2, y2] | null
+    }}
+  ],
+  "overall_confidence": 0-100,
+  "clarification_needed": ["label1", ...],
+  "raw_text": "concise transcription of these pages — labels + filled values only"
+}}
+
+SPATIAL GROUNDING — bbox / value_bbox (REQUIRED for every field when visible):
+  You receive {len(group)} page images. A field's bbox coordinates are relative to the page
+  image the field PHYSICALLY appears on (the same page you report in "page"), in NORMALIZED
+  0–1000 coordinates (0 = top/left edge of THAT page image, 1000 = bottom/right edge):
+    • "bbox":       rectangle around the FIELD LABEL (the printed/asked question text).
+    • "value_bbox": rectangle around the FIELD VALUE (the answer — ticked box, filled
+                   text, selected option, or handwritten entry).
+  Format: [x1, y1, x2, y2] with x1<x2 and y1<y2, all integers 0..1000.
+  If a label or value is not visible, use null (include the key as null explicitly).
+  For checkbox groups, value_bbox covers the specific checked box + its option text.
+  For table cells, bbox covers the cell header/label, value_bbox covers the cell content.
+  Tightly bound the text; this is used to draw a highlight on the PDF, so be precise.
+
+FIELD LIST BY PAGE:
+{combined_field_list}
+
+--- HANDWRITING TIPS for text fields on these pages ---
+{handwriting_tips}
+'''
+
+            sections_guide = {
+                1: "Page 1 — Header (null) + Section 1 (Student Profile) + Section 2 (Family Background)",
+                2: "Page 2 — Section 2 (Family Background cont.) + Section 3 (Housing Condition)",
+                3: "Page 3 — Section 3 (Housing Condition cont.) + Section 4 (Financial Background)",
+                4: "Page 4 — Section 4 (Financial Background)",
+                5: "Page 5 — Section 4 (Financial Background cont.) + Section 5 (Health) + Section 6 (Student Commitment)",
+                6: "Page 6 — Section 6 (Student Commitment cont.) + Section 7 (Scholarship) + Section 8 (Volunteer Observation)",
+            }
+            sections_on_page = {
+                1: [{"number": 1, "name": "Student Profile", "page": 1}, {"number": 2, "name": "Family Background", "page": 1}],
+                2: [{"number": 2, "name": "Family Background", "page": 2}, {"number": 3, "name": "Housing Condition", "page": 2}],
+                3: [{"number": 3, "name": "Housing Condition", "page": 3}, {"number": 4, "name": "Financial Background", "page": 3}],
+                4: [{"number": 4, "name": "Financial Background", "page": 4}],
+                5: [{"number": 4, "name": "Financial Background", "page": 5}, {"number": 5, "name": "Health Information", "page": 5}, {"number": 6, "name": "Student Commitment", "page": 5}],
+                6: [{"number": 6, "name": "Student Commitment", "page": 6}, {"number": 7, "name": "Scholarship Information", "page": 6}, {"number": 8, "name": "Volunteer Observation", "page": 6}],
+            }
+
+            async def _extract_group(group: list[int]):
+                group_images = {p: page_images[p] for p in group}
+                prompt = build_group_prompt(group)
+                for attempt in (1, 2):
+                    try:
+                        res = await self.primary_client.extract_structured(None, group_images, prompt)
+                        if res and res[0]:
+                            return res
+                    except Exception as e:
+                        error_type = type(e).__name__
+                        error_msg = str(e) if str(e) else repr(e)
+                        # Log full exception details for debugging
+                        logger.warning("Group extraction attempt %d/%d failed for pages %s: [%s] %s",
+                                       attempt, 2, group, error_type, error_msg[:300])
+                        # Also log the full exception with traceback for debugging
+                        logger.debug("Full exception details:", exc_info=True)
+                        continue
+                    if attempt == 1:
+                        logger.warning("Group extraction returned no data for pages %s — retrying once", group)
+                return None
+
+            tasks = [_extract_group(g) for g in groups]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             section_names = {
@@ -670,14 +825,14 @@ FIELD LIST FOR PAGE {page}:
             failed_pages: list[int] = []
 
             for idx, res in enumerate(results):
-                page = pages[idx]
+                group = groups[idx]
                 if isinstance(res, Exception):
-                    logger.error("Parallel extraction failed for page %d: %s", page, res)
-                    failed_pages.append(page)
+                    logger.error("Grouped extraction failed for pages %s: %s", group, res)
+                    failed_pages.extend(group)
                     continue
                 if not res or not res[0]:
-                    logger.warning("Parallel extraction returned no data for page %d", page)
-                    failed_pages.append(page)
+                    logger.warning("Grouped extraction returned no data for pages %s", group)
+                    failed_pages.extend(group)
                     continue
                 data, token_usage = res
                 total_prompt_tokens += token_usage.get("prompt_tokens", 0) or 0
@@ -688,10 +843,10 @@ FIELD LIST FOR PAGE {page}:
                     label = f.get("label")
                     if not label:
                         continue
-                    # Authoritative page attribution: the LLM ran on a single-page
-                    # image; trust the caller's page index over any page number the
-                    # model may emit (or omit) so fields never land on page 1 by default.
-                    f["page"] = page
+                    # Authoritative page attribution: a grouped call spans 2 pages,
+                    # so trust the label→page map over any page number the model
+                    # emits (or omits) so fields never land on page 1 by default.
+                    f["page"] = _label_page(label) or int(f.get("page") or 0) or group[0]
                     existing = merged_fields.get(label)
                     if not existing:
                         merged_fields[label] = f
@@ -1698,13 +1853,13 @@ FIELD LIST BY PAGE:
         all_no_groups = ExtractionPipeline._find_all_no_groups(fields)
         field_map = {f.label: f for f in fields}
 
-        for group in all_no_groups:
+        async def _check_group(group):
             pages = sorted({f.page for f in group if f.page})
             if not pages:
-                continue
+                return
             group_pages = {p: processed_images[p] for p in pages if p in processed_images}
             if not group_pages:
-                continue
+                return
             group_prefix = group[0].label.split("—")[0].strip() if "—" in group[0].label else group[0].label[:4]
             field_list = "\n".join(f"  - {f.label}" for f in group)
             prompt = (
@@ -1734,6 +1889,8 @@ FIELD LIST BY PAGE:
                                 f.reason = "Corrected by LLM re-check"
             except Exception as e:
                 logger.warning("Re-check failed for group on page(s) %s: %s", pages, e)
+
+        await asyncio.gather(*[_check_group(g) for g in all_no_groups])
 
         return fields
 
@@ -1769,7 +1926,8 @@ FIELD LIST BY PAGE:
     def _needs_refinement(field: StructuredField) -> bool:
         if field.needs_clarification:
             return True
-        if field.confidence < 50:
+        threshold = int(os.environ.get("REFINEMENT_MIN_CONFIDENCE", "50"))
+        if field.confidence < threshold:
             return True
         return False
 

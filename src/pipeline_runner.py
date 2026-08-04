@@ -16,9 +16,20 @@ from src.page_classifier import PageClassifier
 from src.status import (
     _set_status, _save_checkpoint, _load_checkpoint, _cleanup_intermediate,
     _get_status, _progress_store, _progress_lock, _render_markdown, _format_job_datetime,
+    _set_job_log_ctx, _reset_job_log_ctx,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _run_with_log_ctx(job_dir: Path, fn, *args):
+    """Run fn in a worker thread while tagging logs with job_dir so the per-job
+    FileHandler filter captures them (contextvars don't cross into threads)."""
+    _set_job_log_ctx(job_dir)
+    try:
+        return fn(*args)
+    finally:
+        _reset_job_log_ctx()
 
 # Global semaphore limiting concurrent PDF page rendering (CPU-bound, prevents thrash)
 _RENDER_SEMAPHORE = asyncio.Semaphore(
@@ -26,6 +37,31 @@ _RENDER_SEMAPHORE = asyncio.Semaphore(
 )
 
 _COMBINE_PAGES = os.environ.get("COMBINE_PAGES", "false").lower() in ("1", "true", "yes")
+
+# Fire-and-forget background tasks (Zoho writeback, etc.). Kept in a module-level
+# set so the tasks don't get garbage collected; cleaned periodically.
+_BACKGROUND_TASKS: list[asyncio.Task] = []
+
+
+def _spawn_background(coro) -> asyncio.Task:
+    """Schedule a fire-and-forget task and keep a strong ref so it isn't GC'd."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.append(task)
+    task.add_done_callback(lambda _t: _BACKGROUND_TASKS.remove(task) if task in _BACKGROUND_TASKS else None)
+    return task
+
+
+async def _cleanup_background_tasks() -> None:
+    """Drop references to finished background tasks (called by server periodically)."""
+    done = [t for t in _BACKGROUND_TASKS if t.done()]
+    for t in done:
+        if not t.cancelled():
+            exc = t.exception()
+            if exc:
+                logger.warning("Background task raised: %s", exc)
+        _BACKGROUND_TASKS.remove(t)
+    if len(_BACKGROUND_TASKS) > 200:
+        logger.warning("Background task backlog large: %d", len(_BACKGROUND_TASKS))
 
 
 def _cleanup_pdf_job_dir(pdf_job_dir: Path) -> None:
@@ -93,7 +129,7 @@ async def _set_batch_pdf_status(job_dir: Path, pdf_name: str, status: str, pct: 
                 log.append({"t": datetime.now().strftime("%H:%M:%S"), "msg": f"[{pdf_name}] {message}"})
 
             data = {
-                "status": "processing",
+                "status": status,
                 "message": f"Processing {pdf_name}: {message}" if message else existing.get("message", ""),
                 "log": log,
                 "pages": existing.get("pages", 0),
@@ -458,7 +494,7 @@ async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
             if pipeline.primary_client.needs_images:
                 await _set_status(job_dir, "preprocessing", f"Preprocessing PDF ({pdf_name})...")
                 loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, pipeline.preprocess, pdf_path, str(job_dir))
+                await loop.run_in_executor(None, _run_with_log_ctx, job_dir, pipeline.preprocess, pdf_path, str(job_dir))
                 processed_images = _ensure_page_images(job_dir / "pages")
                 if not processed_images:
                     logger.warning("Preprocessing produced 0 page images — Gemini will receive the raw PDF")
@@ -487,9 +523,9 @@ async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
         res["pdf_names"] = [pdf_name]
 
         await _set_status(job_dir, "saving_results", "Saving results...")
-        await asyncio.to_thread(_save_results, job_dir, res, job_dir.name)
-        await asyncio.to_thread(_print_field_report, job_dir, res)
-        await asyncio.to_thread(_log_field_data, job_dir, res)
+        await asyncio.to_thread(_run_with_log_ctx, job_dir, _save_results, job_dir, res, job_dir.name)
+        await asyncio.to_thread(_run_with_log_ctx, job_dir, _print_field_report, job_dir, res)
+        await asyncio.to_thread(_run_with_log_ctx, job_dir, _log_field_data, job_dir, res)
 
         # If the LLM produced no data at all, surface it as an error so the
         # user can retry — never pretend a fully-empty extraction succeeded.
@@ -518,6 +554,7 @@ async def run_pipeline(job_dir: Path, pdf_path: str) -> None:
         print(f"\033[91m\033[1m└{'─'*78}┘\033[0m\n")
     finally:
         _cleanup_intermediate(job_dir)
+        _progress_store.pop(job_dir.name, None)
 
 
 async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
@@ -529,6 +566,15 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         primary_name = type(primary).__name__.replace("Client", "")
 
         await _set_status(job_dir, "preprocessing", f"Batch: processing {len(pdfs_info)} PDFs...")
+
+        # Fetch the Zoho access token once for the whole batch and share it with
+        # each per-PDF fire-and-forget writeback (avoids N serialized token fetches).
+        shared_zoho_token = None
+        try:
+            from src.zoho_integration import _get_zoho_access_token
+            shared_zoho_token = await asyncio.to_thread(_get_zoho_access_token)
+        except Exception as _tok_err:
+            logger.debug("Batch Zoho token prefetch failed (will fetch per item): %s", _tok_err)
 
         all_results: list[dict] = []
 
@@ -548,6 +594,16 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                     idx, pdf_info = queue.get_nowait()
                 except asyncio.QueueEmpty:
                     break
+
+                pdf_t0 = time.time()
+
+                # Check circuit breaker before processing each PDF
+                from src.model_client import _circuit_breaker
+                if not _circuit_breaker.can_execute():
+                    logger.warning("Circuit breaker OPEN — skipping remaining PDFs in batch %s", job_dir.name)
+                    all_results.append({"name": Path(pdf_info["path"]).name, "error": "Circuit breaker OPEN: too many consecutive failures"})
+                    queue.task_done()
+                    continue
 
                 pdf_name = Path(pdf_info["path"]).name
                 pdf_job_dir = job_dir / str(idx)
@@ -581,7 +637,7 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                         processed_images = {p_num: str(pages_dir / f"page_{p_num}.png") for p_num in image_paths}
                         # Need to run preprocess_images for deskew/denoise
                         async with _RENDER_SEMAPHORE:
-                            processed = await asyncio.to_thread(pipeline.preprocess_images, image_paths, str(pdf_job_dir))
+                            processed = await asyncio.to_thread(_run_with_log_ctx, job_dir, pipeline.preprocess_images, image_paths, str(pdf_job_dir))
                         processed_images = _ensure_page_images(pdf_job_dir / "pages")
                         pdf_path_for_extraction = ""
                     else:
@@ -594,7 +650,7 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
 
                         if pipeline.primary_client.needs_images:
                             async with _RENDER_SEMAPHORE:
-                                await asyncio.to_thread(pipeline.preprocess, pdf_info["path"], str(pdf_job_dir))
+                                await asyncio.to_thread(_run_with_log_ctx, job_dir, pipeline.preprocess, pdf_info["path"], str(pdf_job_dir))
                             await _set_batch_pdf_status(job_dir, pdf_name, "preprocessing", 20, f"Preprocessed ({idx+1}/{len(pdfs_info)})")
                             processed_images = _ensure_page_images(pdf_job_dir / "pages")
                         else:
@@ -605,6 +661,10 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                     async def batch_status_func(stage, msg, _pdf_name=pdf_name, _idx=idx):
                         pct = 40 if stage == "primary_extraction" else (70 if stage == "secondary_verification" else 85)
                         await _set_batch_pdf_status(job_dir, _pdf_name, stage, pct, f"{msg} ({_idx+1}/{len(pdfs_info)})")
+
+                    # Emit waiting status before LLM calls so frontend sees progress during queue/rate-limit waits
+                    await _set_batch_pdf_status(job_dir, pdf_name, "waiting_for_llm", 30,
+                        f"Waiting for LLM slot ({idx+1}/{len(pdfs_info)})")
 
                     res = await _run_core_extraction(
                         job_dir=pdf_job_dir,
@@ -617,24 +677,57 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                     )
                     res["pdf_name"] = pdf_name
                     res["input_type"] = "batch_" + input_type
-                    res["processing_time"] = round(time.time() - t0, 2)
+                    res["processing_time"] = round(time.time() - pdf_t0, 2)
 
                 
 
                     if "zoho_req" in pdf_info:
                         from src.zoho_integration import run_zoho_writeback_for_batch_item
-                        await run_zoho_writeback_for_batch_item(job_dir, Path(pdf_info["path"]), pdf_info["zoho_req"], res, input_info)
+                        _spawn_background(run_zoho_writeback_for_batch_item(
+                            job_dir, Path(pdf_info["path"]), pdf_info["zoho_req"], res, input_info,
+                            access_token=shared_zoho_token,
+                        ))
 
-                    await asyncio.to_thread(_print_field_report, pdf_job_dir, res, pdf_name)
-                    await asyncio.to_thread(_log_field_data, pdf_job_dir, res, pdf_name)
+                    await asyncio.to_thread(_run_with_log_ctx, job_dir, _print_field_report, pdf_job_dir, res, pdf_name)
+                    await asyncio.to_thread(_run_with_log_ctx, job_dir, _log_field_data, pdf_job_dir, res, pdf_name)
 
                     all_results.append(res)
+
+                    if res.get("fields"):
+                        try:
+                            from src.database import upsert_ocr_document as _pdf_upsert
+                            _pdf_doc_id = await _pdf_upsert(
+                                job_id=f"{job_dir.name}_{idx}",
+                                file_name=pdf_name,
+                                status="done",
+                                processing_time=res.get("processing_time"),
+                                confidence_score=res.get("overall_confidence"),
+                                result_json=res,
+                            )
+                            if _pdf_doc_id:
+                                logger.info("  ✅ Per-PDF DB save: job=%s_%s row=%s fields=%d",
+                                    job_dir.name, idx, _pdf_doc_id, len(res.get("fields", [])))
+                            else:
+                                logger.warning("  ❌ Per-PDF DB save failed (empty id) for %s", pdf_name)
+                        except Exception as _db_err:
+                            logger.warning("  ❌ Per-PDF DB save failed for %s: %s", pdf_name, _db_err)
+
                     await _set_batch_pdf_status(job_dir, pdf_name, "done", 100, f"Done ({idx+1}/{len(pdfs_info)})")
                 except Exception as e:
                     _stage = _progress_store.get(job_dir.name, {}).get("status", "unknown")
                     logger.exception("Batch item failed at stage=%s | pdf=%s", _stage, pdf_name)
                     await _set_batch_pdf_status(job_dir, pdf_name, "error", 100, str(e))
                     all_results.append({"name": pdf_name, "error": f"[stage={_stage}] {e}"})
+                    try:
+                        from src.database import upsert_ocr_document as _err_upsert
+                        await _err_upsert(
+                            job_id=f"{job_dir.name}_{idx}",
+                            file_name=pdf_name,
+                            status="error",
+                            result_json={"error": str(e), "stage": _stage},
+                        )
+                    except Exception as _db_err:
+                        logger.debug("Failed to persist per-PDF error row: %s", _db_err)
 
                 queue.task_done()
 
@@ -645,7 +738,23 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
 
         # Run up to N PDFs concurrently (configurable, default 5)
         max_batch_conc = int(os.environ.get("BATCH_MAX_CONCURRENCY", "2"))
+        # In high-throughput mode, allow enough workers that the LLM rate limiter
+        # (global token bucket) is the only throttle; idle workers loop back to
+        # the queue and grab the next PDF the moment another one finishes.
+        if os.environ.get("BATCH_HIGH_THROUGHPUT", "false").lower() in ("1", "true", "yes"):
+            max_batch_conc = max(max_batch_conc, int(os.environ.get("BATCH_HIGH_THROUGHPUT_WORKERS", "8")))
         num_workers = min(max_batch_conc, len(pdfs_info))
+        
+        # Warn if batch concurrency exceeds rate limit capacity
+        gemini_rpm = int(os.environ.get("GEMINI_RATE_LIMIT_RPM", "14"))
+        gemini_conc = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "6"))
+        if num_workers > gemini_conc:
+            logger.warning(
+                "Batch concurrency (%d) exceeds Gemini max concurrency (%d). "
+                "Workers will be rate-limited. Consider reducing BATCH_HIGH_THROUGHPUT_WORKERS to %d.",
+                num_workers, gemini_conc, gemini_conc
+            )
+        
         workers = [asyncio.create_task(batch_worker()) for _ in range(num_workers)]
         await asyncio.gather(*workers)
 
@@ -669,29 +778,6 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         with open(results_dir / "result.json", "w") as f:
             json.dump(combined, f, indent=2)
 
-        # Save each individual PDF's full result to DB using the batch job_id prefix
-        # so the row is discoverable under the batch job rather than subdirectory "0"/"1".
-        from src.database import upsert_ocr_document as _batch_upsert
-        for submission_idx, r in enumerate(ordered_results):
-            if "error" in r or not r.get("fields"):
-                continue
-            pdf_result = r.copy()
-            pdf_result["processing_time"] = combined.get("processing_time", 0)
-            pdf_name_val = r.get("pdf_name", r.get("name", "?"))
-            doc_id = await _batch_upsert(
-                job_id=f"{job_dir.name}_{submission_idx}",
-                file_name=pdf_name_val,
-                status="done",
-                processing_time=pdf_result.get("processing_time"),
-                confidence_score=pdf_result.get("overall_confidence"),
-                result_json=pdf_result,
-            )
-            if doc_id:
-                logger.info("  ✅ Batch-level DB save: job=%s_%s row=%s fields=%d", job_dir.name, submission_idx, doc_id, len(pdf_result.get('fields',[])))
-            else:
-                logger.warning("  ❌ Batch-level DB save failed for %s", r.get('pdf_name','?'))
-
-        _progress_store.pop(job_dir.name, None)
         success = sum(1 for r in all_results if 'error' not in r)
         failed = len(pdfs_info) - success
         logger.info("BATCH REPORT: %d files processed", len(pdfs_info))
@@ -716,6 +802,7 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         logger.exception("Batch pipeline failed")
         await _set_status(job_dir, "error", f"Batch pipeline failed: {e}")
     finally:
+        _progress_store.pop(job_dir.name, None)
         _cleanup_intermediate(job_dir)
 
 
@@ -751,9 +838,9 @@ async def run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None
         res["pdf_names"] = [image_name]
 
         await _set_status(job_dir, "saving_results", "Saving results...")
-        await asyncio.to_thread(_save_results, job_dir, res, job_dir.name)
-        await asyncio.to_thread(_print_field_report, job_dir, res)
-        await asyncio.to_thread(_log_field_data, job_dir, res)
+        await asyncio.to_thread(_run_with_log_ctx, job_dir, _save_results, job_dir, res, job_dir.name)
+        await asyncio.to_thread(_run_with_log_ctx, job_dir, _print_field_report, job_dir, res)
+        await asyncio.to_thread(_run_with_log_ctx, job_dir, _log_field_data, job_dir, res)
         _db_ok = await _save_to_db(job_dir)
         if not _db_ok:
             logger.error("Image pipeline DB save failed | job=%s", job_dir.name)
@@ -763,6 +850,7 @@ async def run_image_pipeline(job_dir: Path, image_paths: dict[int, str]) -> None
         await _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
     finally:
         _cleanup_intermediate(job_dir)
+        _progress_store.pop(job_dir.name, None)
 
 
 async def run_image_pipeline_from_zip(job_dir: Path, image_paths: list[str]) -> None:
@@ -813,6 +901,7 @@ async def run_image_pipeline_from_zip(job_dir: Path, image_paths: list[str]) -> 
         await _set_status(job_dir, "error", f"{type(e).__name__}: {e}")
     finally:
         _cleanup_intermediate(job_dir)
+        _progress_store.pop(job_dir.name, None)
 
 
 KNOWN_SECTIONS: list[dict] = [

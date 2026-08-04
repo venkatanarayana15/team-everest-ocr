@@ -1,7 +1,8 @@
-import React from 'react';
+import { Component, ReactNode } from 'react';
 
 interface Props {
-  children: React.ReactNode;
+  children: ReactNode;
+  fallback?: ReactNode;
 }
 
 interface State {
@@ -9,49 +10,59 @@ interface State {
   error: Error | null;
 }
 
-export default class ErrorBoundary extends React.Component<Props, State> {
-  state: State = { hasError: false, error: null };
+export class ErrorBoundary extends Component<Props, State> {
+  constructor(props: Props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
 
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('[ErrorBoundary]', error, info);
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('ErrorBoundary caught an error:', error, errorInfo);
   }
 
   render() {
     if (this.state.hasError) {
+      if (this.props.fallback) {
+        return this.props.fallback;
+      }
       return (
         <div style={{
-          padding: 24, fontFamily: 'var(--font-sans)',
-          background: 'var(--color-danger-light)', border: '1px solid var(--color-danger-border)',
-          borderRadius: 'var(--radius-lg)', margin: 16,
+          padding: 24,
+          textAlign: 'center',
+          color: 'var(--color-text)',
+          background: 'var(--color-surface)',
+          borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--color-danger)',
         }}>
-          <h2 style={{ color: 'var(--color-danger)', margin: '0 0 8px 0', fontSize: 16 }}>
-            Render Error
-          </h2>
-          <pre style={{
-            fontSize: 12, color: 'var(--color-danger-dark)', whiteSpace: 'pre-wrap',
-            background: 'var(--color-surface)', padding: 12, borderRadius: 'var(--radius-sm)',
-            border: '1px solid var(--color-danger-border)',
-          }}>
-            {this.state.error?.message}
-            {'\n'}
-            {this.state.error?.stack}
-          </pre>
-          <button onClick={() => this.setState({ hasError: false, error: null })}
+          <h3 style={{ margin: '0 0 8px', color: 'var(--color-danger)' }}>
+            Something went wrong
+          </h3>
+          <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--color-text-secondary)' }}>
+            {this.state.error?.message || 'An unexpected error occurred'}
+          </p>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
             style={{
-              marginTop: 8, padding: '6px 14px',
-              border: 'none', borderRadius: 'var(--radius-md)',
-              background: 'var(--color-danger)', color: '#fff', cursor: 'pointer',
+              padding: '8px 16px',
+              fontSize: 13,
               fontWeight: 600,
-            }}>
-            Retry
+              border: 'none',
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--color-primary)',
+              color: '#fff',
+              cursor: 'pointer',
+            }}
+          >
+            Try Again
           </button>
         </div>
       );
     }
+
     return this.props.children;
   }
 }

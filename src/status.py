@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import json
 import logging
 import os
@@ -24,6 +25,59 @@ def _status_write_lock(path: Path) -> threading.Lock:
     with _status_locks_lock:
         return _status_locks.setdefault(path_str, threading.Lock())
 
+# ─── Per-Job Logging ──────────────────────────────────────────────
+# Attaches a FileHandler writing to <job_dir>/result.logs so the UI's
+# GET /logs/{job_id} can show the full terminal-style pipeline logs per
+# job/folder. A contextvar + logging.Filter keeps concurrent jobs from
+# interleaving into each other's result.logs.
+
+_JOB_LOG_CTX: contextvars.ContextVar = contextvars.ContextVar("job_log_ctx", default=None)
+
+
+class _JobLogFilter(logging.Filter):
+    def __init__(self, job_dir: Path):
+        super().__init__()
+        self.job_dir = job_dir
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        ctx = _JOB_LOG_CTX.get()
+        return ctx is not None and ctx == self.job_dir
+
+
+def _set_job_log_ctx(job_dir: Path) -> None:
+    _JOB_LOG_CTX.set(job_dir)
+
+
+def _reset_job_log_ctx() -> None:
+    _JOB_LOG_CTX.set(None)
+
+
+def _attach_log_file(job_dir: Path) -> None:
+    """Attach a filtered FileHandler writing to <job_dir>/result.logs."""
+    log_path = job_dir / "result.logs"
+    root_logger = logging.getLogger()
+    for h in root_logger.handlers:
+        if isinstance(h, logging.FileHandler) and h.baseFilename == str(log_path):
+            return
+    _fh = logging.FileHandler(str(log_path), mode="w")
+    _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    _fh.addFilter(_JobLogFilter(job_dir))
+    root_logger.addHandler(_fh)
+
+
+def _detach_log_file(job_dir: Path) -> None:
+    """Remove and close the FileHandler for this job, if attached."""
+    log_path = job_dir / "result.logs"
+    root_logger = logging.getLogger()
+    for h in list(root_logger.handlers):
+        if isinstance(h, logging.FileHandler) and h.baseFilename == str(log_path):
+            try:
+                h.close()
+            except Exception:
+                pass
+            root_logger.removeHandler(h)
+            return
+
 # ─── Status & Progress Tracking ───────────────────────────────────
 
 STAGE_PROGRESS: dict[str, int] = {
@@ -34,6 +88,8 @@ STAGE_PROGRESS: dict[str, int] = {
     "converting": 18,
     "supabase_upload": 25,
     "pipeline_start": 30,
+    "waiting_for_llm": 32,
+    "processing": 40,
     "preprocessing": 35,
     "primary_extraction": 55,
     "field_mapping": 70,

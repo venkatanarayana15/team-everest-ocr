@@ -12,7 +12,8 @@ __pycache__/
 *.code-workspace
 *.code-workspace
 __pycache__/
-*.code-workspace
 .graphifyignore
 graphify-out/cost.json
 graphify-out/cache/
+frontend/dist
+frontend/node_modules

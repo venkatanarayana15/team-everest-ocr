@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import ErrorBoundary from './components/ErrorBoundary';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import DashboardPage from './pages/DashboardPage';
 import ReviewPage from './pages/ReviewPage';
 import FolderReviewPage from './pages/FolderReviewPage';

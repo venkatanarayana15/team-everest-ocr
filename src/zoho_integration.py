@@ -16,7 +16,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-from src.status import _set_status, _get_status
+from src.status import _set_status, _get_status, _attach_log_file, _detach_log_file, _set_job_log_ctx, _reset_job_log_ctx
 from src.pipeline_runner import run_pipeline, _print_field_report
 
 logger = logging.getLogger(__name__)
@@ -132,6 +132,10 @@ def _get_zoho_access_token() -> str:
         return result["access_token"]
 
 
+_TOKEN_REFRESH_STARTED = False
+_TOKEN_REFRESH_LOCK = threading.Lock()
+
+
 async def _start_periodic_token_refresh() -> None:
     """Background task: refresh Zoho OAuth token every 58 minutes.
 
@@ -139,6 +143,11 @@ async def _start_periodic_token_refresh() -> None:
     (58 min) to stay well within the window and avoid HTTP 400 errors from
     stale tokens on concurrent requests.
     """
+    global _TOKEN_REFRESH_STARTED
+    with _TOKEN_REFRESH_LOCK:
+        if _TOKEN_REFRESH_STARTED:
+            return
+        _TOKEN_REFRESH_STARTED = True
     loop = asyncio.get_running_loop()
     while True:
         try:
@@ -1455,6 +1464,7 @@ async def process_pending_on_startup(base_dir: Path) -> None:
     batch_job_dir = base_dir / batch_job_id
     batch_job_dir.mkdir(parents=True, exist_ok=True)
     (batch_job_dir / "original_name.txt").write_text(f"Startup Poll Batch ({total_eligible} records)")
+    _attach_log_file(batch_job_dir)
     await _set_status(batch_job_dir, "queued", f"Auto-processing {total_eligible} records...")
 
     # Download in parallel
@@ -1507,16 +1517,22 @@ async def process_pending_on_startup(base_dir: Path) -> None:
 
     # Trigger batch pipeline
     print(f"  Starting batch pipeline run for {len(pdfs_info)} record(s)...\n")
+    (batch_job_dir / "pdfs_info.json").write_text(json.dumps(pdfs_info))
     from src.pipeline_runner import run_batch_pdfs_pipeline
-    await run_batch_pdfs_pipeline(batch_job_dir, pdfs_info)
+    _set_job_log_ctx(batch_job_dir)
+    try:
+        await run_batch_pdfs_pipeline(batch_job_dir, pdfs_info)
 
-    print(f"\n{'='*70}")
-    print(f"  STARTUP AUTO-PROCESSOR — COMPLETE")
-    print(f"{'─'*70}")
-    print(f"  Single Batch Job ID: {batch_job_id}")
-    print(f"  Total processed:     {len(pdfs_info)}")
-    print(f"{'='*70}\n")
-    logger.info("STARTUP: batch process complete | job=%s", batch_job_id)
+        print(f"\n{'='*70}")
+        print(f"  STARTUP AUTO-PROCESSOR — COMPLETE")
+        print(f"{'─'*70}")
+        print(f"  Single Batch Job ID: {batch_job_id}")
+        print(f"  Total processed:     {len(pdfs_info)}")
+        print(f"{'='*70}\n")
+        logger.info("STARTUP: batch process complete | job=%s", batch_job_id)
+    finally:
+        _reset_job_log_ctx()
+        _detach_log_file(batch_job_dir)
 
 
 async def _process_pending_from_local(base_dir: Path, csv_path: Path, pdf_dir: Path) -> None:
@@ -1643,31 +1659,34 @@ async def _process_pending_from_local(base_dir: Path, csv_path: Path, pdf_dir: P
     (batch_job_dir / "original_name.txt").write_text(f"Local Batch ({total_eligible} records)")
 
     # Setup file logging to capture structured terminal output
-    log_path = batch_job_dir / "result.logs"
-    root_logger = logging.getLogger()
-    # Avoid duplicate file handlers across calls
-    if not any(isinstance(h, logging.FileHandler) and h.baseFilename == str(log_path) for h in root_logger.handlers):
-        _fh = logging.FileHandler(str(log_path), mode="w")
-        _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        root_logger.addHandler(_fh)
-    logger.info("Batch logging to %s", log_path)
+    _attach_log_file(batch_job_dir)
 
     print(f"  Starting batch pipeline run for {total_eligible} file(s)...\n")
     await _set_status(batch_job_dir, "queued", f"Processing {total_eligible} files...")
+    (batch_job_dir / "pdfs_info.json").write_text(json.dumps(pdfs_info))
     from src.pipeline_runner import run_batch_pdfs_pipeline
-    await run_batch_pdfs_pipeline(batch_job_dir, pdfs_info)
+    _set_job_log_ctx(batch_job_dir)
+    try:
+        await run_batch_pdfs_pipeline(batch_job_dir, pdfs_info)
 
-    logger.info("LOCAL BATCH COMPLETE | job=%s | files=%d", batch_job_id, total_eligible)
-    logger.info("%s", "=" * 70)
-    logger.info("  LOCAL BATCH — COMPLETE")
-    logger.info("%s", "─" * 70)
-    logger.info("  Batch Job ID: %s", batch_job_id)
-    logger.info("  Total processed: %d", total_eligible)
-    logger.info("%s", "=" * 70)
+        logger.info("LOCAL BATCH COMPLETE | job=%s | files=%d", batch_job_id, total_eligible)
+        logger.info("%s", "=" * 70)
+        logger.info("  LOCAL BATCH — COMPLETE")
+        logger.info("%s", "─" * 70)
+        logger.info("  Batch Job ID: %s", batch_job_id)
+        logger.info("  Total processed: %d", total_eligible)
+        logger.info("%s", "=" * 70)
+    finally:
+        _reset_job_log_ctx()
+        _detach_log_file(batch_job_dir)
 
 
-async def run_zoho_writeback_for_batch_item(job_dir: Path, pdf_path: Path, zoho_req_dict: dict, ocr_result: dict, input_info: dict | None = None) -> None:
-    """Invoked inside the pipeline runner after each PDF in a startup batch completes extraction."""
+async def run_zoho_writeback_for_batch_item(job_dir: Path, pdf_path: Path, zoho_req_dict: dict, ocr_result: dict, input_info: dict | None = None, access_token: str | None = None) -> None:
+    """Invoked after each PDF in a batch completes extraction (fire-and-forget).
+
+    ``access_token`` may be shared across the whole batch; when omitted a fresh
+    token is fetched (cached internally by ``_get_zoho_access_token``).
+    """
     import asyncio
     req = OcrExtractRequest(
         record_id=zoho_req_dict["record_id"],
@@ -1681,11 +1700,12 @@ async def run_zoho_writeback_for_batch_item(job_dir: Path, pdf_path: Path, zoho_
     )
 
     loop = asyncio.get_running_loop()
-    try:
-        access_token = await loop.run_in_executor(None, _get_zoho_access_token)
-    except Exception as e:
-        logger.error("Failed to obtain Zoho access token for batch item write-back: %s", e)
-        return
+    if not access_token:
+        try:
+            access_token = await loop.run_in_executor(None, _get_zoho_access_token)
+        except Exception as e:
+            logger.error("Failed to obtain Zoho access token for batch item write-back: %s", e)
+            return
 
     rid = req.record_id
     app_id = req.application_id or ""

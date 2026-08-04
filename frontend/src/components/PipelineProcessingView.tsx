@@ -28,10 +28,16 @@ interface Props {
 
 const STAGES = [
   { key: 'queued',                 label: 'Uploaded',              icon: '📋' },
+  { key: 'waiting_for_llm',        label: 'Waiting for LLM',       icon: '⏳' },
+  { key: 'processing',             label: 'Processing',            icon: '⚙️' },
   { key: 'preprocessing',          label: 'Preprocessing',         icon: '🖼️' },
   { key: 'primary_extraction',     label: 'Primary Extraction',    icon: '🤖' },
   { key: 'field_mapping',          label: 'Field Mapping',         icon: '🗺️' },
   { key: 'secondary_verification', label: 'Verification',          icon: '✅' },
+  { key: 'template_fill',          label: 'Template Fill',         icon: '📝' },
+  { key: 'recheck_checkboxes',     label: 'Re-checking',           icon: '🔁' },
+  { key: 'text_refinement',        label: 'Refining Text',         icon: '🔎' },
+  { key: 'saving_results',         label: 'Saving',                icon: '💾' },
   { key: 'done',                   label: 'Complete',              icon: '🎉' },
 ];
 
@@ -52,12 +58,20 @@ function ProgressBar({ value, color }: { value: number; color?: string }) {
 
 const STAGE_MAPPING: Record<string, string> = {
   queued: 'queued',
+  waiting_for_llm: 'waiting_for_llm',
+  waiting_for_rate_limit: 'waiting_for_llm',
+  waiting_for_semaphore: 'waiting_for_llm',
+  processing: 'processing',
   preprocessing: 'preprocessing',
   primary_extraction: 'primary_extraction',
   extracting: 'primary_extraction',
   field_mapping: 'field_mapping',
   secondary_verification: 'secondary_verification',
-  template_fill: 'secondary_verification',
+  template_fill: 'template_fill',
+  recheck_checkboxes: 'recheck_checkboxes',
+  text_refinement: 'text_refinement',
+  gemini_post_process: 'text_refinement',
+  saving_results: 'saving_results',
   done: 'done',
 };
 
@@ -413,7 +427,7 @@ export default function PipelineProcessingView({
                 {logs.length} entries
               </span>
             </div>
-            <LogViewer logs={logs} autoScroll height="100%" emptyText="No logs yet — full extraction log loads when processing completes." />
+            <LogViewer logs={logs} autoScroll height="100%" emptyText="Streaming pipeline logs will appear here as files process…" />
           </div>
           {/* Action Buttons */}
           {(status === 'error' || status === 'done' || status === 'incomplete') && (

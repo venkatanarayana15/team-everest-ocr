@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { getResult, getStatus, subscribeToJob, correctField, saveToDB } from '../api/client';
+import { getResult, getStatus, subscribeToJob, correctField, saveToDB, retryJob, retryBatch } from '../api/client';
 import type { Field, JobResult, StatusResponse } from '../types';
 import DocumentReview from '../components/DocumentReview';
 import PipelineProcessingView from '../components/PipelineProcessingView';
 import LogViewer from '../components/LogViewer';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 
 interface Props {
   jobId: string;
@@ -32,6 +33,7 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
   const [uploadDone, setUploadDone] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [confirmStep, setConfirmStep] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   const fetchFullLogs = useCallback(async () => {
     try {
@@ -125,6 +127,9 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
     const unsub = subscribeToJob(jobId, (data) => {
       setStatus(data.status);
       setStatusMessage(data.message || '');
+      if (data.log?.length) {
+        setLogs(data.log);
+      }
       if (data.original_name) {
         setOriginalName(data.original_name);
       }
@@ -147,7 +152,7 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
       }
     });
     return () => unsub();
-  }, [jobId]);
+  }, [jobId, retryNonce]);
 
   useEffect(() => {
     if (status === 'done') fetchFullLogs();
@@ -306,18 +311,66 @@ export default function FolderReviewPage({ jobId, onBack }: Props) {
       : (result as any)?.pdf_names?.map((name: string) => ({ name })) || [];
 
     return (
-      <PipelineProcessingView
-        jobId={jobId}
-        files={filesList}
-        status={status}
-        statusMessage={statusMessage}
-        progress={progress}
-        overallProgress={overallProgress}
-        perPdfProgress={perPdfProgress}
-        logs={logs}
-        elapsed={elapsed}
-        onBack={onBack}
-      />
+      <ErrorBoundary
+        fallback={
+          <div style={{
+            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--color-bg)', fontFamily: 'var(--font-sans)',
+          }}>
+            <div style={{ textAlign: 'center', padding: 24 }}>
+              <h3 style={{ margin: '0 0 8px', color: 'var(--color-danger)' }}>
+                Pipeline View Error
+              </h3>
+              <p style={{ margin: '0 0 16px', color: 'var(--color-text-secondary)' }}>
+                Failed to render pipeline status. Please refresh the page.
+              </p>
+              <button
+                onClick={() => window.location.reload()}
+                style={{
+                  padding: '8px 16px', fontSize: 13, fontWeight: 600,
+                  border: 'none', borderRadius: 'var(--radius-md)',
+                  background: 'var(--color-primary)', color: '#fff', cursor: 'pointer',
+                }}
+              >
+                Refresh Page
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <PipelineProcessingView
+          jobId={jobId}
+          files={filesList}
+          status={status}
+          statusMessage={statusMessage}
+          progress={progress}
+          overallProgress={overallProgress}
+          perPdfProgress={perPdfProgress}
+          logs={logs}
+          elapsed={elapsed}
+          onBack={onBack}
+          onResumeJob={async (id: string) => {
+            try {
+              await retryJob(id);
+              setStatus('queued');
+              setStatusMessage('Retrying...');
+              setRetryNonce(n => n + 1);
+            } catch (e: any) {
+              alert('Retry failed: ' + e.message);
+            }
+          }}
+          onResumeBatch={async () => {
+            try {
+              await retryBatch(jobId);
+              setStatus('queued');
+              setStatusMessage('Retrying batch...');
+              setRetryNonce(n => n + 1);
+            } catch (e: any) {
+              alert('Batch retry failed: ' + e.message);
+            }
+          }}
+        />
+      </ErrorBoundary>
     );
   }
 

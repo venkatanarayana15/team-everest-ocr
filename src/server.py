@@ -42,6 +42,7 @@ from src.status import (
     _status_queues, _cleanup_intermediate,
     STAGE_PROGRESS, _progress_store,
     _render_markdown, _render_text, _format_job_datetime,
+    _attach_log_file, _detach_log_file, _set_job_log_ctx, _reset_job_log_ctx,
 )
 
 import zipfile
@@ -294,14 +295,38 @@ async def lifespan(app: FastAPI):
             DB_AVAILABLE = False
     _start_cleanup_thread()
     logger.info("Auto-cleanup thread started (every %ds, max age %ds)", CLEANUP_INTERVAL_SEC, JOB_MAX_AGE_SEC)
+    
+    # Log concurrency configuration on startup
+    try:
+        from src.concurrency_config import get_concurrency_config
+        config = get_concurrency_config()
+        config.log_config()
+    except Exception as e:
+        logger.warning("Failed to load concurrency config: %s", e)
+    
     _create_task(_safe_startup_poller())
     _create_task(_reconcile_stuck_jobs_on_startup())
+    _create_task(_periodic_background_cleanup())
+    _create_task(_periodic_metrics_logging())
     try:
         yield
     except asyncio.CancelledError:
         pass
     finally:
         _stop_cleanup_thread()
+        
+        # Log final metrics before shutdown
+        try:
+            from src.model_client import log_rate_limit_metrics
+            log_rate_limit_metrics(prefix="[SHUTDOWN]")
+        except Exception:
+            pass
+        
+        from src.model_client import close_all_clients
+        try:
+            await close_all_clients()
+        except Exception:
+            pass
         if DB_AVAILABLE:
             try:
                 await close_pool()
@@ -309,11 +334,39 @@ async def lifespan(app: FastAPI):
                 pass
 
 
+async def _periodic_background_cleanup() -> None:
+    """Periodically clean up completed background tasks from pipeline_runner."""
+    from src.pipeline_runner import _cleanup_background_tasks
+    while True:
+        try:
+            await _cleanup_background_tasks()
+        except Exception as e:
+            logger.debug("Background task cleanup error: %s", e)
+        await asyncio.sleep(300)  # every 5 minutes
+
+
+async def _periodic_metrics_logging() -> None:
+    """Periodically log rate limit metrics for monitoring."""
+    from src.model_client import log_rate_limit_metrics
+    interval = int(os.environ.get("METRICS_LOG_INTERVAL_SEC", "300"))  # every 5 minutes
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            log_rate_limit_metrics(prefix="[METRICS]")
+        except Exception as e:
+            logger.debug("Metrics logging error: %s", e)
+
+
 async def _safe_startup_poller() -> None:
-    try:
-        await process_pending_on_startup(BASE_DIR)
-    except Exception as e:
-        logger.exception("Startup poller crashed: %s — will not retry", e)
+    """Poll Zoho for pending records periodically (not just at boot)."""
+    from src.zoho_integration import process_pending_on_startup
+    interval = int(os.environ.get("ZOHO_POLL_INTERVAL_SEC", "1800"))
+    while True:
+        try:
+            await process_pending_on_startup(BASE_DIR)
+        except Exception as e:
+            logger.exception("Startup poller crashed: %s — retrying next interval", e)
+        await asyncio.sleep(interval)
 
 
 async def _reconcile_stuck_jobs_on_startup() -> None:
@@ -356,6 +409,10 @@ logger.info("Output dir: %s", BASE_DIR)
 MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "15"))
 # Note: no timeout on semaphore — jobs wait indefinitely in queue
 _job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+
+# Track running pipeline tasks by job_id for cancellation on retry
+_RUNNING_TASKS: dict[str, asyncio.Task] = {}
+_RUNNING_TASKS_LOCK = asyncio.Lock()
 
 
 # ── Auto-cleanup old jobs ─────────────────────────────────────────
@@ -569,6 +626,7 @@ async def _create_job_dir(original_name: str, status_msg: str, initial_stage: st
     job_id = f"{prefix}_{ts}" if prefix else f"{str(uuid.uuid4())[:8]}_{ts}"
     job_dir = _job_dir_for(job_id)
     job_dir.mkdir(parents=True, exist_ok=True)
+    _attach_log_file(job_dir)
     with open(job_dir / "original_name.txt", "w") as f:
         f.write(original_name)
     await _set_status(job_dir, initial_stage, status_msg)
@@ -577,55 +635,99 @@ async def _create_job_dir(original_name: str, status_msg: str, initial_stage: st
 
 
 async def _run_pipeline_task(job_dir: Path, pdf_path: str) -> None:
+    job_id = job_dir.name
+    task = asyncio.current_task()
+    _set_job_log_ctx(job_dir)
     try:
-        await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
-    except asyncio.TimeoutError:
-        logger.error("Job %s waited too long for semaphore", job_dir.name)
-        await _set_status(job_dir, "error", "Job timed out waiting in queue")
-        return
-    try:
-        await run_pipeline(job_dir, pdf_path)
+        async with _RUNNING_TASKS_LOCK:
+            _RUNNING_TASKS[job_id] = task
+        try:
+            await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
+        except asyncio.TimeoutError:
+            logger.error("Job %s waited too long for semaphore", job_dir.name)
+            await _set_status(job_dir, "error", "Job timed out waiting in queue")
+            return
+        try:
+            await run_pipeline(job_dir, pdf_path)
+        finally:
+            _job_semaphore.release()
     finally:
-        _job_semaphore.release()
+        async with _RUNNING_TASKS_LOCK:
+            _RUNNING_TASKS.pop(job_id, None)
+        _reset_job_log_ctx()
+        _detach_log_file(job_dir)
 
 
 async def _run_batch_task(job_dir: Path, pdfs_info: list[dict]) -> None:
+    job_id = job_dir.name
+    task = asyncio.current_task()
+    _set_job_log_ctx(job_dir)
     try:
-        await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
-    except asyncio.TimeoutError:
-        logger.error("Job %s waited too long for semaphore", job_dir.name)
-        await _set_status(job_dir, "error", "Job timed out waiting in queue")
-        return
-    try:
-        await run_batch_pdfs_pipeline(job_dir, pdfs_info)
-    finally:
+        async with _RUNNING_TASKS_LOCK:
+            _RUNNING_TASKS[job_id] = task
+        try:
+            await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
+        except asyncio.TimeoutError:
+            logger.error("Job %s waited too long for semaphore", job_dir.name)
+            await _set_status(job_dir, "error", "Job timed out waiting in queue")
+            return
+        try:
+            await run_batch_pdfs_pipeline(job_dir, pdfs_info)
+        finally:
             _job_semaphore.release()
+    finally:
+        async with _RUNNING_TASKS_LOCK:
+            _RUNNING_TASKS.pop(job_id, None)
+        _reset_job_log_ctx()
+        _detach_log_file(job_dir)
 
 
 async def _run_image_task(job_dir: Path, image_paths) -> None:
+    job_id = job_dir.name
+    task = asyncio.current_task()
+    _set_job_log_ctx(job_dir)
     try:
-        await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
-    except asyncio.TimeoutError:
-        logger.error("Job %s waited too long for semaphore", job_dir.name)
-        await _set_status(job_dir, "error", "Job timed out waiting in queue")
-        return
-    try:
-        await run_image_pipeline_from_zip(job_dir, image_paths)
+        async with _RUNNING_TASKS_LOCK:
+            _RUNNING_TASKS[job_id] = task
+        try:
+            await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
+        except asyncio.TimeoutError:
+            logger.error("Job %s waited too long for semaphore", job_dir.name)
+            await _set_status(job_dir, "error", "Job timed out waiting in queue")
+            return
+        try:
+            await run_image_pipeline_from_zip(job_dir, image_paths)
+        finally:
+            _job_semaphore.release()
     finally:
-        _job_semaphore.release()
+        async with _RUNNING_TASKS_LOCK:
+            _RUNNING_TASKS.pop(job_id, None)
+        _reset_job_log_ctx()
+        _detach_log_file(job_dir)
 
 
 async def _run_ocr_extract_task(job_dir: Path, req: OcrExtractRequest) -> None:
+    job_id = job_dir.name
+    task = asyncio.current_task()
+    _set_job_log_ctx(job_dir)
     try:
-        await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
-    except asyncio.TimeoutError:
-        logger.error("Job %s waited too long for semaphore", job_dir.name)
-        await _set_status(job_dir, "error", "Job timed out waiting in queue")
-        return
-    try:
-        await _run_ocr_extract_pipeline(job_dir, req)
+        async with _RUNNING_TASKS_LOCK:
+            _RUNNING_TASKS[job_id] = task
+        try:
+            await asyncio.wait_for(_job_semaphore.acquire(), timeout=1800)
+        except asyncio.TimeoutError:
+            logger.error("Job %s waited too long for semaphore", job_dir.name)
+            await _set_status(job_dir, "error", "Job timed out waiting in queue")
+            return
+        try:
+            await _run_ocr_extract_pipeline(job_dir, req)
+        finally:
+            _job_semaphore.release()
     finally:
-        _job_semaphore.release()
+        async with _RUNNING_TASKS_LOCK:
+            _RUNNING_TASKS.pop(job_id, None)
+        _reset_job_log_ctx()
+        _detach_log_file(job_dir)
 
 
 @app.post("/upload")
@@ -777,6 +879,8 @@ async def upload_batch(files: list[UploadFile] = File(...)):
                 fout.write(content)
             pdfs_info.append({"filename": _safe_filename(f.filename), "path": str(pdf_path.resolve())})
 
+        (job_dir / "pdfs_info.json").write_text(json.dumps(pdfs_info))
+
         _create_task(_run_batch_task(job_dir, pdfs_info))
         pdf_names = [f.filename for f in pdf_files]
         results.append({"job_id": job_id, "filename": f"Batch: {names}", "type": "pdf", "status": "queued", "pdf_names": pdf_names})
@@ -908,6 +1012,18 @@ async def retry_job(job_id: str):
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
 
+    # Cancel any in-flight pipeline task for this job
+    async with _RUNNING_TASKS_LOCK:
+        existing_task = _RUNNING_TASKS.get(job_id)
+        if existing_task and not existing_task.done():
+            existing_task.cancel()
+            logger.info("Cancelled in-flight task for job %s on retry", job_id)
+            # Wait briefly for cancellation to complete
+            try:
+                await asyncio.wait_for(existing_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+
     # Guard: never restart a job that is currently running or queued — that
     # would spawn a duplicate pipeline on the same job directory.
     cur = _get_status(job_dir)
@@ -921,6 +1037,7 @@ async def retry_job(job_id: str):
     img_dir = job_dir / "input_images"
 
     await _set_status(job_dir, "queued", "Retrying pipeline from last checkpoint...")
+    _attach_log_file(job_dir)
 
     if pdf_path.exists():
         valid, err = _validate_pdf(str(pdf_path))
@@ -941,12 +1058,87 @@ async def retry_job(job_id: str):
     raise HTTPException(400, "No input files found for this job")
 
 
+@app.post("/retry-batch/{job_id}")
+async def retry_batch(job_id: str):
+    """Re-run a batch pipeline from its persisted pdfs_info.json manifest.
+
+    Fails gracefully when the manifest is missing (e.g. batches created before
+    this feature) so old jobs stay deletable instead of erroring.
+    """
+    job_dir = _job_dir_for(job_id)
+    if not job_dir.exists():
+        raise HTTPException(404, "Job not found")
+
+    # Cancel any in-flight pipeline task for this job
+    async with _RUNNING_TASKS_LOCK:
+        existing_task = _RUNNING_TASKS.get(job_id)
+        if existing_task and not existing_task.done():
+            existing_task.cancel()
+            logger.info("Cancelled in-flight batch task for job %s on retry", job_id)
+            try:
+                await asyncio.wait_for(existing_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+
+    cur = _get_status(job_dir)
+    if cur.get("status") in ("queued", "processing", "preprocessing", "primary_extraction",
+                             "field_mapping", "secondary_verification", "template_fill",
+                             "saving_results", "gemini_post_process", "recheck_checkboxes",
+                             "text_refinement"):
+        raise HTTPException(409, f"Job is already {cur.get('status')} — cannot retry while running")
+
+    manifest_path = job_dir / "pdfs_info.json"
+    if not manifest_path.exists():
+        raise HTTPException(400, "No batch manifest (pdfs_info.json) found — cannot retry this job")
+
+    try:
+        with open(manifest_path) as f:
+            pdfs_info = json.load(f)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to read batch manifest: {e}")
+
+    if not isinstance(pdfs_info, list) or not pdfs_info:
+        raise HTTPException(400, "Batch manifest is empty")
+
+    missing = [p.get("path") for p in pdfs_info if not Path(p.get("path", "")).exists()]
+    if missing:
+        raise HTTPException(400, f"{len(missing)} source file(s) missing from disk — cannot retry: {missing[:3]}")
+
+    await _set_status(job_dir, "queued", f"Retrying batch of {len(pdfs_info)} PDFs...")
+    _attach_log_file(job_dir)
+    _create_task(_run_batch_task(job_dir, pdfs_info))
+    return {
+        "job_id": job_id,
+        "status": "restarted",
+        "input_type": "batch",
+        "total": len(pdfs_info),
+    }
+
+
 @app.get("/status/{job_id}")
 async def get_status(job_id: str):
     job_dir = _job_dir_for(job_id)
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
     return _get_status(job_dir)
+
+
+@app.get("/metrics")
+async def get_metrics():
+    """Return rate limit and concurrency metrics for monitoring."""
+    from src.model_client import get_rate_limit_metrics, get_adaptive_limiter
+    from src.concurrency_config import get_concurrency_config
+    
+    metrics = get_rate_limit_metrics()
+    config = get_concurrency_config()
+    adaptive = get_adaptive_limiter()
+    
+    result = {
+        "rate_limit_metrics": metrics.get_stats(),
+        "concurrency_config": config.get_effective_limits(),
+        "adaptive_concurrency": adaptive.get_stats() if adaptive else None,
+    }
+    return result
 
 
 _TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d{3}\s+\w+\s+(.*)$")
@@ -1536,15 +1728,19 @@ async def delete_job(job_id: str):
         try:
             pool = get_pool()
             if pool:
+                # Batch job rows are stored as "<batch_job_id>_<pdf_idx>" (per-PDF
+                # upserts). Deleting the batch must remove every member row.
                 async with pool.acquire() as conn:
                     await conn.execute(
-                        "DELETE FROM ocr_documents WHERE job_id = $1", job_id
+                        "DELETE FROM ocr_documents WHERE job_id = $1 OR job_id LIKE $1 || '\\_%'",
+                        job_id,
                     )
                     await conn.execute(
                         "DELETE FROM ocr_jobs WHERE job_id = $1", job_id
                     )
                     await conn.execute(
-                        "DELETE FROM corrections_log WHERE job_id = $1", job_id
+                        "DELETE FROM corrections_log WHERE job_id = $1 OR job_id LIKE $1 || '\\_%'",
+                        job_id,
                     )
         except Exception as e:
             logger.warning("Failed to clean up DB records for job %s: %s", job_id, e)
@@ -1713,7 +1909,9 @@ async def save_result_to_db(job_id: str, body: dict = {}):
                     job_id=pdf_job_id,
                     file_name=pdf_file_name,
                     status="done",
-                    processing_time=result_data.get("processing_time"),
+                    # Per-PDF processing_time (saved by batch_worker), not the
+                    # whole-batch wall time.
+                    processing_time=pdf_data.get("processing_time"),
                     confidence_score=pdf_data.get("overall_confidence"),
                     num_pdfs=None,
                     result_json=pdf_data,
@@ -1837,6 +2035,7 @@ async def ocr_extract(req: OcrExtractRequest):
     job_id = f"ext_{str(uuid.uuid4())[:8]}"
     job_dir = _job_dir_for(job_id)
     job_dir.mkdir(parents=True, exist_ok=True)
+    _attach_log_file(job_dir)
 
     with open(job_dir / "original_name.txt", "w") as f:
         f.write(req.record_id)

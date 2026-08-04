@@ -26,6 +26,10 @@ POOL_CONNECT_TIMEOUT = float(os.getenv("DATABASE_CONNECT_TIMEOUT", "10"))
 
 _pool: Optional[asyncpg.Pool] = None
 
+# Cache of pre-built upsert SQL strings keyed by frozenset(column_names).
+# Avoids reconstructing the query on every call (hot path in batch inserts).
+_SQL_CACHE: dict[frozenset[str], str] = {}
+
 # ── Generated field label → database column mapping ──────────────────────────
 
 def _build_field_to_column(schema) -> dict[str, str]:
@@ -416,11 +420,6 @@ async def upsert_ocr_document(
     Structured field columns are auto-populated from result_json.fields.
     Returns the row uuid as str, or "" on failure.
     """
-    logger.info(
-        "upsert_ocr_document: job=%s file=%r status=%s",
-        job_id, file_name, status,
-    )
-
     pool = get_pool()
 
     data: dict[str, Any] = {
@@ -450,26 +449,12 @@ async def upsert_ocr_document(
                 if pdf_fields:
                     raw_fields.extend(pdf_fields)
         if raw_fields:
-            sample_labels = [f.get("label","")[:60] for f in raw_fields[:10]]
-            logger.info(
-                "upsert_ocr_document: raw_fields=%d, sample_labels=%s",
-                len(raw_fields), sample_labels,
-            )
             structured = _extract_structured_fields(raw_fields)
-            logger.info(
-                "upsert_ocr_document: extracted %d structured columns: %s",
-                len(structured), list(structured.keys())[:8],
-            )
             for col, val in structured.items():
                 if val is not None:
                     if col in SKIP_IF_EMPTY_COLUMNS and isinstance(val, str) and not val.strip():
                         continue
                     data[col] = val
-
-    logger.info(
-        "upsert_ocr_document: payload columns=%s",
-        list(data.keys()),
-    )
 
     cols = list(data.keys())
     placeholders = [f"${i + 1}" for i in range(len(cols))]
@@ -477,12 +462,19 @@ async def upsert_ocr_document(
 
     update_set = ", ".join(f"{col} = EXCLUDED.{col}" for col in cols if col != "job_id")
 
-    sql = (
-        f"INSERT INTO ocr_documents ({', '.join(cols)}) "
-        f"VALUES ({', '.join(placeholders)}) "
-        f"ON CONFLICT (job_id) DO UPDATE SET {update_set} "
-        f"RETURNING id"
-    )
+    # Build SQL once per unique column set — avoids f-string overhead on
+    # hot path (batch inserts do 100s of upserts). Keyed by frozenset(cols).
+    global _SQL_CACHE
+    key = frozenset(cols)
+    sql = _SQL_CACHE.get(key)
+    if sql is None:
+        sql = (
+            f"INSERT INTO ocr_documents ({', '.join(cols)}) "
+            f"VALUES ({', '.join(placeholders)}) "
+            f"ON CONFLICT (job_id) DO UPDATE SET {update_set} "
+            f"RETURNING id"
+        )
+        _SQL_CACHE[key] = sql
 
     logger.debug(
         "upsert_ocr_document: upserting %d columns: %s",
@@ -503,7 +495,7 @@ async def upsert_ocr_document(
 
     doc_id = str(row["id"]) if row else ""
     if doc_id:
-        logger.info(
+        logger.debug(
             "upsert_ocr_document: SUCCESS — job=%s → row id=%s",
             job_id, doc_id,
         )
@@ -721,3 +713,27 @@ async def log_correction(
     except Exception as e:
         logger.error("log_correction: FAILED — %s", e, exc_info=True)
         return False
+
+
+async def delete_batch_documents(batch_job_id: str) -> int:
+    """Delete all ocr_documents rows for a batch (job_id = batch_job_id OR job_id LIKE batch_job_id || '%').
+
+    Returns the number of rows deleted.
+    """
+    pool = get_pool()
+    if pool is None:
+        return 0
+    try:
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM ocr_documents WHERE job_id = $1 OR job_id LIKE $1 || '\\_%'",
+                batch_job_id,
+            )
+            # asyncpg returns "DELETE <count>" — extract the count.
+            deleted = int(result.split()[-1]) if result else 0
+            if deleted:
+                logger.info("delete_batch_documents: removed %d rows for batch %s", deleted, batch_job_id)
+            return deleted
+    except Exception as e:
+        logger.error("delete_batch_documents: FAILED for %s — %s", batch_job_id, e, exc_info=True)
+        return 0

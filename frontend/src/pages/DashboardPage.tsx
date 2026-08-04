@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { deleteJob, subscribeNewJobs } from '../api/client';
+import { deleteJob, subscribeNewJobs, uploadBatch } from '../api/client';
 
 interface JobEntry {
   job_id: string;
@@ -42,6 +42,33 @@ export default function DashboardPage({ onSelectBatch }: Props) {
   const [showMetrics, setShowMetrics] = useState(false);
   const [metricsData, setMetricsData] = useState<any>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
+
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [uploadProgressText, setUploadProgressText] = useState<string>('');
+  const [showUpload, setShowUpload] = useState(false);
+
+  const handleUpload = async (files: File[]) => {
+    if (!files.length) return;
+    setUploading(true);
+    setUploadProgress(0);
+    try {
+      const res = await uploadBatch(files, (progress) => {
+        setUploadProgress(progress);
+      });
+      setUploadProgress(100);
+      setUploadProgressText(`Submitted ${res.results?.length || files.length} file(s)`);
+      setShowUpload(false);
+      setTimeout(() => setUploadProgressText(''), 3000);
+      setTimeout(() => setUploadProgress(0), 3000);
+    } catch (e: any) {
+      setUploadProgressText(e.message || 'Upload failed');
+      setTimeout(() => setUploadProgressText(''), 5000);
+      setTimeout(() => setUploadProgress(0), 5000);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const loadMetrics = useCallback(async () => {
     setMetricsLoading(true);
@@ -185,6 +212,25 @@ export default function DashboardPage({ onSelectBatch }: Props) {
           >
             📊 Metrics
           </button>
+          <button
+            onClick={() => setShowUpload(true)}
+            disabled={uploading}
+            style={{
+              padding: '6px 12px', fontSize: 12, fontWeight: 600,
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg)',
+              background: 'var(--color-surface)',
+              color: 'var(--color-text)',
+              cursor: uploading ? 'not-allowed' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 4,
+              transition: 'all var(--transition-fast)',
+              boxShadow: 'var(--shadow-xs)',
+              opacity: uploading ? 0.6 : 1,
+            }}
+            title="Upload PDF batch for processing"
+          >
+            📤 Upload Batch
+          </button>
           <div style={{ display: 'flex', gap: 2, background: 'var(--color-bg)', borderRadius: 'var(--radius-md)', padding: 2 }}>
             {(['latest', 'oldest'] as const).map((opt) => (
               <button
@@ -207,6 +253,95 @@ export default function DashboardPage({ onSelectBatch }: Props) {
 
         </div>
       </header>
+
+      {showUpload && (
+        <div style={{
+          padding: '16px 24px', borderBottom: '1px solid var(--color-border)',
+          background: 'var(--color-surface)',
+        }}>
+          <div style={{ maxWidth: 700, margin: '0 auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--color-text)' }}>
+                Upload PDF Batch
+              </h3>
+              <button
+                onClick={() => setShowUpload(false)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: 20, color: 'var(--color-text-muted)', padding: '0 4px',
+                }}
+              >✕</button>
+            </div>
+            <div
+              onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+              onDragLeave={(e) => { e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.currentTarget.style.borderColor = 'var(--color-border)';
+                if (e.dataTransfer.files.length) handleUpload(Array.from(e.dataTransfer.files));
+              }}
+              style={{
+                border: '2px dashed var(--color-border)',
+                borderRadius: 'var(--radius-lg)',
+                padding: '32px 24px',
+                textAlign: 'center',
+                background: 'var(--color-bg)',
+                cursor: 'pointer',
+                transition: 'all var(--transition-fast)',
+              }}
+            >
+              <input
+                type="file"
+                accept=".pdf"
+                multiple
+                onChange={(e) => e.target.files && handleUpload(Array.from(e.target.files))}
+                style={{ display: 'none' }}
+                id="pdf-upload-input"
+              />
+              <div
+                onClick={() => document.getElementById('pdf-upload-input')?.click()}
+                style={{ cursor: 'pointer', display: 'block' }}
+              >
+                <div style={{ fontSize: 40, marginBottom: 8 }}>📄</div>
+                <p style={{ fontSize: 15, fontWeight: 500, color: 'var(--color-text)', margin: '0 0 4px' }}>
+                  Drop PDF files here or click to browse
+                </p>
+                <p style={{ fontSize: 12, color: 'var(--color-text-muted)', margin: 0 }}>
+                  Multiple files allowed — each becomes a batch item
+                </p>
+              </div>
+            </div>
+            {uploading || uploadProgress > 0 ? (
+              <div style={{ marginTop: 12 }}>
+                <div style={{
+                  width: '100%',
+                  height: 6,
+                  background: 'var(--color-border)',
+                  borderRadius: 3,
+                  overflow: 'hidden',
+                }}>
+                  <div style={{
+                    width: `${uploadProgress}%`,
+                    height: '100%',
+                    background: 'var(--color-primary)',
+                    borderRadius: 3,
+                    transition: 'width 0.3s ease',
+                  }} />
+                </div>
+                {uploadProgressText && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: uploading ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}>
+                    {uploading ? '⏳ ' : '✅ '}{uploadProgressText}
+                  </div>
+                )}
+              </div>
+            ) : uploadProgressText ? (
+              <div style={{ marginTop: 12, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+                ✅ {uploadProgressText}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
 
       <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
         {loading ? (
