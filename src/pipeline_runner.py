@@ -33,7 +33,7 @@ def _run_with_log_ctx(job_dir: Path, fn, *args):
 
 # Global semaphore limiting concurrent PDF page rendering (CPU-bound, prevents thrash)
 _RENDER_SEMAPHORE = asyncio.Semaphore(
-    int(os.environ.get("RENDER_MAX_CONCURRENCY", "6"))
+    int(os.environ.get("RENDER_MAX_CONCURRENCY", "3"))
 )
 
 _COMBINE_PAGES = os.environ.get("COMBINE_PAGES", "false").lower() in ("1", "true", "yes")
@@ -747,7 +747,7 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
         
         # Warn if batch concurrency exceeds rate limit capacity
         gemini_rpm = int(os.environ.get("GEMINI_RATE_LIMIT_RPM", "14"))
-        gemini_conc = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "6"))
+        gemini_conc = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "2"))
         if num_workers > gemini_conc:
             logger.warning(
                 "Batch concurrency (%d) exceeds Gemini max concurrency (%d). "
@@ -755,7 +755,12 @@ async def run_batch_pdfs_pipeline(job_dir: Path, pdfs_info: list[dict]) -> None:
                 num_workers, gemini_conc, gemini_conc
             )
         
-        workers = [asyncio.create_task(batch_worker()) for _ in range(num_workers)]
+        workers = []
+        for i in range(num_workers):
+            if i > 0:
+                # Stagger worker starts to avoid thundering-herd on LLM rate limiter
+                await asyncio.sleep(1.5)
+            workers.append(asyncio.create_task(batch_worker()))
         await asyncio.gather(*workers)
 
         await _set_status(job_dir, "saving_results", "Saving batch results...")

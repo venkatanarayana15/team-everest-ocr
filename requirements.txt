@@ -1,5 +1,16 @@
+Fix 1 — Bound the log + keep SSE cheap
+Backend:
+- status.json's log array caps at 200 entries (ring buffer, latest wins) instead of growing forever. Full history still lives in result.logs.
+- SSE loops stop doing the expensive sync file-read + json.dumps of a huge file every 1s tick — status reads move to a thread, and the log field in each SSE event is truncated.
+- Less CPU/file I/O per second per connected client → the event loop stays responsive even mid-processing.
+UI: No visible change. The Logs modal reads result.logs (still complete), and live status/progress in the header updates the same way — but it keeps updating smoothly instead of stalling when a job logs thousands of lines.
+
+
+
 # Backend Python dependencies for the OCR extraction server.
 # Mirrors [project].dependencies in pyproject.toml.
+
+
 torch>=2.0.0
 transformers>=4.21.0
 sentencepiece

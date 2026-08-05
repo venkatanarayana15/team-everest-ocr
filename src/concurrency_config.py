@@ -24,16 +24,16 @@ class ConcurrencyConfig:
     """Unified concurrency configuration with clear hierarchy."""
     
     # Provider-level limits (hard limits from API)
-    gemini_max_concurrency: int = 6
+    gemini_max_concurrency: int = 2
     gemini_rate_limit_rpm: int = 14
     
     # Global LLM limits (soft limits for fairness)
-    global_llm_max_concurrency: int = 8
+    global_llm_max_concurrency: int = 3
     
     # Pipeline-level limits (workload-specific)
-    batch_max_concurrency: int = 4
+    batch_max_concurrency: int = 2
     batch_high_throughput_workers: int = 8
-    render_max_concurrency: int = 6
+    render_max_concurrency: int = 3
     
     # Rate limiting
     llm_max_retries: int = 5
@@ -68,16 +68,16 @@ class ConcurrencyConfig:
         """Create configuration from environment variables."""
         return cls(
             # Provider-level
-            gemini_max_concurrency=int(os.environ.get("GEMINI_MAX_CONCURRENCY", "6")),
+            gemini_max_concurrency=int(os.environ.get("GEMINI_MAX_CONCURRENCY", "2")),
             gemini_rate_limit_rpm=int(os.environ.get("GEMINI_RATE_LIMIT_RPM", "14")),
             
             # Global LLM
-            global_llm_max_concurrency=int(os.environ.get("GLOBAL_LLM_MAX_CONCURRENCY", "8")),
+            global_llm_max_concurrency=int(os.environ.get("GLOBAL_LLM_MAX_CONCURRENCY", "3")),
             
             # Pipeline-level
-            batch_max_concurrency=int(os.environ.get("BATCH_MAX_CONCURRENCY", "4")),
+            batch_max_concurrency=int(os.environ.get("BATCH_MAX_CONCURRENCY", "2")),
             batch_high_throughput_workers=int(os.environ.get("BATCH_HIGH_THROUGHPUT_WORKERS", "8")),
-            render_max_concurrency=int(os.environ.get("RENDER_MAX_CONCURRENCY", "6")),
+            render_max_concurrency=int(os.environ.get("RENDER_MAX_CONCURRENCY", "3")),
             
             # Rate limiting
             llm_max_retries=int(os.environ.get("LLM_MAX_RETRIES", "5")),

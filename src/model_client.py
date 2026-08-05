@@ -37,7 +37,7 @@ _load_dotenv()
 # Global semaphore that caps total concurrent LLM calls across ALL pipelines.
 # This prevents LLM API overload regardless of how many pipelines are active.
 _global_llm_semaphore = asyncio.Semaphore(
-    int(os.environ.get("GLOBAL_LLM_MAX_CONCURRENCY", "24"))
+    int(os.environ.get("GLOBAL_LLM_MAX_CONCURRENCY", "3"))
 )
 
 
@@ -574,14 +574,17 @@ def call_with_retry(fn, max_retries: int | None = None, rl: RateLimiter | None =
                 raise
             if attempt == max_retries - 1:
                 raise
-            
+
             wait = _retry_wait(attempt, e, rl)
-            
+
             # Phase 1: Refund token on failed request
             if rl:
                 rl.refund_token()
-            
-            _circuit_breaker.record_failure()
+
+            # Don't count quota exhaustion as circuit-breaker failures —
+            # it's a capacity signal, not a service degradation.
+            if not _is_quota_exhausted(e):
+                _circuit_breaker.record_failure()
             _rate_limit_metrics.record_request(
                 success=False, 
                 rate_limited=True, 
@@ -637,14 +640,17 @@ async def call_with_retry_async(fn, max_retries: int | None = None, rl: RateLimi
             if attempt == max_retries - 1:
                 logger.warning("Max retries reached, raising: [%s] %s", error_type, error_msg[:200])
                 raise
-            
+
             wait = _retry_wait(attempt, e, rl)
-            
+
             # Phase 1: Refund token on failed request
             if rl:
                 rl.refund_token()
-            
-            _circuit_breaker.record_failure()
+
+            # Don't count quota exhaustion as circuit-breaker failures —
+            # it's a capacity signal, not a service degradation.
+            if not _is_quota_exhausted(e):
+                _circuit_breaker.record_failure()
             _rate_limit_metrics.record_request(
                 success=False, 
                 rate_limited=True, 
@@ -715,7 +721,7 @@ class GeminiClient(ModelClient):
         self._genai = _genai
         self.model_name = model
         self.provider = "gemini"
-        _gemini_conc = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "12"))
+        _gemini_conc = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "2"))
         _gemini_rpm = int(os.environ.get("GEMINI_RATE_LIMIT_RPM", "14"))
         _gemini_tpm = int(os.environ.get("GEMINI_RATE_LIMIT_TPM", "250000"))
         self._rl = _get_rate_limiter(f"gemini:{model}", _gemini_rpm, _gemini_conc, _gemini_tpm)

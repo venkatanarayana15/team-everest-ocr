@@ -1324,7 +1324,7 @@ async def process_pending_on_startup(base_dir: Path) -> None:
     app_link_name = os.environ.get("ZOHO_POLL_APP_LINK_NAME", "iatc-selection-one-app")
     report_link_name = os.environ.get("ZOHO_POLL_REPORT_LINK_NAME", "Volunteer_Home_Visited_Form_Report")
     file_field_link_name = os.environ.get("ZOHO_POLL_FILE_FIELD_LINK_NAME", "Upload_Home_Visit_Form")
-    max_concurrent = int(os.environ.get("ZOHO_POLL_MAX_CONCURRENT", "5"))
+    max_concurrent = int(os.environ.get("ZOHO_POLL_MAX_CONCURRENT", "2"))
     criteria = os.environ.get("ZOHO_POLL_CRITERIA",
                                '(OCR_Status=="null" || OCR_Status=="") && OCR_Status!="updated"')
 

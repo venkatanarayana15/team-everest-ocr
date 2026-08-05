@@ -161,3 +161,4 @@ pyproject.toml           Project metadata + uv deps
 setup.sh                 One-file install (backend + frontend + system)
 .env.example             Template for environment config
 ```
+

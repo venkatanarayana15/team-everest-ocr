@@ -1030,6 +1030,14 @@ FIELD LIST BY PAGE:
                 bb = gf.get(bbox_key)
                 if isinstance(bb, list) and any(v is None for v in bb):
                     gf[bbox_key] = None
+            # Convert float bbox coords to int for Pydantic validation (LLM emits floats)
+            for bbox_key in ("bbox", "value_bbox"):
+                bb = gf.get(bbox_key)
+                if isinstance(bb, list):
+                    try:
+                        gf[bbox_key] = [int(round(float(v))) for v in bb]
+                    except (TypeError, ValueError):
+                        gf[bbox_key] = None
             try:
                 # Validate with Pydantic schema
                 validated = PydanticStructuredField.model_validate(gf)

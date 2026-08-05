@@ -358,8 +358,20 @@ async def _periodic_metrics_logging() -> None:
 
 
 async def _safe_startup_poller() -> None:
-    """Poll Zoho for pending records periodically (not just at boot)."""
+    """Poll Zoho for pending records periodically (not just at boot).
+
+    Gated by ZOHO_POLL_ENABLED (default true). Waits ZOHO_POLL_STARTUP_DELAY_SEC
+    before the first poll so a fresh boot isn't slammed with auto-processing
+    while the user is trying to open the app.
+    """
     from src.zoho_integration import process_pending_on_startup
+    if os.environ.get("ZOHO_POLL_ENABLED", "true").lower() not in ("1", "true", "yes"):
+        logger.info("Zoho startup poller disabled (ZOHO_POLL_ENABLED != true)")
+        return
+    startup_delay = int(os.environ.get("ZOHO_POLL_STARTUP_DELAY_SEC", "60"))
+    if startup_delay > 0:
+        logger.info("Zoho startup poller waiting %ds before first poll", startup_delay)
+        await asyncio.sleep(startup_delay)
     interval = int(os.environ.get("ZOHO_POLL_INTERVAL_SEC", "1800"))
     while True:
         try:
@@ -406,7 +418,7 @@ BASE_DIR = _script_dir / "output"
 BASE_DIR.mkdir(exist_ok=True)
 logger.info("Output dir: %s", BASE_DIR)
 
-MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "15"))
+MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "2"))
 # Note: no timeout on semaphore — jobs wait indefinitely in queue
 _job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
