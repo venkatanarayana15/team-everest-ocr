@@ -16,4 +16,21 @@ __pycache__/
 graphify-out/cost.json
 graphify-out/cache/
 frontend/dist
-frontend/node_modules
+frontend/node_modules# ── Repo hygiene (added during cleanup) ─────────────────────────────────────
+# Customer document samples / test batches — never commit (PII).
+Test_Batch/
+# Tooling scratch + generated output.
+scratch/
+graphify-out/
+# Node dependencies (root + frontend).
+node_modules/
+# Runtime state / logs / binaries that leaked in.
+*.log
+*.tgz
+.processed_records.json
+ngrok*
+# Loose SQL migration dumps at root.
+migration_*.sql
+# Planning docs with secrets must never be committed; rotate any key that
+# was previously committed in docs/plan3.md.
+docs/plan3.md
